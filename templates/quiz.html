@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+
+{% block title %}AI测试 - {{ concept.name }}{% endblock %}
+
+{% block content %}
+<!-- 页面头部 -->
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <a href="/chapter/{{ concept.chapter_id }}" class="hover:text-blue-500">章节</a>
+        <span class="mx-2">/</span>
+        <span>测试</span>
+    </div>
+
+    <h1 class="text-2xl font-bold">AI 出题测试</h1>
+    <p class="text-gray-500">知识点：{{ concept.name }}</p>
+</div>
+
+<div class="max-w-3xl mx-auto">
+    <!-- 加载状态 -->
+    <div id="loadingState" class="bg-white rounded-lg shadow p-12 text-center">
+        <div class="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+        <p class="text-gray-600">AI 正在生成题目，请稍候...</p>
+    </div>
+
+    <!-- 题目区域 -->
+    <div id="quizArea" class="hidden">
+        <div class="bg-white rounded-lg shadow">
+            <!-- 进度条 -->
+            <div class="px-6 py-3 bg-gray-50 border-b">
+                <div class="flex items-center">
+                    <span class="text-sm text-gray-500 mr-2">题目进度：</span>
+                    <div class="flex-1 bg-gray-200 rounded-full h-2">
+                        <div id="progressBar" class="bg-blue-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6">
+                <!-- 题目内容 -->
+                <div id="questionContent" class="mb-6">
+                    <h3 id="questionText" class="text-lg font-medium mb-4"></h3>
+
+                    <!-- 选项 -->
+                    <div id="optionsArea" class="space-y-3">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 信心度选择 -->
+                <div id="confidenceArea" class="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <p class="text-sm font-medium mb-3">你对这个答案的信心度</p>
+
+                    <div class="grid grid-cols-3 gap-3">
+                        <button
+                            type="button"
+                            data-confidence="sure"
+                            class="confidence-btn p-3 border-2 rounded-lg text-center transition hover:border-green-500"
+                            onclick="selectConfidence('sure')">
+                            <div class="text-2xl mb-1">✅</div>
+                            <div class="font-medium">确定</div>
+                            <div class="text-xs text-gray-500">很有把握</div>
+                        </button>
+
+                        <button
+                            type="button"
+                            data-confidence="unsure"
+                            class="confidence-btn p-3 border-2 rounded-lg text-center transition hover:border-yellow-500"
+                            onclick="selectConfidence('unsure')">
+                            <div class="text-2xl mb-1">🤔</div>
+                            <div class="font-medium">模糊</div>
+                            <div class="text-xs text-gray-500">不太确定</div>
+                        </button>
+
+                        <button
+                            type="button"
+                            data-confidence="dont_know"
+                            class="confidence-btn p-3 border-2 rounded-lg text-center transition hover:border-red-500"
+                            onclick="selectConfidence('dont_know')">
+                            <div class="text-2xl mb-1">❌</div>
+                            <div class="font-medium">不会</div>
+                            <div class="text-xs text-gray-500">需要学习</div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 提交按钮 -->
+                <div class="flex justify-between">
+                    <button id="skipBtn" onclick="skipQuestion()" class="text-gray-500 hover:text-gray-700 px-4 py-2">
+                        跳过此题
+                    </button>
+
+                    <button
+                        id="submitBtn"
+                        onclick="submitAnswer()"
+                        disabled
+                        class="bg-blue-500 text-white px-8 py-2 rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed">
+                        提交答案
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 结果区域 -->
+    <div id="resultArea" class="hidden">
+        <div class="bg-white rounded-lg shadow">
+            <div id="resultHeader" class="px-6 py-4 border-b">
+                <!-- 动态填充 -->
+            </div>
+
+            <div class="p-6">
+                <!-- 题目回顾 -->
+                <div class="mb-6 p-4 bg-gray-50 rounded">
+                    <h4 class="font-medium mb-2">题目</h4>
+                    <p id="reviewQuestion" class="text-gray-700"></p>
+
+                    <div id="reviewOptions" class="mt-2 space-y-1">
+                        <!-- 动态填充 -->
+                    </div>
+                </div>
+
+                <!-- AI 解析 -->
+                <div class="mb-6">
+                    <h4 class="font-medium mb-2">解析</h4>
+                    <button
+                        id="revealExplanationBtn"
+                        type="button"
+                        onclick="revealSingleExplanation()"
+                        class="hidden w-full text-left bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 rounded-lg text-sm hover:bg-amber-100 transition mb-2">
+                        我先自我反思，再查看解析
+                    </button>
+                    <p id="explanationText" class="text-gray-700 leading-relaxed"></p>
+                </div>
+
+                <!-- AI 反馈 -->
+                <div class="mb-6 p-4 bg-blue-50 rounded">
+                    <h4 class="font-medium mb-2 text-blue-800">AI 反馈</h4>
+                    <p id="feedbackText" class="text-blue-700"></p>
+
+                    <div id="weakPoints" class="mt-2">
+                        <!-- 动态填充薄弱点 -->
+                    </div>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="flex justify-between">
+                    <a href="/chapter/{{ concept.chapter_id }}" class="text-gray-500 hover:text-gray-700 px-4 py-2">
+                        返回章节
+                    </a>
+
+                    <div class="space-x-3">
+                        <button onclick="generateVariation()" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 transition">
+                            生成变式题
+                        </button>
+
+                        <button onclick="nextQuestion()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition">
+                            下一题
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // ========== 安全工具函数 ==========
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function handleFetchError(error, userMessage, showAlert = true) {
+        console.error('API Error:', error);
+        const message = userMessage || '操作失败，请稍后重试';
+        if (showAlert) alert(message);
+        return message;
+    }
+
+    async function safeFetch(url, options = {}, errorMessage = '请求失败') {
+        try {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            handleFetchError(error, errorMessage);
+            throw error;
+        }
+    }
+
+    const conceptId = '{{ concept.concept_id }}';
+    let currentQuiz = null;
+    let selectedAnswer = null;
+    let selectedConfidence = null;
+
+    window.onload = async function() {
+        await generateQuiz();
+    };
+
+    async function generateQuiz() {
+        try {
+            const data = await safeFetch(`/api/quiz/generate/${conceptId}`, {
+                method: 'POST'
+            }, '操作失败');
+
+            currentQuiz = data;
+            displayQuiz(currentQuiz);
+        } catch (error) {
+            alert('生成题目失败：' + error.message);
+        }
+    }
+
+    function displayQuiz(quiz) {
+        document.getElementById('loadingState').classList.add('hidden');
+        document.getElementById('quizArea').classList.remove('hidden');
+
+        document.getElementById('questionText').textContent = quiz.question;
+
+        const optionsArea = document.getElementById('optionsArea');
+        optionsArea.innerHTML = '';
+
+        ['A', 'B', 'C', 'D'].forEach(opt => {
+            const btn = document.createElement('button');
+            btn.className = 'w-full p-4 border-2 rounded-lg text-left transition hover:border-blue-500 option-btn';
+            btn.dataset.option = opt;
+            btn.innerHTML = `
+                <span class="font-bold mr-2">${opt}.</span>
+                <span>${quiz.options[opt]}</span>
+            `;
+            btn.onclick = () => selectOption(opt);
+            optionsArea.appendChild(btn);
+        });
+
+        selectedAnswer = null;
+        selectedConfidence = null;
+        updateSubmitButton();
+    }
+
+    function selectOption(option) {
+        if (selectedAnswer === option) {
+            // 已选中该选项，取消选择
+            selectedAnswer = null;
+            document.querySelectorAll('.option-btn').forEach(btn => {
+                btn.classList.remove('border-blue-500', 'bg-blue-50');
+            });
+        } else {
+            // 选中该选项
+            selectedAnswer = option;
+            document.querySelectorAll('.option-btn').forEach(btn => {
+                if (btn.dataset.option === option) {
+                    btn.classList.add('border-blue-500', 'bg-blue-50');
+                } else {
+                    btn.classList.remove('border-blue-500', 'bg-blue-50');
+                }
+            });
+        }
+        updateSubmitButton();
+    }
+
+    function selectConfidence(confidence) {
+        selectedConfidence = confidence;
+        document.querySelectorAll('.confidence-btn').forEach(btn => {
+            btn.classList.remove('border-green-500', 'bg-green-50', 'border-yellow-500', 'bg-yellow-50', 'border-red-500', 'bg-red-50');
+            if (btn.dataset.confidence === confidence) {
+                if (confidence === 'sure') btn.classList.add('border-green-500', 'bg-green-50');
+                if (confidence === 'unsure') btn.classList.add('border-yellow-500', 'bg-yellow-50');
+                if (confidence === 'dont_know') btn.classList.add('border-red-500', 'bg-red-50');
+            }
+        });
+        updateSubmitButton();
+    }
+
+    function updateSubmitButton() {
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = !(selectedAnswer && selectedConfidence);
+    }
+
+    async function submitAnswer() {
+        if (!selectedAnswer || !selectedConfidence) return;
+
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.disabled = true;
+        submitBtn.textContent = '批改中...';
+
+        try {
+            const result = await safeFetch('/api/quiz/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    test_id: currentQuiz.id,
+                    user_answer: selectedAnswer,
+                    confidence: selectedConfidence
+                })
+            }, '操作失败');
+
+            displayResult(result);
+        } catch (error) {
+            alert('提交失败：' + error.message);
+            submitBtn.disabled = false;
+            submitBtn.textContent = '提交答案';
+        }
+    }
+
+    function displayResult(result) {
+        document.getElementById('quizArea').classList.add('hidden');
+        document.getElementById('resultArea').classList.remove('hidden');
+
+        const header = document.getElementById('resultHeader');
+        const isCorrect = result.is_correct;
+        header.className = `px-6 py-4 border-b ${isCorrect ? 'bg-green-50' : 'bg-red-50'}`;
+        header.innerHTML = `
+            <div class="flex justify-between items-center">
+                <div>
+                    <span class="text-2xl mr-2">${isCorrect ? '✅' : '❌'}</span>
+                    <span class="text-lg font-semibold ${isCorrect ? 'text-green-800' : 'text-red-800'}">
+                        ${isCorrect ? '回答正确' : '回答错误'}
+                    </span>
+                </div>
+                <div class="text-right">
+                    <div class="text-3xl font-bold ${isCorrect ? 'text-green-600' : 'text-red-600'}">${result.score}分</div>
+                    <div class="text-sm text-gray-500">信心：${getConfidenceText(result.confidence)}</div>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('reviewQuestion').textContent = result.question;
+        const reviewOptions = document.getElementById('reviewOptions');
+        reviewOptions.innerHTML = '';
+
+        ['A', 'B', 'C', 'D'].forEach(opt => {
+            const div = document.createElement('div');
+            let classes = 'p-2 rounded ';
+
+            if (opt === result.correct_answer) {
+                classes += 'bg-green-100 text-green-800';
+            } else if (opt === result.user_answer && opt !== result.correct_answer) {
+                classes += 'bg-red-100 text-red-800';
+            } else {
+                classes += 'text-gray-600';
+            }
+
+            div.className = classes;
+            div.innerHTML = `
+                <span class="font-bold mr-2">${opt}.</span>
+                <span>${result.options[opt]}</span>
+                ${opt === result.correct_answer ? ' ✅' : ''}
+                ${opt === result.user_answer && opt !== result.correct_answer ? ' ❌（你的答案）' : ''}
+            `;
+            reviewOptions.appendChild(div);
+        });
+
+        const explanationText = document.getElementById('explanationText');
+        const revealBtn = document.getElementById('revealExplanationBtn');
+        const rawExplanation = (result.ai_explanation || result.explanation || '').trim();
+        const hasExplanation = rawExplanation.length > 0;
+        explanationText.textContent = hasExplanation ? rawExplanation : '暂无解析';
+
+        if (!hasExplanation || (result.is_correct && result.confidence === 'sure')) {
+            revealBtn.classList.add('hidden');
+            explanationText.classList.remove('hidden');
+        } else {
+            revealBtn.classList.remove('hidden');
+            explanationText.classList.add('hidden');
+        }
+
+        document.getElementById('feedbackText').textContent = result.ai_feedback || '暂无反馈';
+
+        const weakPointsDiv = document.getElementById('weakPoints');
+        if (result.weak_points && result.weak_points.length > 0) {
+            weakPointsDiv.innerHTML = `
+                <p class="text-sm font-medium mt-2">建议重点关注：</p>
+                <ul class="list-disc list-inside text-sm text-blue-600 mt-1">
+                    ${result.weak_points.map(wp => `<li>${wp}</li>`).join('')}
+                </ul>
+            `;
+        } else {
+            weakPointsDiv.innerHTML = '';
+        }
+    }
+
+    function revealSingleExplanation() {
+        const explanationText = document.getElementById('explanationText');
+        const revealBtn = document.getElementById('revealExplanationBtn');
+        if (explanationText) explanationText.classList.remove('hidden');
+        if (revealBtn) revealBtn.classList.add('hidden');
+    }
+
+    function getConfidenceText(confidence) {
+        const map = {
+            sure: '确定',
+            unsure: '模糊',
+            dont_know: '不会'
+        };
+        return map[confidence] || confidence;
+    }
+
+    function skipQuestion() {
+        if (confirm('确定要跳过这道题吗？')) {
+            nextQuestion();
+        }
+    }
+
+    async function nextQuestion() {
+        document.getElementById('resultArea').classList.add('hidden');
+        document.getElementById('loadingState').classList.remove('hidden');
+
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '提交答案';
+
+        await generateQuiz();
+    }
+
+    function generateVariation() {
+        window.location.href = `/variation/{{ concept.concept_id }}`;
+    }
+
+    // 键盘快捷键
+    document.addEventListener('keydown', function(e) {
+        const quizArea = document.getElementById('quizArea');
+        if (!quizArea || quizArea.classList.contains('hidden')) return;
+
+        const key = e.key;
+
+        // 数字键 1-4 选择选项 A-D
+        if (key >= '1' && key <= '4') {
+            const options = ['A', 'B', 'C', 'D'];
+            const opt = options[parseInt(key) - 1];
+            if (opt) {
+                selectOption(opt);
+            }
+            e.preventDefault();
+            return;
+        }
+
+        // Q/W/E 选择信心度
+        const keyLower = key.toLowerCase();
+        if (keyLower === 'q') { selectConfidence('sure'); e.preventDefault(); }
+        if (keyLower === 'w') { selectConfidence('unsure'); e.preventDefault(); }
+        if (keyLower === 'e') { selectConfidence('dont_know'); e.preventDefault(); }
+
+        // Enter 提交答案
+        if (key === 'Enter') {
+            if (selectedAnswer && selectedConfidence) {
+                submitAnswer();
+            }
+            e.preventDefault();
+        }
+    });
+</script>
+{% endblock %}

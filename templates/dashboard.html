@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}True Learning System - 医学考研学习系统{% endblock %}
+
+{% block content %}
+<!-- 核心入口：整卷测验 -->
+<div class="mb-8">
+    <div class="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl shadow-xl p-8 text-white">
+        <div class="flex flex-col md:flex-row items-center justify-between">
+            <div class="md:w-2/3">
+                <h1 class="text-3xl font-bold mb-2">📝 整卷测验</h1>
+                <p class="text-green-100 text-lg mb-3">粘贴内容，一次性生成整套试卷，高效检验学习成果</p>
+                <div class="flex flex-wrap gap-3">
+                    <span class="px-3 py-1 bg-white/20 rounded-full text-sm">✅ 知识点辨析</span>
+                    <span class="px-3 py-1 bg-white/20 rounded-full text-sm">🔄 题目变式</span>
+                    <span class="px-3 py-1 bg-white/20 rounded-full text-sm">📊 难度梯度</span>
+                </div>
+            </div>
+            <div class="md:w-1/3 mt-6 md:mt-0 text-center">
+                <a href="/quiz/batch/0" class="inline-block bg-white text-green-600 px-8 py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-green-50 hover:scale-105 transition transform">
+                    开始测验 →
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 学习数据概览 -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
+        <div class="text-xs text-gray-500">学习次数</div>
+        <div class="text-2xl font-bold text-blue-600">{{ stats.total_sessions }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
+        <div class="text-xs text-gray-500">总做题数</div>
+        <div class="text-2xl font-bold text-green-600">{{ stats.total_questions }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
+        <div class="text-xs text-gray-500">平均正确率</div>
+        <div class="text-2xl font-bold text-purple-600">{{ stats.avg_accuracy }}%</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-orange-500">
+        <div class="text-xs text-gray-500">学习时长</div>
+        <div class="text-2xl font-bold text-orange-600">
+            {% if stats.total_duration >= 3600 %}
+                {{ (stats.total_duration / 3600) | round(1) }}h
+            {% else %}
+                {{ (stats.total_duration / 60) | round(0) | int }}min
+            {% endif %}
+        </div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-cyan-500">
+        <div class="text-xs text-gray-500">知识点数</div>
+        <div class="text-2xl font-bold text-cyan-600">{{ stats.total_kps }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-red-500">
+        <div class="text-xs text-gray-500">薄弱知识点</div>
+        <div class="text-2xl font-bold text-red-600">{{ stats.weak_kps }}</div>
+        <div class="text-xs text-gray-400">正确率&lt;60%</div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- 最近学习记录 -->
+    <div class="lg:col-span-2">
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b flex justify-between items-center">
+                <h2 class="text-lg font-semibold">📚 最近学习</h2>
+                <a href="/learning-tracking" class="text-blue-600 hover:text-blue-800 text-sm">查看全部 →</a>
+            </div>
+            <div class="divide-y">
+                {% if recent_sessions %}
+                    {% for s in recent_sessions %}
+                    <div class="px-6 py-4 hover:bg-gray-50 transition">
+                        <div class="flex justify-between items-center mb-1">
+                            <div class="flex items-center space-x-2">
+                                {% if s.session_type == 'exam' %}
+                                    <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">整卷</span>
+                                {% else %}
+                                    <span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-medium">细节</span>
+                                {% endif %}
+                                <span class="font-medium">{{ s.title }}</span>
+                            </div>
+                            <div class="flex items-center space-x-3 text-sm">
+                                {% if s.accuracy is not none %}
+                                    {% set acc_pct = (s.accuracy * 100) | round(1) %}
+                                    <span class="font-bold {% if acc_pct >= 80 %}text-green-600{% elif acc_pct >= 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                                        {{ acc_pct }}%
+                                    </span>
+                                {% endif %}
+                                <span class="text-gray-400 text-xs">
+                                    {{ s.started_at.strftime('%m-%d %H:%M') if s.started_at else '' }}
+                                </span>
+                            </div>
+                        </div>
+                        {% if s.accuracy is not none %}
+                        <div class="flex items-center mt-1">
+                            <div class="flex-1 bg-gray-200 rounded-full h-1.5">
+                                {% set acc_pct = (s.accuracy * 100) | round(1) %}
+                                <div class="h-1.5 rounded-full transition-all {% if acc_pct >= 80 %}bg-green-500{% elif acc_pct >= 60 %}bg-yellow-500{% else %}bg-red-500{% endif %}" style="width:{{ acc_pct }}%"></div>
+                            </div>
+                            <span class="text-xs text-gray-400 ml-3">{{ s.correct_count or 0 }}/{{ (s.correct_count or 0) + (s.wrong_count or 0) }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="px-6 py-8 text-center text-gray-500">
+                        还没有学习记录，开始一次整卷测验吧 🚀
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 快速入口 -->
+    <div class="space-y-4">
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b">
+                <h2 class="text-lg font-semibold">⚡ 快速入口</h2>
+            </div>
+            <div class="p-4 space-y-3">
+                <a href="/quiz/batch/0" class="block p-4 bg-green-50 rounded-lg hover:bg-green-100 transition">
+                    <div class="font-bold text-green-700">📝 整卷测验</div>
+                    <div class="text-sm text-gray-600">粘贴内容，生成完整试卷</div>
+                </a>
+                <a href="/learning-tracking" class="block p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition">
+                    <div class="font-bold text-blue-700">📊 学习轨迹</div>
+                    <div class="text-sm text-gray-600">查看学习数据与趋势分析</div>
+                </a>
+                <a href="/knowledge-archive" class="block p-4 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition">
+                    <div class="font-bold text-indigo-700">🧠 知识点归档</div>
+                    <div class="text-sm text-gray-600">全局知识点掌握情况</div>
+                </a>
+                <a href="/wrong-answers" class="block p-4 bg-red-50 rounded-lg hover:bg-red-100 transition">
+                    <div class="font-bold text-red-700">❌ 错题本</div>
+                    <div class="text-sm text-gray-600">复习错题，巩固薄弱环节</div>
+                </a>
+                <a href="/graph" class="block p-4 bg-purple-50 rounded-lg hover:bg-purple-100 transition">
+                    <div class="font-bold text-purple-700">🕸️ 知识图谱</div>
+                    <div class="text-sm text-gray-600">可视化知识点关联</div>
+                </a>
+            </div>
+        </div>
+
+        <!-- 学习流程提示 -->
+        <div class="bg-white rounded-lg shadow p-5">
+            <h3 class="font-semibold text-gray-700 mb-3">🔄 推荐学习流程</h3>
+            <div class="space-y-2 text-sm">
+                <div class="flex items-center space-x-2">
+                    <span class="w-6 h-6 bg-green-100 text-green-700 rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                    <span>整卷测验 — 检验整体掌握</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                    <span>学习轨迹 — 定位薄弱环节</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="w-6 h-6 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold">3</span>
+                    <span>细节强化 — 针对性练习</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="w-6 h-6 bg-orange-100 text-orange-700 rounded-full flex items-center justify-center text-xs font-bold">4</span>
+                    <span>错题复盘 — 巩固记忆</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

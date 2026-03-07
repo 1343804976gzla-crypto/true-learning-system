@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block title %}费曼讲解 - {{ concept.name }}{% endblock %}
+
+{% block content %}
+<!-- 页面头部 -->
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <a href="/chapter/{{ concept.chapter_id }}" class="hover:text-blue-500">章节</a>
+        <span class="mx-2">/</span>
+        <span>费曼讲解</span>
+    </div>
+    
+    <h1 class="text-2xl font-bold">🎤 费曼讲解</h1>
+    <p class="text-gray-500">知识点: {{ concept.name }}</p>
+</div>
+
+<div class="max-w-3xl mx-auto">
+    <!-- 说明卡片 -->
+    <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                </svg>
+            </div>
+            <div class="ml-3">
+                <p class="text-sm text-blue-700">
+                    <strong>费曼技巧：</strong>用最简单的语言解释概念，就像在给10岁小孩讲课一样。
+                    避免使用专业术语，如果必须用到，要想办法解释清楚。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 对话区域 -->
+    <div class="bg-white rounded-lg shadow">
+        <!-- 对话历史 -->
+        <div id="chatHistory" class="p-6 min-h-[400px] max-h-[600px] overflow-y-auto">
+            <!-- 初始AI消息 -->
+            <div class="flex items-start mb-4">
+                <div class="flex-shrink-0">
+                    <div class="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center text-white">🤖</div>
+                </div>
+                <div class="ml-3 bg-gray-100 rounded-lg p-3 max-w-[80%]">
+                    <p>你好！我是你的费曼教练。</p>
+                    <p class="mt-2">我们要讲解的概念是：<strong>{{ concept.name }}</strong></p>
+                    <p class="mt-2">请用大白话解释这个概念，就像你在给10岁的表弟讲课一样。禁止使用专业术语！</p>
+                    
+                    {% if concept.retention > 0 %}
+                    <p class="mt-2 text-sm text-gray-500">💡 提示：你之前对这个概念的掌握度是 {{ "%.0f"|format(concept.retention * 100) }}%，加油！</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div id="inputArea" class="border-t p-4">
+            <div class="flex items-end">
+                <div class="flex-1">
+                    <textarea id="userInput" rows="3" 
+                              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none"
+                              placeholder="在这里输入你的解释..."
+                              onkeypress="handleKeyPress(event)"></textarea>
+                    <p class="text-xs text-gray-400 mt-1">提示：尽量用简单的比喻和例子来说明</p>
+                </div>
+                
+                <button id="sendBtn" onclick="sendMessage()" 
+                        class="ml-3 bg-purple-500 text-white px-6 py-2 rounded-lg hover:bg-purple-600 transition flex items-center"
+                        style="height: 42px;"
+>
+                    <span id="sendText">发送</span>
+                    <svg id="loadingIcon" class="animate-spin ml-2 h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- 完成区域 (隐藏) -->
+        <div id="completeArea" class="hidden border-t p-6 text-center">
+            <div class="text-6xl mb-4">🎉</div>
+            <h3 class="text-xl font-semibold text-green-600 mb-2">恭喜通过费曼测试！</h3>            
+            <p class="text-gray-600 mb-4">你已经真正理解了这个概念。</p>
+            
+            <div class="flex justify-center space-x-4">
+                <a href="/chapter/{{ concept.chapter_id }}" class="text-gray-500 hover:text-gray-700 px-4 py-2">
+                    ← 返回章节
+                </a>
+                
+                <a href="/quiz/{{ concept.concept_id }}" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 transition">
+                    去做测试题 →
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 进度指示器 -->
+    <div class="mt-4 text-center text-sm text-gray-500">
+        对话轮次: <span id="roundCount">1</span> / 最多5轮
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const conceptId = '{{ concept.concept_id }}';
+    let sessionId = null;
+    let roundCount = 1;
+
+    // 开始费曼讲解
+    window.onload = async function() {
+        await startFeynman();
+    };
+
+    // 开始会话
+    async function startFeynman() {
+        try {
+            const response = await fetch(`/api/feynman/start/${conceptId}`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) throw new Error('启动失败');
+            
+            const result = await response.json();
+            sessionId = result.session_id;
+            
+            // 添加AI的初始消息（兼容 ai_message / message 两种字段）
+            const initialMessage = result.ai_message || result.message;
+            if (initialMessage) {
+                addAIMessage(initialMessage);
+            }
+            
+        } catch (error) {
+            console.error('启动费曼讲解失败:', error);
+        }
+    }
+
+    // 发送消息
+    async function sendMessage() {
+        const input = document.getElementById('userInput');
+        const message = input.value.trim();
+        
+        if (!message) return;
+        if (!sessionId) {
+            alert('会话未初始化，请刷新页面重试');
+            return;
+        }
+        
+        // 添加用户消息到对话
+        addUserMessage(message);
+        
+        // 清空输入框
+        input.value = '';
+        
+        // 显示加载状态
+        setLoading(true);
+        
+        try {
+            const response = await fetch(`/api/feynman/respond/${sessionId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: `message=${encodeURIComponent(message)}`
+            });
+            
+            if (!response.ok) throw new Error('发送失败');
+            
+            const result = await response.json();
+            
+            // 更新轮次
+            roundCount = result.round;
+            document.getElementById('roundCount').textContent = roundCount;
+            
+            // 添加AI回复
+            addAIMessage(result.message);
+            
+            // 检查是否完成
+            if (result.finished) {
+                handleComplete(result.passed);
+            }
+            
+        } catch (error) {
+            alert('发送失败: ' + error.message);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    // 添加用户消息
+    function addUserMessage(message) {
+        const chatHistory = document.getElementById('chatHistory');
+        
+        const div = document.createElement('div');
+        div.className = 'flex items-start mb-4 justify-end';
+        div.innerHTML = `
+            <div class="mr-3 bg-purple-500 text-white rounded-lg p-3 max-w-[80%]">
+                <p>${escapeHtml(message)}</p>
+            </div>
+            <div class="flex-shrink-0">
+                <div class="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">👤</div>
+            </div>
+        `;
+        
+        chatHistory.appendChild(div);
+        scrollToBottom();
+    }
+
+    // 添加AI消息
+    function addAIMessage(message) {
+        const chatHistory = document.getElementById('chatHistory');
+        
+        const div = document.createElement('div');
+        div.className = 'flex items-start mb-4';
+        div.innerHTML = `
+            <div class="flex-shrink-0">
+                <div class="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center text-white">🤖</div>
+            </div>
+            <div class="ml-3 bg-gray-100 rounded-lg p-3 max-w-[80%]">
+                <p>${escapeHtml(message)}</p>
+            </div>
+        `;
+        
+        chatHistory.appendChild(div);
+        scrollToBottom();
+    }
+
+    // 处理完成
+    function handleComplete(passed) {
+        const inputArea = document.getElementById('inputArea');
+        const completeArea = document.getElementById('completeArea');
+        
+        inputArea.classList.add('hidden');
+        completeArea.classList.remove('hidden');
+        
+        if (!passed) {
+            // 达到最大轮次但未通过
+            completeArea.innerHTML = `
+                <div class="text-6xl mb-4">💪</div>
+                <h3 class="text-xl font-semibold text-orange-600 mb-2">继续努力！</h3>
+                <p class="text-gray-600 mb-4">虽然没有完全通过，但你已经对这个概念有了更深的理解。</p>
+                <div class="flex justify-center space-x-4">
+                    <button onclick="location.reload()" class="bg-purple-500 text-white px-6 py-2 rounded hover:bg-purple-600 transition">
+                        再试一次
+                    </button>
+                    <a href="/chapter/{{ concept.chapter_id }}" class="text-gray-500 hover:text-gray-700 px-4 py-2">
+                        返回章节
+                    </a>
+                </div>
+            `;
+        }
+    }
+
+    // 设置加载状态
+    function setLoading(loading) {
+        const sendBtn = document.getElementById('sendBtn');
+        const sendText = document.getElementById('sendText');
+        const loadingIcon = document.getElementById('loadingIcon');
+        const userInput = document.getElementById('userInput');
+        
+        if (loading) {
+            sendBtn.disabled = true;
+            sendText.textContent = '思考中';
+            loadingIcon.classList.remove('hidden');
+            userInput.disabled = true;
+        } else {
+            sendBtn.disabled = false;
+            sendText.textContent = '发送';
+            loadingIcon.classList.add('hidden');
+            userInput.disabled = false;
+            userInput.focus();
+        }
+    }
+
+    // 滚动到底部
+    function scrollToBottom() {
+        const chatHistory = document.getElementById('chatHistory');
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
+    // 处理回车键
+    function handleKeyPress(event) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
+        }
+    }
+
+    // 转义HTML
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, m => map[m]);
+    }
+</script>
+{% endblock %}

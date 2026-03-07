@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+
+{% block title %}沉浸式复盘{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <a href="/learning-tracking" class="hover:text-blue-500">学习轨迹</a>
+        <span class="mx-2">/</span>
+        <span>沉浸式复盘</span>
+    </div>
+
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold">🔍 沉浸式复盘</h1>
+            <p class="text-gray-500" id="reviewSubtitle">加载中...</p>
+        </div>
+        <div class="flex space-x-2">
+            <button onclick="exportCSV()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">📊 导出CSV</button>
+            <button onclick="exportMarkdown()" class="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600">📝 导出Markdown</button>
+        </div>
+    </div>
+</div>
+
+<!-- 总览卡片 -->
+<div id="overviewCard" class="hidden bg-white rounded-lg shadow p-6 mb-6">
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-4 text-center">
+        <div>
+            <div class="text-sm text-gray-500">总题数</div>
+            <div id="rvTotal" class="text-2xl font-bold text-blue-600">0</div>
+        </div>
+        <div>
+            <div class="text-sm text-gray-500">正确</div>
+            <div id="rvCorrect" class="text-2xl font-bold text-green-600">0</div>
+        </div>
+        <div>
+            <div class="text-sm text-gray-500">错误</div>
+            <div id="rvWrong" class="text-2xl font-bold text-red-600">0</div>
+        </div>
+        <div>
+            <div class="text-sm text-gray-500">正确率</div>
+            <div id="rvAccuracy" class="text-2xl font-bold text-purple-600">0%</div>
+        </div>
+        <div>
+            <div class="text-sm text-gray-500">确定/模糊/不会</div>
+            <div id="rvConfidence" class="text-lg font-bold"><span class="text-green-600">0</span>/<span class="text-yellow-600">0</span>/<span class="text-red-600">0</span></div>
+        </div>
+        <div>
+            <div class="text-sm text-gray-500">用时</div>
+            <div id="rvDuration" class="text-2xl font-bold text-orange-600">0min</div>
+        </div>
+    </div>
+</div>
+
+<!-- 筛选栏 -->
+<div id="filterBar" class="hidden bg-white rounded-lg shadow p-4 mb-6">
+    <div class="flex items-center space-x-4 flex-wrap">
+        <span class="text-sm text-gray-500">筛选：</span>
+        <button onclick="setFilter('all')" id="filter-all" class="px-3 py-1 rounded-full text-sm bg-blue-500 text-white">全部</button>
+        <button onclick="setFilter('wrong')" id="filter-wrong" class="px-3 py-1 rounded-full text-sm border border-red-400 text-red-600 hover:bg-red-50">仅错题</button>
+        <button onclick="setFilter('correct')" id="filter-correct" class="px-3 py-1 rounded-full text-sm border border-green-400 text-green-600 hover:bg-green-50">仅正确</button>
+        <button onclick="setFilter('unsure')" id="filter-unsure" class="px-3 py-1 rounded-full text-sm border border-yellow-400 text-yellow-600 hover:bg-yellow-50">模糊/不会</button>
+    </div>
+</div>
+
+<!-- 加载状态 -->
+<div id="loadingState" class="bg-white rounded-lg shadow p-12 text-center">
+    <div class="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+    <p class="text-gray-500">正在加载复盘数据...</p>
+</div>
+
+<!-- 题目列表 -->
+<div id="questionsList" class="hidden space-y-4"></div>
+
+<!-- 无数据 -->
+<div id="noData" class="hidden bg-yellow-50 border-l-4 border-yellow-400 p-6 text-center">
+    <p class="text-yellow-700">没有找到复盘数据，请从学习轨迹页面进入。</p>
+    <a href="/learning-tracking" class="text-blue-600 hover:underline mt-2 inline-block">← 返回学习轨迹</a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    var allQuestions = [];  // 扁平化的所有题目
+    var sessionsData = [];
+    var currentFilter = 'all';
+
+    // 从URL获取session ids
+    var urlParams = new URLSearchParams(window.location.search);
+    var ids = urlParams.get('ids') || '';
+
+    (async function() {
+        if (!ids) {
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('noData').classList.remove('hidden');
+            return;
+        }
+        try {
+            var response = await fetch('/api/tracking/review-data?ids=' + encodeURIComponent(ids));
+            var data = await response.json();
+            sessionsData = data.sessions || [];
+            if (sessionsData.length === 0) {
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('noData').classList.remove('hidden');
+                return;
+            }
+            // 扁平化题目，带session上下文
+            var globalIdx = 0;
+            sessionsData.forEach(function(s) {
+                (s.questions || []).forEach(function(q) {
+                    q._sessionTitle = s.title;
+                    q._sessionType = s.session_type;
+                    q._globalIdx = globalIdx++;
+                    allQuestions.push(q);
+                });
+            });
+            renderOverview();
+            renderQuestions();
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('overviewCard').classList.remove('hidden');
+            document.getElementById('filterBar').classList.remove('hidden');
+            document.getElementById('questionsList').classList.remove('hidden');
+        } catch (e) {
+            console.error('加载失败:', e);
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('noData').classList.remove('hidden');
+        }
+    })();
+
+    function renderOverview() {
+        var total = allQuestions.length;
+        var correct = 0, wrong = 0, sure = 0, unsure = 0, no = 0, totalTime = 0;
+        allQuestions.forEach(function(q) {
+            if (q.is_correct) correct++; else wrong++;
+            if (q.confidence === 'sure') sure++;
+            else if (q.confidence === 'unsure') unsure++;
+            else if (q.confidence === 'no') no++;
+            totalTime += q.time_spent_seconds || 0;
+        });
+        document.getElementById('rvTotal').textContent = total;
+        document.getElementById('rvCorrect').textContent = correct;
+        document.getElementById('rvWrong').textContent = wrong;
+        document.getElementById('rvAccuracy').textContent = total > 0 ? Math.round(correct / total * 100) + '%' : '0%';
+        document.getElementById('rvConfidence').innerHTML = '<span class="text-green-600">' + sure + '</span>/<span class="text-yellow-600">' + unsure + '</span>/<span class="text-red-600">' + no + '</span>';
+        document.getElementById('rvDuration').textContent = totalTime >= 3600 ? Math.round(totalTime / 360) / 10 + 'h' : Math.round(totalTime / 60) + 'min';
+        // 副标题
+        var titles = sessionsData.map(function(s) { return s.title; });
+        document.getElementById('reviewSubtitle').textContent = titles.join(' + ') + ' · 共' + total + '题';
+    }
+
+    function setFilter(f) {
+        currentFilter = f;
+        ['all','wrong','correct','unsure'].forEach(function(k) {
+            var btn = document.getElementById('filter-' + k);
+            if (k === f) {
+                btn.className = 'px-3 py-1 rounded-full text-sm bg-blue-500 text-white';
+            } else {
+                var colors = { all: 'border-gray-400 text-gray-600 hover:bg-gray-50', wrong: 'border-red-400 text-red-600 hover:bg-red-50', correct: 'border-green-400 text-green-600 hover:bg-green-50', unsure: 'border-yellow-400 text-yellow-600 hover:bg-yellow-50' };
+                btn.className = 'px-3 py-1 rounded-full text-sm border ' + colors[k];
+            }
+        });
+        renderQuestions();
+    }
+
+    function getFilteredQuestions() {
+        if (currentFilter === 'all') return allQuestions;
+        if (currentFilter === 'wrong') return allQuestions.filter(function(q) { return !q.is_correct; });
+        if (currentFilter === 'correct') return allQuestions.filter(function(q) { return q.is_correct; });
+        if (currentFilter === 'unsure') return allQuestions.filter(function(q) { return q.confidence === 'unsure' || q.confidence === 'no'; });
+        return allQuestions;
+    }
+
+    function confLabel(c) {
+        if (c === 'sure') return '<span class="text-green-600 font-medium">✓ 确定</span>';
+        if (c === 'unsure') return '<span class="text-yellow-600 font-medium">? 模糊</span>';
+        if (c === 'no') return '<span class="text-red-600 font-medium">✗ 不会</span>';
+        return '<span class="text-gray-400">○ 未标记</span>';
+    }
+
+    function renderQuestions() {
+        var container = document.getElementById('questionsList');
+        var filtered = getFilteredQuestions();
+        if (filtered.length === 0) {
+            container.innerHTML = '<div class="bg-white rounded-lg shadow p-8 text-center text-gray-400">没有符合筛选条件的题目</div>';
+            return;
+        }
+        container.innerHTML = '';
+        filtered.forEach(function(q, fi) {
+            var borderColor = q.is_correct ? 'border-l-green-500' : 'border-l-red-500';
+            var statusText = q.is_correct ? '<span class="text-green-600 font-bold">✓ 正确</span>' : '<span class="text-red-600 font-bold">✗ 错误</span>';
+            var diffColor = q.difficulty === '基础' ? 'text-green-600' : (q.difficulty === '提高' ? 'text-yellow-600' : 'text-red-600');
+
+            // 选项渲染
+            var optsHtml = '';
+            ['A','B','C','D','E'].forEach(function(opt) {
+                if (!q.options || !q.options[opt]) return;
+                var isUser = (q.user_answer || '').includes(opt);
+                var isCorrect = (q.correct_answer || '').includes(opt);
+                var cls = 'p-3 rounded-lg mb-2 border ';
+                if (isCorrect) cls += 'bg-green-50 border-green-300 text-green-800';
+                else if (isUser && !isCorrect) cls += 'bg-red-50 border-red-300 text-red-800';
+                else cls += 'bg-gray-50 border-gray-200 text-gray-600';
+                optsHtml += '<div class="' + cls + '">' +
+                    '<span class="font-bold mr-2">' + opt + '.</span>' + q.options[opt] +
+                    (isCorrect ? ' <span class="text-green-600 font-bold">✅</span>' : '') +
+                    (isUser && !isCorrect ? ' <span class="text-red-600 font-bold">❌ 你的答案</span>' : '') +
+                    '</div>';
+            });
+
+            var card = document.createElement('div');
+            card.className = 'bg-white rounded-lg shadow border-l-4 ' + borderColor;
+            card.innerHTML =
+                '<div class="p-6">' +
+                    '<div class="flex items-center justify-between mb-3">' +
+                        '<div class="flex items-center space-x-2 flex-wrap">' +
+                            '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-bold">第' + (q._globalIdx + 1) + '题</span>' +
+                            '<span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">' + (q.type || 'A1') + '</span>' +
+                            '<span class="' + diffColor + ' text-xs font-medium">' + (q.difficulty || '') + '</span>' +
+                            statusText +
+                            confLabel(q.confidence) +
+                        '</div>' +
+                        '<span class="text-xs text-gray-400">' + (q.key_point || '') + '</span>' +
+                    '</div>' +
+                    '<p class="text-lg font-medium leading-relaxed mb-4">' + q.question + '</p>' +
+                    '<div class="mb-4">' + optsHtml + '</div>' +
+                    '<div class="flex items-center space-x-4 text-sm text-gray-500 mb-3">' +
+                        '<span>你的答案：<strong class="' + (q.is_correct ? 'text-green-600' : 'text-red-600') + '">' + (q.user_answer || '未作答') + '</strong></span>' +
+                        '<span>正确答案：<strong class="text-green-600">' + (q.correct_answer || '') + '</strong></span>' +
+                        (q.time_spent_seconds > 0 ? '<span>用时：' + q.time_spent_seconds + '秒</span>' : '') +
+                    '</div>' +
+                    (q.explanation ? '<div class="bg-blue-50 border border-blue-200 rounded-lg p-4"><div class="font-medium text-blue-800 mb-1">📖 解析</div><p class="text-sm text-blue-700">' + q.explanation + '</p></div>' : '') +
+                '</div>';
+            container.appendChild(card);
+        });
+    }
+
+    // ========== 导出CSV ==========
+    function exportCSV() {
+        var filtered = getFilteredQuestions();
+        if (filtered.length === 0) { alert('没有可导出的数据'); return; }
+        var rows = [['序号','题型','难度','题目','你的答案','正确答案','是否正确','自信度','知识点','用时(秒)','解析']];
+        filtered.forEach(function(q, i) {
+            var confMap = { sure: '确定', unsure: '模糊', no: '不会' };
+            rows.push([
+                i + 1,
+                q.type || '',
+                q.difficulty || '',
+                '"' + (q.question || '').replace(/"/g, '""') + '"',
+                q.user_answer || '',
+                q.correct_answer || '',
+                q.is_correct ? '正确' : '错误',
+                confMap[q.confidence] || '未标记',
+                q.key_point || '',
+                q.time_spent_seconds || 0,
+                '"' + (q.explanation || '').replace(/"/g, '""') + '"'
+            ]);
+        });
+        var csv = '\uFEFF' + rows.map(function(r) { return r.join(','); }).join('\n');
+        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        var link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = '复盘导出_' + new Date().toISOString().slice(0, 10) + '.csv';
+        link.click();
+    }
+
+    // ========== 导出Markdown ==========
+    function exportMarkdown() {
+        var filtered = getFilteredQuestions();
+        if (filtered.length === 0) { alert('没有可导出的数据'); return; }
+        var titles = sessionsData.map(function(s) { return s.title; });
+        var total = filtered.length;
+        var correct = filtered.filter(function(q) { return q.is_correct; }).length;
+        var md = '# 沉浸式复盘报告\n\n';
+        md += '**来源**: ' + titles.join(' + ') + '\n';
+        md += '**导出时间**: ' + new Date().toLocaleString('zh-CN') + '\n';
+        md += '**题目数**: ' + total + ' | **正确**: ' + correct + ' | **错误**: ' + (total - correct) + ' | **正确率**: ' + (total > 0 ? Math.round(correct / total * 100) : 0) + '%\n\n';
+        md += '---\n\n';
+        filtered.forEach(function(q, i) {
+            var confMap = { sure: '✓ 确定', unsure: '? 模糊', no: '✗ 不会' };
+            var status = q.is_correct ? '✅ 正确' : '❌ 错误';
+            md += '## 第' + (i + 1) + '题 ' + status + ' [' + (q.type || 'A1') + '] [' + (q.difficulty || '') + ']\n\n';
+            md += '**' + q.question + '**\n\n';
+            ['A','B','C','D','E'].forEach(function(opt) {
+                if (!q.options || !q.options[opt]) return;
+                var mark = '';
+                if ((q.correct_answer || '').includes(opt)) mark = ' ✅';
+                else if ((q.user_answer || '').includes(opt) && !(q.correct_answer || '').includes(opt)) mark = ' ❌';
+                md += opt + '. ' + q.options[opt] + mark + '\n';
+            });
+            md += '\n';
+            md += '- 你的答案: **' + (q.user_answer || '未作答') + '** | 正确答案: **' + (q.correct_answer || '') + '**\n';
+            md += '- 自信度: ' + (confMap[q.confidence] || '○ 未标记') + '\n';
+            md += '- 知识点: ' + (q.key_point || '无') + '\n';
+            if (q.explanation) md += '\n> **解析**: ' + q.explanation + '\n';
+            md += '\n---\n\n';
+        });
+        navigator.clipboard.writeText(md).then(function() {
+            alert('✓ Markdown报告已复制到剪贴板！');
+        }).catch(function() {
+            var blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+            var link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = '复盘报告_' + new Date().toISOString().slice(0, 10) + '.md';
+            link.click();
+        });
+    }
+</script>
+{% endblock %}

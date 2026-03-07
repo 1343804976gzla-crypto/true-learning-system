@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}全局知识点归档{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <a href="/learning-tracking" class="hover:text-blue-500">学习轨迹</a>
+        <span class="mx-2">/</span>
+        <span>知识点归档</span>
+    </div>
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold">🧠 全局知识点归档看板</h1>
+            <p class="text-gray-500" id="archiveSubtitle">加载中...</p>
+        </div>
+        <div class="flex space-x-2">
+            <button onclick="exportArchiveMarkdown()" class="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600">📝 导出Markdown</button>
+            <button onclick="loadArchiveData()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">🔄 刷新</button>
+        </div>
+    </div>
+</div>
+<div id="overviewCard" class="hidden mb-6">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
+            <div class="text-sm text-gray-500">知识点总数</div>
+            <div id="ovKpCount" class="text-3xl font-bold text-blue-600">0</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
+            <div class="text-sm text-gray-500">总做题数</div>
+            <div id="ovQCount" class="text-3xl font-bold text-green-600">0</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 border-l-4 border-red-500">
+            <div class="text-sm text-gray-500">高危知识点</div>
+            <div id="ovDangerCount" class="text-3xl font-bold text-red-600">0</div>
+            <div class="text-xs text-gray-400">错误率≥50%</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 border-l-4 border-orange-500">
+            <div class="text-sm text-gray-500">整体正确率</div>
+            <div id="ovAccuracy" class="text-3xl font-bold text-orange-600">0%</div>
+        </div>
+    </div>
+</div>
+<div id="filterBar" class="hidden bg-white rounded-lg shadow p-4 mb-6">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center space-x-2">
+            <span class="text-sm text-gray-500">排序：</span>
+            <button onclick="setSortMode('error_rate')" id="sort-error_rate" class="px-3 py-1 rounded-full text-sm bg-red-500 text-white">错误率↓</button>
+            <button onclick="setSortMode('total')" id="sort-total" class="px-3 py-1 rounded-full text-sm border border-gray-400 text-gray-600 hover:bg-gray-50">题量↓</button>
+            <button onclick="setSortMode('accuracy')" id="sort-accuracy" class="px-3 py-1 rounded-full text-sm border border-green-400 text-green-600 hover:bg-green-50">正确率↑</button>
+        </div>
+        <div class="flex items-center space-x-2">
+            <span class="text-sm text-gray-500">筛选：</span>
+            <button onclick="setFilterMode('all')" id="flt-all" class="px-3 py-1 rounded-full text-sm bg-blue-500 text-white">全部</button>
+            <button onclick="setFilterMode('danger')" id="flt-danger" class="px-3 py-1 rounded-full text-sm border border-red-400 text-red-600 hover:bg-red-50">高危(≥50%)</button>
+            <button onclick="setFilterMode('weak')" id="flt-weak" class="px-3 py-1 rounded-full text-sm border border-yellow-400 text-yellow-600 hover:bg-yellow-50">薄弱(30-50%)</button>
+            <button onclick="setFilterMode('good')" id="flt-good" class="px-3 py-1 rounded-full text-sm border border-green-400 text-green-600 hover:bg-green-50">掌握(<30%)</button>
+        </div>
+        <div class="flex items-center space-x-2">
+            <input type="text" id="searchInput" placeholder="搜索知识点..." class="border rounded px-3 py-1 text-sm w-48" oninput="renderKnowledgePoints()">
+        </div>
+    </div>
+</div>
+<div id="loadingState" class="bg-white rounded-lg shadow p-12 text-center">
+    <div class="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+    <p class="text-gray-500">正在加载知识点归档数据...</p>
+</div>
+<div id="kpList" class="hidden space-y-3"></div>
+<div id="noData" class="hidden bg-yellow-50 border-l-4 border-yellow-400 p-6 text-center">
+    <p class="text-yellow-700">暂无做题记录，完成测试后数据将自动归档。</p>
+    <a href="/quiz/batch/0" class="text-blue-600 hover:underline mt-2 inline-block">去做一套题 →</a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var archiveData=null,currentSort='error_rate',currentFilterMode='all';
+document.addEventListener('DOMContentLoaded',function(){loadArchiveData();});
+
+async function loadArchiveData(){
+    try{
+        document.getElementById('loadingState').classList.remove('hidden');
+        document.getElementById('kpList').classList.add('hidden');
+        document.getElementById('noData').classList.add('hidden');
+        var r=await fetch('/api/tracking/knowledge-archive');
+        archiveData=await r.json();
+        if(!archiveData.knowledge_points||archiveData.knowledge_points.length===0){
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('noData').classList.remove('hidden');return;
+        }
+        renderOverview();renderKnowledgePoints();
+        document.getElementById('loadingState').classList.add('hidden');
+        document.getElementById('overviewCard').classList.remove('hidden');
+        document.getElementById('filterBar').classList.remove('hidden');
+        document.getElementById('kpList').classList.remove('hidden');
+    }catch(e){
+        console.error('加载失败:',e);
+        document.getElementById('loadingState').classList.add('hidden');
+        document.getElementById('noData').classList.remove('hidden');
+    }
+}
+
+function renderOverview(){
+    if(!archiveData)return;
+    var kps=archiveData.knowledge_points,totalQ=archiveData.total_questions,totalCorrect=0,dangerCount=0;
+    kps.forEach(function(kp){totalCorrect+=kp.correct;if(kp.error_rate>=50)dangerCount++;});
+    document.getElementById('ovKpCount').textContent=archiveData.total_knowledge_points;
+    document.getElementById('ovQCount').textContent=totalQ;
+    document.getElementById('ovDangerCount').textContent=dangerCount;
+    document.getElementById('ovAccuracy').textContent=totalQ>0?Math.round(totalCorrect/totalQ*100)+'%':'0%';
+    document.getElementById('archiveSubtitle').textContent='共 '+archiveData.total_knowledge_points+' 个知识点 · '+totalQ+' 道题目';
+}
+
+function setSortMode(mode){
+    currentSort=mode;
+    ['error_rate','total','accuracy'].forEach(function(m){
+        var btn=document.getElementById('sort-'+m);
+        if(m===mode){var c={error_rate:'bg-red-500 text-white',total:'bg-gray-600 text-white',accuracy:'bg-green-500 text-white'};btn.className='px-3 py-1 rounded-full text-sm '+c[m];}
+        else{var b={error_rate:'border-red-400 text-red-600 hover:bg-red-50',total:'border-gray-400 text-gray-600 hover:bg-gray-50',accuracy:'border-green-400 text-green-600 hover:bg-green-50'};btn.className='px-3 py-1 rounded-full text-sm border '+b[m];}
+    });renderKnowledgePoints();
+}
+
+function setFilterMode(mode){
+    currentFilterMode=mode;
+    ['all','danger','weak','good'].forEach(function(m){
+        var btn=document.getElementById('flt-'+m);
+        if(m===mode){var c={all:'bg-blue-500 text-white',danger:'bg-red-500 text-white',weak:'bg-yellow-500 text-white',good:'bg-green-500 text-white'};btn.className='px-3 py-1 rounded-full text-sm '+c[m];}
+        else{var b={all:'border-blue-400 text-blue-600 hover:bg-blue-50',danger:'border-red-400 text-red-600 hover:bg-red-50',weak:'border-yellow-400 text-yellow-600 hover:bg-yellow-50',good:'border-green-400 text-green-600 hover:bg-green-50'};btn.className='px-3 py-1 rounded-full text-sm border '+b[m];}
+    });renderKnowledgePoints();
+}
+
+function getFilteredAndSorted(){
+    if(!archiveData)return[];
+    var kps=archiveData.knowledge_points.slice();
+    var search=(document.getElementById('searchInput').value||'').trim().toLowerCase();
+    if(currentFilterMode==='danger')kps=kps.filter(function(k){return k.error_rate>=50;});
+    else if(currentFilterMode==='weak')kps=kps.filter(function(k){return k.error_rate>=30&&k.error_rate<50;});
+    else if(currentFilterMode==='good')kps=kps.filter(function(k){return k.error_rate<30;});
+    if(search)kps=kps.filter(function(k){return k.name.toLowerCase().indexOf(search)>=0;});
+    if(currentSort==='error_rate')kps.sort(function(a,b){return b.error_rate-a.error_rate;});
+    else if(currentSort==='total')kps.sort(function(a,b){return b.total-a.total;});
+    else if(currentSort==='accuracy')kps.sort(function(a,b){return a.error_rate-b.error_rate;});
+    return kps;
+}
+
+function renderKnowledgePoints(){
+    var container=document.getElementById('kpList');
+    var kps=getFilteredAndSorted();
+    if(kps.length===0){container.innerHTML='<div class="bg-white rounded-lg shadow p-8 text-center text-gray-400">没有符合条件的知识点</div>';return;}
+    container.innerHTML='';
+    kps.forEach(function(kp,idx){
+        var accColor=kp.accuracy>=80?'text-green-600':(kp.accuracy>=60?'text-yellow-600':'text-red-600');
+        var barColor=kp.accuracy>=80?'bg-green-500':(kp.accuracy>=60?'bg-yellow-500':'bg-red-500');
+        var borderColor=kp.error_rate>=50?'border-l-red-500':(kp.error_rate>=30?'border-l-yellow-500':'border-l-green-500');
+        var badge=kp.error_rate>=50?'<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold">高危</span>':(kp.error_rate>=30?'<span class="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-xs font-bold">薄弱</span>':'<span class="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold">掌握</span>');
+        var wrapper=document.createElement('div');
+        wrapper.className='bg-white rounded-lg shadow border-l-4 '+borderColor;
+        var header=document.createElement('div');
+        header.className='p-4 cursor-pointer hover:bg-gray-50 transition';
+        header.onclick=(function(i){return function(){toggleKp(i);};})(idx);
+        header.innerHTML='<div class="flex items-center justify-between mb-2"><div class="flex items-center space-x-2"><span class="text-sm text-gray-400 font-mono w-8">#'+(idx+1)+'</span>'+badge+'<span class="font-bold text-base">'+kp.name+'</span></div><div class="flex items-center space-x-4 text-sm"><span class="'+accColor+' font-bold">正确率 '+kp.accuracy+'%</span><span class="text-gray-500">'+kp.correct+'/'+kp.total+'</span><span class="text-gray-400 kp-toggle" data-idx="'+idx+'">展开 ▼</span></div></div><div class="flex items-center"><div class="flex-1 bg-gray-200 rounded-full h-2.5"><div class="'+barColor+' h-2.5 rounded-full transition-all" style="width:'+kp.accuracy+'%"></div></div><span class="text-xs text-gray-400 ml-3 w-24 text-right">错'+kp.wrong+' / 对'+kp.correct+'</span></div>';
+        wrapper.appendChild(header);
+        var panel=document.createElement('div');
+        panel.id='kp-panel-'+idx;
+        panel.className='hidden border-t';
+        panel.innerHTML=buildKpPanel(kp);
+        wrapper.appendChild(panel);
+        container.appendChild(wrapper);
+    });
+}
+
+function toggleKp(idx){
+    var panel=document.getElementById('kp-panel-'+idx);
+    var hint=document.querySelector('.kp-toggle[data-idx="'+idx+'"]');
+    if(!panel)return;
+    if(panel.classList.contains('hidden')){panel.classList.remove('hidden');if(hint)hint.textContent='收起 ▲';}
+    else{panel.classList.add('hidden');if(hint)hint.textContent='展开 ▼';}
+}
+
+function buildKpPanel(kp){
+    if(!kp.questions||kp.questions.length===0)return '<div class="p-4 text-gray-400 text-sm text-center">暂无题目记录</div>';
+    var html='<div class="p-4 space-y-3"><div class="text-sm text-gray-500 mb-2">共 '+kp.questions.length+' 道题目（按时间倒序）</div>';
+    kp.questions.forEach(function(q,qi){
+        var borderCls=q.is_correct?'border-l-green-500':'border-l-red-500';
+        var statusText=q.is_correct?'<span class="text-green-600 font-bold">✓ 正确</span>':'<span class="text-red-600 font-bold">✗ 错误</span>';
+        var diffColor=q.difficulty==='基础'?'text-green-600':(q.difficulty==='提高'?'text-yellow-600':'text-red-600');
+        var confMap={sure:'<span class="text-green-600">✓ 确定</span>',unsure:'<span class="text-yellow-600">? 模糊</span>',no:'<span class="text-red-600">✗ 不会</span>'};
+        var confLabel=confMap[q.confidence]||'<span class="text-gray-400">○ 未标记</span>';
+        var optsHtml='';
+        if(q.options){['A','B','C','D','E'].forEach(function(opt){
+            if(!q.options[opt])return;
+            var isUser=(q.user_answer||'').indexOf(opt)>=0;
+            var isCorrect=(q.correct_answer||'').indexOf(opt)>=0;
+            var cls='p-2 rounded mb-1 border text-sm ';
+            if(isCorrect)cls+='bg-green-50 border-green-300 text-green-800';
+            else if(isUser&&!isCorrect)cls+='bg-red-50 border-red-300 text-red-800';
+            else cls+='bg-gray-50 border-gray-200 text-gray-600';
+            optsHtml+='<div class="'+cls+'"><span class="font-bold mr-1">'+opt+'.</span>'+q.options[opt]+(isCorrect?' ✅':'')+(isUser&&!isCorrect?' ❌':'')+'</div>';
+        });}
+        var dateStr=q.answered_at?new Date(q.answered_at).toLocaleString('zh-CN'):'';
+        var srcLabel=q.session_type==='exam'?'整卷测试':(q.session_type==='detail_practice'?'细节练习':q.session_type||'');
+        html+='<div class="bg-gray-50 rounded-lg border-l-4 '+borderCls+' p-4">'+
+            '<div class="flex items-center justify-between mb-2 flex-wrap gap-1">'+
+            '<div class="flex items-center space-x-2">'+
+            '<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-bold">第'+(qi+1)+'题</span>'+
+            '<span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">'+(q.question_type||'A1')+'</span>'+
+            '<span class="'+diffColor+' text-xs font-medium">'+(q.difficulty||'')+'</span>'+
+            statusText+confLabel+'</div>'+
+            '<div class="text-xs text-gray-400">'+dateStr+(srcLabel?' · '+srcLabel:'')+'</div></div>'+
+            '<p class="text-sm font-medium leading-relaxed mb-2">'+(q.question||'')+'</p>'+
+            (optsHtml?'<div class="mb-2">'+optsHtml+'</div>':'')+
+            '<div class="flex items-center space-x-3 text-xs text-gray-500">'+
+            '<span>你的答案：<strong class="'+(q.is_correct?'text-green-600':'text-red-600')+'">'+(q.user_answer||'未作答')+'</strong></span>'+
+            '<span>正确答案：<strong class="text-green-600">'+(q.correct_answer||'')+'</strong></span>'+
+            (q.time_spent_seconds>0?'<span>用时：'+q.time_spent_seconds+'秒</span>':'')+
+            '</div>'+
+            (q.explanation?'<div class="bg-blue-50 border border-blue-200 rounded p-3 mt-2"><div class="font-medium text-blue-800 text-xs mb-1">📖 解析</div><p class="text-xs text-blue-700">'+q.explanation+'</p></div>':'')+
+            '</div>';
+    });
+    html+='</div>';
+    return html;
+}
+
+function exportArchiveMarkdown(){
+    var kps=getFilteredAndSorted();
+    if(kps.length===0){alert('没有可导出的数据');return;}
+    var totalQ=0,totalCorrect=0;
+    kps.forEach(function(kp){totalQ+=kp.total;totalCorrect+=kp.correct;});
+    var overallAcc=totalQ>0?Math.round(totalCorrect/totalQ*100):0;
+    var md='# 全局知识点归档报告\n\n';
+    md+='**导出时间**: '+new Date().toLocaleString('zh-CN')+'\n';
+    md+='**知识点数**: '+kps.length+' | **总题数**: '+totalQ+' | **整体正确率**: '+overallAcc+'%\n\n---\n\n';
+    kps.forEach(function(kp,ki){
+        var tag=kp.error_rate>=50?'🔴 高危':(kp.error_rate>=30?'🟡 薄弱':'🟢 掌握');
+        md+='## '+(ki+1)+'. '+kp.name+' '+tag+'\n\n';
+        md+='- 正确率: **'+kp.accuracy+'%** ('+kp.correct+'/'+kp.total+')\n';
+        md+='- 错误率: '+kp.error_rate+'% | 错题数: '+kp.wrong+'\n\n';
+        if(kp.questions&&kp.questions.length>0){
+            kp.questions.forEach(function(q,qi){
+                var status=q.is_correct?'✅':'❌';
+                var confMap={sure:'✓确定',unsure:'?模糊',no:'✗不会'};
+                md+='### 题'+(qi+1)+' '+status+' ['+(q.question_type||'A1')+'] ['+(q.difficulty||'')+']\n\n';
+                md+='**'+(q.question||'')+'**\n\n';
+                if(q.options){['A','B','C','D','E'].forEach(function(opt){
+                    if(!q.options[opt])return;
+                    var mark='';
+                    if((q.correct_answer||'').indexOf(opt)>=0)mark=' ✅';
+                    else if((q.user_answer||'').indexOf(opt)>=0&&(q.correct_answer||'').indexOf(opt)<0)mark=' ❌';
+                    md+=opt+'. '+q.options[opt]+mark+'\n';
+                });}
+                md+='\n- 你的答案: **'+(q.user_answer||'未作答')+'** | 正确答案: **'+(q.correct_answer||'')+'**\n';
+                md+='- 自信度: '+(confMap[q.confidence]||'○未标记')+'\n';
+                if(q.explanation)md+='\n> **解析**: '+q.explanation+'\n';
+                md+='\n';
+            });
+        }
+        md+='---\n\n';
+    });
+    navigator.clipboard.writeText(md).then(function(){
+        alert('✓ Markdown报告已复制到剪贴板！');
+    }).catch(function(){
+        var blob=new Blob([md],{type:'text/markdown;charset=utf-8;'});
+        var link=document.createElement('a');
+        link.href=URL.createObjectURL(blob);
+        link.download='知识点归档_'+new Date().toISOString().slice(0,10)+'.md';
+        link.click();
+    });
+}
+</script>
+{% endblock %}

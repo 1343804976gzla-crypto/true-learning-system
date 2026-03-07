@@ -1,0 +1,416 @@
+﻿{% extends "base.html" %}
+
+{% block title %}AI娴嬭瘯 - {{ concept.name }}{% endblock %}
+
+{% block content %}
+<!-- 椤甸潰澶撮儴 -->
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">浠〃鐩?/a>
+        <span class="mx-2">/</span>
+        <a href="/chapter/{{ concept.chapter_id }}" class="hover:text-blue-500">绔犺妭</a>
+        <span class="mx-2">/</span>
+        <span>娴嬭瘯</span>
+    </div>
+    
+    <h1 class="text-2xl font-bold">馃摑 AI鍑洪娴嬭瘯</h1>
+    <p class="text-gray-500">鐭ヨ瘑鐐? {{ concept.name }}</p>
+</div>
+
+<div class="max-w-3xl mx-auto">
+    <!-- 鍔犺浇鐘舵€?-->
+    <div id="loadingState" class="bg-white rounded-lg shadow p-12 text-center">
+        <div class="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+        <p class="text-gray-600">AI姝ｅ湪鐢熸垚棰樼洰...璇风◢鍊?/p>
+    </div>
+
+    <!-- 棰樼洰鍖哄煙 -->
+    <div id="quizArea" class="hidden">
+        <div class="bg-white rounded-lg shadow">
+            <!-- 杩涘害鏉?-->
+            <div class="px-6 py-3 bg-gray-50 border-b">
+                <div class="flex items-center">
+                    <span class="text-sm text-gray-500 mr-2">棰樼洰杩涘害:</span>
+                    <div class="flex-1 bg-gray-200 rounded-full h-2">
+                        <div id="progressBar" class="bg-blue-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6">
+                <!-- 棰樼洰鍐呭 -->
+                <div id="questionContent" class="mb-6">
+                    <h3 id="questionText" class="text-lg font-medium mb-4"></h3>
+                    
+                    <!-- 閫夐」 -->
+                    <div id="optionsArea" class="space-y-3">
+                        <!-- 鍔ㄦ€佺敓鎴?-->
+                    </div>
+                </div>
+
+                <!-- 淇″績搴﹂€夋嫨 -->
+                <div id="confidenceArea" class="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <p class="text-sm font-medium mb-3">浣犲杩欎釜绛旀鐨勪俊蹇冨害锛?/p>
+                    
+                    <div class="grid grid-cols-3 gap-3">
+                        <button type="button" data-confidence="sure" 
+                                class="confidence-btn p-3 border-2 rounded-lg text-center transition hover:border-green-500"
+                                onclick="selectConfidence('sure')">
+                            <div class="text-2xl mb-1">鉁?/div>
+                            <div class="font-medium">纭畾浼?/div>
+                            <div class="text-xs text-gray-500">寰堟湁鎶婃彙</div>
+                        </button>
+
+                        <button type="button" data-confidence="unsure"
+                                class="confidence-btn p-3 border-2 rounded-lg text-center transition hover:border-yellow-500"
+                                onclick="selectConfidence('unsure')">
+                            <div class="text-2xl mb-1">?</div>
+                            <div class="font-medium">鏈夌偣妯＄硦</div>
+                            <div class="text-xs text-gray-500">涓嶅お纭畾</div>
+                        </button>
+
+                        <button type="button" data-confidence="dont_know"
+                                class="confidence-btn p-3 border-2 rounded-lg text-center transition hover:border-red-500"
+                                onclick="selectConfidence('dont_know')">
+                            <div class="text-2xl mb-1">鉁?/div>
+                            <div class="font-medium">瀹屽叏涓嶄細</div>
+                            <div class="text-xs text-gray-500">闇€瑕佸涔?/div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 鎻愪氦鎸夐挳 -->
+                <div class="flex justify-between">
+                    <button id="skipBtn" onclick="skipQuestion()" 
+                            class="text-gray-500 hover:text-gray-700 px-4 py-2">
+                        璺宠繃姝ら
+                    </button>
+                    
+                    <button id="submitBtn" onclick="submitAnswer()" disabled
+                            class="bg-blue-500 text-white px-8 py-2 rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed">
+                        鎻愪氦绛旀
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 缁撴灉鍖哄煙 -->
+    <div id="resultArea" class="hidden">
+        <div class="bg-white rounded-lg shadow">
+            <div id="resultHeader" class="px-6 py-4 border-b">
+                <!-- 鍔ㄦ€佸～鍏?-->
+            </div>
+
+            <div class="p-6">
+                <!-- 棰樼洰鍥為【 -->
+                <div class="mb-6 p-4 bg-gray-50 rounded">
+                    <h4 class="font-medium mb-2">棰樼洰</h4>
+                    <p id="reviewQuestion" class="text-gray-700"></p>
+                    
+                    <div id="reviewOptions" class="mt-2 space-y-1">
+                        <!-- 鍔ㄦ€佸～鍏?-->
+                    </div>
+                </div>
+
+                <!-- AI瑙ｆ瀽 -->
+                <div class="mb-6">
+                    <h4 class="font-medium mb-2">瑙ｆ瀽</h4>
+                    <button id="revealExplanationBtn" type="button" onclick="revealSingleExplanation()" class="hidden w-full text-left bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 rounded-lg text-sm hover:bg-amber-100 transition mb-2">这题做错了，先自己想一下，点击查看解析</button>
+                    <p id="explanationText" class="text-gray-700 leading-relaxed"></p>
+                </div>
+
+                <!-- AI鍙嶉 -->
+                <div class="mb-6 p-4 bg-blue-50 rounded">
+                    <h4 class="font-medium mb-2 text-blue-800">AI鍙嶉</h4>
+                    <p id="feedbackText" class="text-blue-700"></p>
+                    
+                    <div id="weakPoints" class="mt-2">
+                        <!-- 鍔ㄦ€佸～鍏呰杽寮辩偣 -->
+                    </div>
+                </div>
+
+                <!-- 鎿嶄綔鎸夐挳 -->
+                <div class="flex justify-between">
+                    <a href="/chapter/{{ concept.chapter_id }}" class="text-gray-500 hover:text-gray-700 px-4 py-2">
+                        鈫?杩斿洖绔犺妭
+                    </a>
+                    
+                    <div class="space-x-3">
+                        <button onclick="generateVariation()" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 transition">
+                            鍙樺紡棰樻寫鎴?                        </button>
+                        
+                        <button onclick="nextQuestion()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition">
+                            涓嬩竴棰?鈫?                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const conceptId = '{{ concept.concept_id }}';
+    let currentQuiz = null;
+    let selectedAnswer = null;
+    let selectedConfidence = null;
+
+    // 椤甸潰鍔犺浇鏃剁敓鎴愰鐩?    window.onload = async function() {
+        await generateQuiz();
+    };
+
+    // 鐢熸垚棰樼洰
+    async function generateQuiz() {
+        try {
+            const response = await fetch(`/api/quiz/generate/${conceptId}`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) throw new Error('鐢熸垚棰樼洰澶辫触');
+            
+            currentQuiz = await response.json();
+            displayQuiz(currentQuiz);
+            
+        } catch (error) {
+            alert('鐢熸垚棰樼洰澶辫触: ' + error.message);
+        }
+    }
+
+    // 鏄剧ず棰樼洰
+    function displayQuiz(quiz) {
+        document.getElementById('loadingState').classList.add('hidden');
+        document.getElementById('quizArea').classList.remove('hidden');
+        
+        document.getElementById('questionText').textContent = quiz.question;
+        
+        // 鐢熸垚閫夐」
+        const optionsArea = document.getElementById('optionsArea');
+        optionsArea.innerHTML = '';
+        
+        const options = ['A', 'B', 'C', 'D'];
+        options.forEach(opt => {
+            const btn = document.createElement('button');
+            btn.className = 'w-full p-4 border-2 rounded-lg text-left transition hover:border-blue-500 option-btn';
+            btn.dataset.option = opt;
+            btn.innerHTML = `
+                <span class="font-bold mr-2">${opt}.</span>
+                <span>${quiz.options[opt]}</span>
+            `;
+            btn.onclick = () => selectOption(opt);
+            optionsArea.appendChild(btn);
+        });
+        
+        // 閲嶇疆鐘舵€?        selectedAnswer = null;
+        selectedConfidence = null;
+        updateSubmitButton();
+    }
+
+    // 閫夋嫨閫夐」
+    function selectOption(option) {
+        selectedAnswer = option;
+        
+        // 鏇存柊UI
+        document.querySelectorAll('.option-btn').forEach(btn => {
+            if (btn.dataset.option === option) {
+                btn.classList.add('border-blue-500', 'bg-blue-50');
+            } else {
+                btn.classList.remove('border-blue-500', 'bg-blue-50');
+            }
+        });
+        
+        updateSubmitButton();
+    }
+
+    // 閫夋嫨淇″績搴?    function selectConfidence(confidence) {
+        selectedConfidence = confidence;
+        
+        // 鏇存柊UI
+        document.querySelectorAll('.confidence-btn').forEach(btn => {
+            if (btn.dataset.confidence === confidence) {
+                btn.classList.add('border-green-500', 'bg-green-50');
+            } else {
+                btn.classList.remove('border-green-500', 'bg-green-50');
+            }
+        });
+        
+        updateSubmitButton();
+    }
+
+    // 鏇存柊鎻愪氦鎸夐挳鐘舵€?    function updateSubmitButton() {
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = !(selectedAnswer && selectedConfidence);
+    }
+
+    // 鎻愪氦绛旀
+    async function submitAnswer() {
+        if (!selectedAnswer || !selectedConfidence) return;
+        
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.disabled = true;
+        submitBtn.textContent = '鎵规敼涓?..';
+        
+        try {
+            const response = await fetch('/api/quiz/submit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    test_id: currentQuiz.id,
+                    user_answer: selectedAnswer,
+                    confidence: selectedConfidence
+                })
+            });
+            
+            if (!response.ok) throw new Error('鎻愪氦澶辫触');
+            
+            const result = await response.json();
+            displayResult(result);
+            
+        } catch (error) {
+            alert('鎻愪氦澶辫触: ' + error.message);
+            submitBtn.disabled = false;
+            submitBtn.textContent = '鎻愪氦绛旀';
+        }
+    }
+
+    // 鏄剧ず缁撴灉
+    function displayResult(result) {
+        document.getElementById('quizArea').classList.add('hidden');
+        document.getElementById('resultArea').classList.remove('hidden');
+        
+        // 缁撴灉澶撮儴
+        const header = document.getElementById('resultHeader');
+        const isCorrect = result.is_correct;
+        header.className = `px-6 py-4 border-b ${isCorrect ? 'bg-green-50' : 'bg-red-50'}`;
+        header.innerHTML = `
+            <div class="flex justify-between items-center">
+                <div>
+                    <span class="text-2xl mr-2">${isCorrect ? '鉁? : '鉂?}</span>
+                    <span class="text-lg font-semibold ${isCorrect ? 'text-green-800' : 'text-red-800'}">
+                        ${isCorrect ? '鍥炵瓟姝ｇ‘' : '鍥炵瓟閿欒'}
+                    </span>
+                </div>
+                <div class="text-right">
+                    <div class="text-3xl font-bold ${isCorrect ? 'text-green-600' : 'text-red-600'}">${result.score}鍒?/div>
+                    <div class="text-sm text-gray-500">淇″績搴? ${getConfidenceText(result.confidence)}</div>
+                </div>
+            </div>
+        `;
+        
+        // 棰樼洰鍥為【
+        document.getElementById('reviewQuestion').textContent = result.question;
+        const reviewOptions = document.getElementById('reviewOptions');
+        reviewOptions.innerHTML = '';
+        
+        const options = ['A', 'B', 'C', 'D'];
+        options.forEach(opt => {
+            const div = document.createElement('div');
+            let classes = 'p-2 rounded ';
+            
+            if (opt === result.correct_answer) {
+                classes += 'bg-green-100 text-green-800';
+            } else if (opt === result.user_answer && opt !== result.correct_answer) {
+                classes += 'bg-red-100 text-red-800';
+            } else {
+                classes += 'text-gray-600';
+            }
+            
+            div.className = classes;
+            div.innerHTML = `
+                <span class="font-bold mr-2">${opt}.</span>
+                <span>${result.options[opt]}</span>
+                ${opt === result.correct_answer ? ' 鉁? : ''}
+                ${opt === result.user_answer && opt !== result.correct_answer ? ' 鉂?(浣犵殑绛旀)' : ''}
+            `;
+            reviewOptions.appendChild(div);
+        });
+        
+        // 瑙ｆ瀽
+        const explanationText = document.getElementById('explanationText');
+        const revealBtn = document.getElementById('revealExplanationBtn');
+        const rawExplanation = (result.ai_explanation || '').trim();
+        const hasExplanation = rawExplanation.length > 0;
+        explanationText.textContent = hasExplanation ? rawExplanation : '暂无解析';
+        if (!hasExplanation || (result.is_correct && result.confidence === 'sure')) {
+            revealBtn.classList.add('hidden');
+            explanationText.classList.remove('hidden');
+        } else {
+            revealBtn.classList.remove('hidden');
+            explanationText.classList.add('hidden');
+        }
+        
+        // AI鍙嶉
+        document.getElementById('feedbackText').textContent = result.ai_feedback;
+        
+        // 钖勫急鐐?
+        const weakPointsDiv = document.getElementById('weakPoints');
+        if (result.weak_points && result.weak_points.length > 0) {
+            weakPointsDiv.innerHTML = `
+                <p class="text-sm font-medium mt-2">寤鸿鍏虫敞锛?/p>
+                <ul class="list-disc list-inside text-sm text-blue-600 mt-1">
+                    ${result.weak_points.map(wp => `<li>${wp}</li>`).join('')}
+                </ul>
+            `;
+        }
+    }
+
+    // 鑾峰彇淇″績搴︽枃鏈?    
+    function revealSingleExplanation() {
+        const explanationText = document.getElementById('explanationText');
+        const revealBtn = document.getElementById('revealExplanationBtn');
+        if (explanationText) explanationText.classList.remove('hidden');
+        if (revealBtn) revealBtn.classList.add('hidden');
+    }
+
+    function getConfidenceText(confidence) {
+        const map = {
+            'sure': '纭畾浼?,
+            'unsure': '鏈夌偣妯＄硦',
+            'dont_know': '瀹屽叏涓嶄細'
+        };
+        return map[confidence] || confidence;
+    }
+
+    // 璺宠繃棰樼洰
+    function skipQuestion() {
+        if (confirm('纭畾瑕佽烦杩囪繖閬撻鍚楋紵')) {
+            nextQuestion();
+        }
+    }
+
+    // 涓嬩竴棰?    async function nextQuestion() {
+        document.getElementById('resultArea').classList.add('hidden');
+        document.getElementById('loadingState').classList.remove('hidden');
+        
+        // 閲嶇疆鎸夐挳
+        const submitBtn = document.getElementById('submitBtn');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '鎻愪氦绛旀';
+        
+        await generateQuiz();
+    }
+
+    // 鐢熸垚鍙樺紡棰?    function generateVariation() {
+        window.location.href = `/variation/{{ concept.concept_id }}`;
+    }
+</script>
+
+<style>
+    .option-btn.selected {
+        border-color: #3b82f6;
+        background-color: #eff6ff;
+    }
+    
+    .confidence-btn.selected {
+        border-color: #22c55e;
+        background-color: #f0fdf4;
+    }
+</style>
+{% endblock %}
+
+
+
+

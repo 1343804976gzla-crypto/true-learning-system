@@ -1,0 +1,1109 @@
+﻿{% extends "base.html" %}
+
+{% block title %}鏁村嵎鑰冭瘯{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">浠〃鐩?/a>
+        <span class="mx-2">/</span>
+        <span>鏁村嵎鑰冭瘯</span>
+    </div>
+
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold">馃摑 鏁村嵎鑰冭瘯</h1>
+            <p class="text-gray-500">涓€娆℃€х敓鎴愭暣濂楄瘯鍗凤紝棰樼洰涔嬮棿鏈夎鲸鏋愩€佸姣斻€佸彉寮?/p>
+        </div>
+    </div>
+</div>
+
+<!-- 绗竴姝ワ細涓婁紶鍐呭 -->
+<div id="step1" class="bg-white rounded-lg shadow p-6 mb-6">
+    <h3 class="font-bold text-lg mb-4">馃搫 涓婁紶璁茶鍐呭</h3>
+
+    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+        <p class="text-sm text-yellow-700">
+            馃挕 <strong>鏁村嵎鍑洪璇存槑</strong>锛氱郴缁熶細涓€娆℃€х敓鎴愭暣濂楄瘯鍗凤紝鎵€鏈夐鐩熀浜庢暣娈靛唴瀹圭殑鐞嗚В銆?            棰樼洰涔嬮棿浼氭湁<strong>杈ㄦ瀽銆佸姣斻€佸彉寮?/strong>锛岄伩鍏嶅悓涓€瑙掑害閲嶅鑰冨療銆?        </p>
+    </div>
+
+    <textarea id="contentInput" class="w-full h-40 p-4 border rounded-lg"
+              placeholder="璇风矘璐磋璇惧唴瀹?..寤鸿鑷冲皯500瀛楋紝鍐呭瓒婂畬鏁达紝棰樼洰璐ㄩ噺瓒婇珮"></textarea>
+
+    <div class="mt-4 flex justify-between items-center">
+        <span class="text-sm text-gray-500" id="charCount">0 瀛楃</span>
+        <button type="button" id="nextBtn" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+            涓嬩竴姝?鈫?        </button>
+    </div>
+</div>
+
+<!-- 绗簩姝ワ細閫夋嫨棰樼洰鏁伴噺 -->
+<div id="step2" class="hidden bg-white rounded-lg shadow p-6 mb-6">
+    <h3 class="font-bold text-lg mb-4">閫夋嫨棰樼洰鏁伴噺</h3>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <label class="cursor-pointer">
+            <input type="radio" name="questionCount" value="5" class="hidden peer">
+            <div class="p-4 border-2 rounded-lg text-center peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-300 transition">
+                <div class="text-2xl font-bold">5</div>
+                <div class="text-sm text-gray-500">閬撻</div>
+                <div class="text-xs text-gray-400 mt-1">蹇€熸祴璇?/div>
+            </div>
+        </label>
+
+        <label class="cursor-pointer">
+            <input type="radio" name="questionCount" value="10" class="hidden peer" checked>
+            <div class="p-4 border-2 rounded-lg text-center peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-300 transition">
+                <div class="text-2xl font-bold text-blue-600">10</div>
+                <div class="text-sm text-gray-500">閬撻</div>
+                <div class="text-xs text-blue-500 mt-1">猸?鎺ㄨ崘</div>
+            </div>
+        </label>
+
+        <label class="cursor-pointer">
+            <input type="radio" name="questionCount" value="15" class="hidden peer">
+            <div class="p-4 border-2 rounded-lg text-center peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-300 transition">
+                <div class="text-2xl font-bold">15</div>
+                <div class="text-sm text-gray-500">閬撻</div>
+                <div class="text-xs text-gray-400 mt-1">缁煎悎缁冧範</div>
+            </div>
+        </label>
+
+        <label class="cursor-pointer">
+            <input type="radio" name="questionCount" value="20" class="hidden peer">
+            <div class="p-4 border-2 rounded-lg text-center peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-300 transition">
+                <div class="text-2xl font-bold">20</div>
+                <div class="text-sm text-gray-500">閬撻</div>
+                <div class="text-xs text-gray-400 mt-1">妯℃嫙鑰冭瘯</div>
+            </div>
+        </label>
+    </div>
+
+    <div class="bg-gray-50 p-4 rounded-lg mb-4">
+        <h4 class="font-medium mb-2">馃搳 鍑洪鐗圭偣</h4>
+        <ul class="text-sm text-gray-600 space-y-1">
+            <li>鉁?<strong>涓€娆℃€х敓鎴?/strong>锛氭暣濂楄瘯鍗蜂竴娆℃€х敓鎴愶紝閬垮厤閲嶅</li>
+            <li>鉁?<strong>棰樼洰杈ㄦ瀽</strong>锛氶鐩箣闂村舰鎴愬姣旓紝鑰冩煡鏄撴贩鐐?/li>
+            <li>鉁?<strong>鍙樺紡璁捐</strong>锛氬悓涓€鐭ヨ瘑鐐瑰瑙掑害鑰冨療</li>
+            <li>鉁?<strong>闅惧害鍒嗗竷</strong>锛氬熀纭€50% + 鎻愰珮30% + 闅鹃20%</li>
+        </ul>
+    </div>
+
+    <div class="flex justify-between">
+        <button type="button" id="prevBtn" class="text-gray-500 hover:text-gray-700">鈫?涓婁竴姝?/button>
+        <button type="button" id="generateBtn" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+            寮€濮嬬敓鎴愯瘯鍗?        </button>
+    </div>
+</div>
+
+<!-- 鍔犺浇鐘舵€?-->
+<div id="loadingState" class="hidden bg-white rounded-lg shadow p-12 text-center">
+    <div class="animate-spin w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+    <p class="text-gray-600 text-lg">DeepSeek姝ｅ湪鍒嗘瀽鏁存鍐呭...</p>
+    <p class="text-sm text-gray-400 mt-2">涓€娆℃€х敓鎴愭暣濂楄瘯鍗凤紝棰樼洰涔嬮棿鏈夎鲸鏋愩€佸姣斻€佸彉寮?/p>
+    <p class="text-sm text-gray-400">棰勮闇€瑕?0-90绉?/p>
+</div>
+
+<!-- 澶х翰纭寮圭獥 -->
+<div id="chapterConfirmModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6">
+        <h3 class="font-bold text-xl mb-2">馃搶 纭澶х翰褰掑睘</h3>
+        <p class="text-sm text-gray-500 mb-4">AI宸插垎鏋愯涔夊唴瀹癸紝璇风‘璁ゆ垨淇鎵€灞炵珷鑺傦紝纭繚閿欓鏈暟鎹噯纭綊绫汇€?/p>
+
+        <div id="aiPredictionInfo" class="bg-blue-50 rounded-lg p-3 mb-4 text-sm">
+            <span class="text-blue-600 font-medium">馃 AI棰勬祴锛?/span>
+            <span id="aiPredictionText" class="text-blue-800"></span>
+            <span id="aiConfidenceBadge" class="ml-2 px-2 py-0.5 rounded text-xs"></span>
+        </div>
+
+        <div class="space-y-3 mb-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">绉戠洰</label>
+                <select id="confirmBook" onchange="onBookChange()" class="w-full border rounded-lg px-3 py-2 text-sm">
+                    <option value="">鍔犺浇涓?..</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">绔犺妭</label>
+                <select id="confirmChapter" class="w-full border rounded-lg px-3 py-2 text-sm">
+                    <option value="">璇峰厛閫夋嫨绉戠洰</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex space-x-3">
+            <button onclick="confirmChapterAndStart()" class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600">鉁?纭骞跺紑濮嬬瓟棰?/button>
+            <button onclick="skipChapterConfirm()" class="px-4 py-3 text-gray-500 hover:text-gray-700 text-sm">璺宠繃</button>
+        </div>
+    </div>
+</div>
+
+<!-- 鑰冭瘯鍖哄煙 -->
+<div id="examArea" class="hidden space-y-6">
+    <!-- 璇曞嵎淇℃伅 -->
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="flex justify-between items-center">
+            <div>
+                <h2 id="paperTitle" class="font-bold text-xl">鍖诲鑰冪爺妯℃嫙璇曞嵎</h2>
+                <p id="paperSummary" class="text-sm text-gray-500 mt-1"></p>
+            </div>
+            <div class="text-right">
+                <div class="text-sm text-gray-500">鍓╀綑鏃堕棿</div>
+                <div id="timer" class="text-2xl font-mono font-bold text-blue-600">60:00</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 杩涘害鏉?-->
+    <div class="bg-white rounded-lg shadow p-4 sticky top-0 z-10">
+        <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center space-x-4">
+                <span class="text-sm text-gray-500">绛旈杩涘害</span>
+                <span class="text-xs text-gray-400">| 蹇嵎閿? 1-5閫夐€夐」 | Q纭畾 W妯＄硦 E涓嶄細 | 鈫戔啌鍒囨崲</span>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="progressDetail" class="text-sm"></span>
+                <span id="progressText" class="text-sm font-bold text-blue-600">0/10</span>
+            </div>
+        </div>
+        <div class="bg-gray-200 rounded-full h-3">
+            <div id="progressBar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <!-- 棰樼洰鍒楄〃 -->
+    <div id="questionsList" class="space-y-6"></div>
+
+    <!-- 鎻愪氦鎸夐挳 -->
+    <div class="bg-white rounded-lg shadow p-6 sticky bottom-4">
+        <div class="flex justify-between items-center">
+            <div class="text-sm text-gray-500">
+                宸茬瓟: <span id="answeredCount" class="font-bold text-blue-600 text-lg">0</span>/<span id="totalCount">10</span>
+            </div>
+            <button id="submitBtn" type="button" disabled
+                    class="bg-blue-500 text-white px-8 py-3 rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed text-lg font-medium">
+                鎻愪氦绛斿嵎
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 缁撴灉鍖哄煙 -->
+<div id="resultArea" class="hidden space-y-6">
+    <!-- 鎴愮哗鍗＄墖 -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-center">
+            <div class="text-6xl mb-4" id="scoreEmoji">馃帀</div>
+            <div class="text-5xl font-bold text-blue-600 mb-2" id="scoreDisplay">0</div>
+            <div class="text-gray-500">鍒?/div>
+            <div class="mt-4 flex justify-center space-x-6">
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-green-600" id="correctCount">0</div>
+                    <div class="text-sm text-gray-500">姝ｇ‘</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-red-600" id="wrongCount">0</div>
+                    <div class="text-sm text-gray-500">閿欒</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-purple-600" id="accuracy">0%</div>
+                    <div class="text-sm text-gray-500">姝ｇ‘鐜?/div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 闅惧害鍒嗘瀽 -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="font-bold text-lg mb-4">馃搳 闅惧害鍒嗘瀽</h3>
+        <div id="difficultyAnalysis" class="space-y-2"></div>
+    </div>
+
+    <!-- 绛旀瑙ｆ瀽 -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b">
+            <h3 class="font-bold text-lg">馃摉 绛旀涓庤В鏋?/h3>
+        </div>
+        <div id="answerDetails" class="divide-y"></div>
+    </div>
+
+    <!-- 鐭ヨ瘑鐐瑰垎鏋?-->
+    <div id="knowledgeAnalysis" class="bg-white rounded-lg shadow p-6">
+        <h3 class="font-bold text-lg mb-4">馃 鐭ヨ瘑鐐规帉鎻″垎鏋?/h3>
+        <div id="knowledgeList" class="space-y-3"></div>
+
+        <div class="mt-6 p-4 bg-yellow-50 rounded-lg">
+            <h4 class="font-medium text-yellow-800 mb-2">馃搶 涓嬩竴姝ュ缓璁?/h4>
+            <ul class="text-sm text-yellow-700 space-y-1">
+                <li>鈥?鐐瑰嚮涓嬫柟"缁嗚妭寮哄寲"杩涘叆缁嗗井鐭ヨ瘑鐐圭粌涔?/li>
+                <li>鈥?閽堝閿欓娑夊強鐨勭煡璇嗙偣杩涜閽堝鎬ц缁?/li>
+                <li>鈥?鎺屾彙鍚庡啀杩涜涓嬩竴绔犵殑鏁村嵎娴嬭瘯</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- 澶嶅埗鍋氶鎶ュ憡 -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex justify-between items-center">
+            <div>
+                <h3 class="font-bold text-xl">馃搵 鍋氶鎶ュ憡</h3>
+                <p class="text-gray-500 mt-1">澶嶅埗鏈娴嬮獙鐨勫畬鏁磋褰曪紝鏂逛究澶嶇洏鍒嗘瀽</p>
+            </div>
+            <button type="button" onclick="copyExamReport()" id="copyReportBtn" class="bg-indigo-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-indigo-600 transition flex items-center">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                </svg>
+                <span id="copyBtnText">涓€閿鍒舵姤鍛?/span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 缁嗗井鐭ヨ瘑鐐规祴璇曞叆鍙?-->
+    <div class="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg shadow p-6 text-white">
+        <div class="flex justify-between items-center">
+            <div>
+                <h3 class="font-bold text-xl">馃幆 杩涘叆缁嗚妭寮哄寲</h3>
+                <p class="text-blue-100 mt-1">閽堝钖勫急鐭ヨ瘑鐐硅繘琛岀粏寰粌涔?/p>
+            </div>
+            <button type="button" onclick="goToDetailPractice()" class="bg-white text-blue-600 px-6 py-3 rounded-lg font-bold hover:bg-blue-50 transition">
+                寮€濮嬬粏鑺傜粌涔?鈫?            </button>
+        </div>
+    </div>
+
+    <div class="flex justify-center space-x-4">
+        <a href="/" class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600">鈫?杩斿洖棣栭〉</a>
+        <button type="button" onclick="location.reload()" class="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600">鍐嶅仛涓€濂楁暣鍗?/button>
+        <button type="button" onclick="endStudySession()" class="bg-emerald-600 text-white px-6 py-3 rounded-lg hover:bg-emerald-700 font-bold">鉁?缁撴潫瀛︿範</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    console.log('JavaScript 寮€濮嬪姞杞?);
+
+    const chapterId = '{{ chapter_id }}';
+    console.log('chapterId:', chapterId);
+
+    let uploadedContent = '';
+    let numQuestions = 10;
+    let examId = null;
+    let questions = [];
+    let userAnswers = {};
+    let userConfidence = {};
+    let timerInterval = null;
+    let currentQuestion = 0;
+    let trackingSessionId = null;  // 瀛︿範杞ㄨ抗浼氳瘽ID
+    let chaptersGrouped = {};      // 绔犺妭鐩綍缂撳瓨
+    let pendingExamData = null;    // 寰呯‘璁ょ殑璇曞嵎鏁版嵁
+    let confirmedChapterId = chapterId; // 纭鍚庣殑绔犺妭ID
+    function buildMaskedExplanationHtml(explanation, isCorrect, confidence, revealId, keyPoint) {
+        const text = explanation || '暂无解析';
+        const keyPointHtml = '<div class="mt-2 text-sm text-blue-600"><span class="font-medium">核心考点：</span>' + (keyPoint || '未标注') + '</div>';
+
+        if (!explanation || (isCorrect && confidence === 'sure')) {
+            return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div>' +
+                '<p class="text-gray-600 text-sm">' + text + '</p>' +
+                keyPointHtml + '</div>';
+        }
+
+        return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div>' +
+            '<button type="button" onclick="revealMaskedExplanation(\'' + revealId + '\', this)" ' +
+            'class="w-full text-left bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 rounded-lg text-sm hover:bg-amber-100 transition">' +
+            '这题做错了，先自己想一下，点击查看解析</button>' +
+            '<p id="' + revealId + '" class="text-gray-600 text-sm mt-3 hidden">' + text + '</p>' +
+            keyPointHtml + '</div>';
+    }
+
+    function revealMaskedExplanation(revealId, triggerBtn) {
+        const explanationEl = document.getElementById(revealId);
+        if (explanationEl) explanationEl.classList.remove('hidden');
+        if (triggerBtn) triggerBtn.classList.add('hidden');
+    }
+
+    // 椤甸潰鍔犺浇鏃惰幏鍙栫珷鑺傜洰褰?    (async function loadChapterCatalog() {
+        try {
+            const r = await fetch('/api/chapters/grouped');
+            chaptersGrouped = await r.json();
+            console.log('绔犺妭鐩綍宸插姞杞? 绉戠洰鏁?', Object.keys(chaptersGrouped).length);
+        } catch(e) {
+            console.error('鍔犺浇绔犺妭鐩綍澶辫触:', e);
+        }
+    })();
+
+    // 瀛楃璁℃暟
+    document.getElementById('contentInput').addEventListener('input', function() {
+        document.getElementById('charCount').textContent = this.value.length + ' 瀛楃';
+    });
+
+    // 涓嬩竴姝ユ寜閽?    document.getElementById('nextBtn').addEventListener('click', function() {
+        const content = document.getElementById('contentInput').value.trim();
+        if (content.length < 100) {
+            alert('璇疯嚦灏戣緭鍏?00瀛楃殑鍐呭锛屽綋鍓嶅彧鏈?' + content.length + ' 瀛?);
+            return;
+        }
+        uploadedContent = content;
+        document.getElementById('step1').classList.add('hidden');
+        document.getElementById('step2').classList.remove('hidden');
+    });
+
+    // 涓婁竴姝ユ寜閽?    document.getElementById('prevBtn').addEventListener('click', function() {
+        document.getElementById('step2').classList.add('hidden');
+        document.getElementById('step1').classList.remove('hidden');
+    });
+
+    // 鐢熸垚璇曞嵎
+    document.getElementById('generateBtn').addEventListener('click', async function() {
+        const selected = document.querySelector('input[name="questionCount"]:checked');
+        numQuestions = parseInt(selected ? selected.value : 10);
+
+        document.getElementById('step2').classList.add('hidden');
+        document.getElementById('loadingState').classList.remove('hidden');
+
+        try {
+            const response = await fetch('/api/quiz/batch/generate/' + chapterId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uploaded_content: uploadedContent,
+                    num_questions: numQuestions
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '鐢熸垚澶辫触');
+            }
+
+            const data = await response.json();
+            console.log('鐢熸垚鎴愬姛, 棰樼洰鏁伴噺:', data.questions.length);
+
+            examId = data.exam_id;
+            questions = data.questions;
+            uploadedContent = document.getElementById('contentInput').value.trim();
+
+            // 绔嬪嵆淇濆瓨鏁版嵁鍒?sessionStorage锛堝寘鎷煡璇嗙偣锛?            const tempData = {
+                chapterId: confirmedChapterId || chapterId,
+                uploadedContent: uploadedContent,
+                questions: questions,
+                knowledgePoints: data.knowledge_points || [],
+                paperTitle: data.paper_title || ''
+            };
+            try {
+                sessionStorage.setItem('examTempData', JSON.stringify(tempData));
+                console.log('宸蹭繚瀛樹复鏃舵暟鎹? questions:', questions.length);
+            } catch(e) {
+                console.log('sessionStorage淇濆瓨澶辫触:', e);
+            }
+
+            // 淇濆瓨寰呯‘璁ゆ暟鎹紝寮瑰嚭澶х翰纭寮圭獥
+            pendingExamData = data;
+            showChapterConfirmModal(data);
+
+        } catch (error) {
+            alert('鐢熸垚璇曞嵎澶辫触: ' + error.message);
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+        }
+    });
+
+    // 閿洏蹇嵎閿?    document.addEventListener('keydown', function(e) {
+        const examArea = document.getElementById('examArea');
+        if (!examArea || examArea.classList.contains('hidden')) return;
+
+        const key = e.key;
+
+        // 鏁板瓧閿?1-5 閫夋嫨閫夐」
+        if (key >= '1' && key <= '5') {
+            const optIndex = parseInt(key) - 1;
+            const options = ['A', 'B', 'C', 'D', 'E'];
+            const opt = options[optIndex];
+
+            if (questions[currentQuestion]) {
+                const input = document.querySelector('input[name="q' + currentQuestion + '"][value="' + opt + '"]');
+                if (input) input.checked = true;
+                const isMultiple = questions[currentQuestion].type === 'X';
+                selectOption(currentQuestion, opt, isMultiple);
+            }
+            e.preventDefault();
+            return;
+        }
+
+        const keyLower = key.toLowerCase();
+
+        // 鑷俊搴﹀揩鎹烽敭
+        if (keyLower === 'q') { setConfidence(currentQuestion, 'sure'); e.preventDefault(); }
+        if (keyLower === 'w') { setConfidence(currentQuestion, 'unsure'); e.preventDefault(); }
+        if (keyLower === 'e') { setConfidence(currentQuestion, 'no'); e.preventDefault(); }
+
+        // 涓婁笅绠ご鍒囨崲棰樼洰
+        if (key === 'ArrowDown' || key === 'Tab') {
+            e.preventDefault();
+            if (currentQuestion < numQuestions - 1) {
+                currentQuestion++;
+                scrollToQuestion(currentQuestion);
+            }
+        }
+        if (key === 'ArrowUp') {
+            e.preventDefault();
+            if (currentQuestion > 0) {
+                currentQuestion--;
+                scrollToQuestion(currentQuestion);
+            }
+        }
+
+        // Enter 鎻愪氦
+        if (key === 'Enter') {
+            const answered = Object.keys(userAnswers).length;
+            if (answered >= numQuestions) submitExam();
+            e.preventDefault();
+        }
+    });
+
+    // ==========================================
+    // 澶х翰纭寮圭獥閫昏緫
+    // ==========================================
+
+    function showChapterConfirmModal(data) {
+        document.getElementById('loadingState').classList.add('hidden');
+        const modal = document.getElementById('chapterConfirmModal');
+        const prediction = data.chapter_prediction;
+
+        // 濉厖绉戠洰涓嬫媺
+        const bookSelect = document.getElementById('confirmBook');
+        bookSelect.innerHTML = '<option value="">璇烽€夋嫨绉戠洰</option>';
+        for (const book in chaptersGrouped) {
+            const opt = document.createElement('option');
+            opt.value = book;
+            opt.textContent = book;
+            bookSelect.appendChild(opt);
+        }
+
+        // 濡傛灉AI鏈夐娴嬶紝棰勯€?        if (prediction && prediction.book) {
+            bookSelect.value = prediction.book;
+            onBookChange(); // 瑙﹀彂绔犺妭鍒楄〃濉厖
+
+            // 棰勯€夌珷鑺?            if (prediction.chapter_id) {
+                setTimeout(function() {
+                    document.getElementById('confirmChapter').value = prediction.chapter_id;
+                }, 50);
+            }
+
+            // 鏄剧ずAI棰勬祴淇℃伅
+            document.getElementById('aiPredictionText').textContent =
+                prediction.book + ' > ' + (prediction.chapter_title || '');
+            const badge = document.getElementById('aiConfidenceBadge');
+            const conf = prediction.confidence || 'medium';
+            badge.textContent = conf === 'high' ? '楂樼疆淇? : (conf === 'medium' ? '涓疆淇? : '浣庣疆淇?);
+            badge.className = 'ml-2 px-2 py-0.5 rounded text-xs ' +
+                (conf === 'high' ? 'bg-green-100 text-green-700' :
+                 conf === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                 'bg-red-100 text-red-700');
+            document.getElementById('aiPredictionInfo').classList.remove('hidden');
+        } else {
+            document.getElementById('aiPredictionInfo').classList.add('hidden');
+        }
+
+        modal.classList.remove('hidden');
+    }
+
+    function onBookChange() {
+        const book = document.getElementById('confirmBook').value;
+        const chapterSelect = document.getElementById('confirmChapter');
+        chapterSelect.innerHTML = '<option value="">璇烽€夋嫨绔犺妭</option>';
+
+        if (!book || !chaptersGrouped[book]) return;
+
+        chaptersGrouped[book].forEach(function(ch) {
+            const opt = document.createElement('option');
+            opt.value = ch.id;
+            opt.textContent = ch.number + '. ' + ch.title;
+            chapterSelect.appendChild(opt);
+        });
+    }
+
+    async function confirmChapterAndStart() {
+        const selectedChapter = document.getElementById('confirmChapter').value;
+        if (!selectedChapter) {
+            alert('璇烽€夋嫨绔犺妭');
+            return;
+        }
+
+        // 璋冪敤鍚庣纭鎺ュ彛
+        try {
+            await fetch('/api/quiz/batch/confirm-chapter/' + examId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chapter_id: selectedChapter })
+            });
+            confirmedChapterId = selectedChapter;
+            console.log('[Chapter] 宸茬‘璁ょ珷鑺?', selectedChapter);
+        } catch(e) {
+            console.error('纭绔犺妭澶辫触:', e);
+        }
+
+        // 鍏抽棴寮圭獥锛屽紑濮嬬瓟棰?        document.getElementById('chapterConfirmModal').classList.add('hidden');
+        proceedToExam();
+    }
+
+    function skipChapterConfirm() {
+        confirmedChapterId = chapterId; // 淇濇寔鍘熷鍊?        document.getElementById('chapterConfirmModal').classList.add('hidden');
+        proceedToExam();
+    }
+
+    function proceedToExam() {
+        if (!pendingExamData) return;
+
+        // 鏇存柊sessionStorage涓殑chapterId涓虹‘璁ゅ悗鐨勫€?        try {
+            const tempData = JSON.parse(sessionStorage.getItem('examTempData') || '{}');
+            tempData.chapterId = confirmedChapterId || chapterId;
+            sessionStorage.setItem('examTempData', JSON.stringify(tempData));
+        } catch(e) {}
+
+        displayExam(pendingExamData);
+        startTimer();
+        startTrackingSession(pendingExamData.paper_title);
+        pendingExamData = null;
+    }
+
+    function scrollToQuestion(idx) {
+        const questionEl = document.getElementById('question-' + idx);
+        if (questionEl) {
+            questionEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
+    function displayExam(data) {
+        document.getElementById('loadingState').classList.add('hidden');
+        document.getElementById('examArea').classList.remove('hidden');
+        currentQuestion = 0;
+
+        document.getElementById('paperTitle').textContent = data.paper_title;
+        document.getElementById('paperSummary').textContent = data.summary.coverage;
+        document.getElementById('totalCount').textContent = numQuestions;
+        document.getElementById('progressText').textContent = '0/' + numQuestions;
+
+        const dist = data.difficulty_distribution;
+        document.getElementById('progressDetail').innerHTML =
+            '<span class="text-green-600">鍩虹' + dist['鍩虹'] + '</span>/' +
+            '<span class="text-yellow-600">鎻愰珮' + dist['鎻愰珮'] + '</span>/' +
+            '<span class="text-red-600">闅鹃' + dist['闅鹃'] + '</span>';
+
+        const container = document.getElementById('questionsList');
+        container.innerHTML = '';
+
+        questions.forEach(function(q, index) {
+            const div = document.createElement('div');
+            div.className = 'bg-white rounded-lg shadow p-6';
+            div.id = 'question-' + index;
+
+            const difficultyColor = q.difficulty === '鍩虹' ? 'text-green-600' :
+                                   (q.difficulty === '鎻愰珮' ? 'text-yellow-600' : 'text-red-600');
+
+            let optionsHtml = '';
+            const isMultiple = q.type === 'X';
+            const inputType = isMultiple ? 'checkbox' : 'radio';
+
+            ['A', 'B', 'C', 'D', 'E'].forEach(function(opt) {
+                optionsHtml +=
+                    '<label class="flex items-start p-3 border-2 rounded-lg cursor-pointer hover:border-blue-500 transition option-label" data-idx="' + index + '" data-opt="' + opt + '">' +
+                    '<input type="' + inputType + '" name="q' + index + '" value="' + opt + '" class="mt-1 mr-3"' +
+                    ' onchange="selectOption(' + index + ', \'' + opt + '\', ' + isMultiple + ')">' +
+                    '<span class="font-bold mr-2">' + opt + '.</span>' +
+                    '<span>' + (q.options[opt] || '閫夐」' + opt) + '</span>' +
+                    '</label>';
+            });
+
+            div.innerHTML =
+                '<div class="flex items-center justify-between mb-4">' +
+                '<div class="flex items-center space-x-2">' +
+                '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-bold">绗? + (index + 1) + '棰?/span>' +
+                '<span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-sm">' + q.type + (q.type === 'X' ? '(澶氶€?' : '') + '</span>' +
+                '<span class="' + difficultyColor + ' text-sm font-medium">' + q.difficulty + '</span>' +
+                '</div>' +
+                '<span id="status-' + index + '" class="text-gray-300 text-xl">鈼?/span>' +
+                '</div>' +
+                '<div class="mb-4"><p class="text-lg font-medium leading-relaxed">' + q.question + '</p></div>' +
+                '<div class="space-y-2">' + optionsHtml + '</div>' +
+                '<div class="mt-4 pt-4 border-t border-gray-100">' +
+                '<div class="flex items-center justify-between">' +
+                '<span class="text-sm text-gray-500">鑷垜璇勪及锛?/span>' +
+                '<div class="flex space-x-2">' +
+                '<button type="button" onclick="setConfidence(' + index + ', \'sure\')" id="btn-sure-' + index + '" class="px-3 py-1 rounded-full text-sm border-2 border-green-500 text-green-600 hover:bg-green-500 hover:text-white transition">鉁?纭畾</button>' +
+                '<button type="button" onclick="setConfidence(' + index + ', \'unsure\')" id="btn-unsure-' + index + '" class="px-3 py-1 rounded-full text-sm border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white transition">? 妯＄硦</button>' +
+                '<button type="button" onclick="setConfidence(' + index + ', \'no\')" id="btn-no-' + index + '" class="px-3 py-1 rounded-full text-sm border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white transition">鉁?涓嶄細</button>' +
+                '</div></div><div id="confidence-display-' + index + '" class="mt-2 text-sm text-center hidden"></div></div>';
+
+            container.appendChild(div);
+        });
+
+        updateProgress();
+    }
+
+    function setConfidence(idx, level) {
+        userConfidence[idx] = level;
+
+        const btnSure = document.getElementById('btn-sure-' + idx);
+        const btnUnsure = document.getElementById('btn-unsure-' + idx);
+        const btnNo = document.getElementById('btn-no-' + idx);
+        const display = document.getElementById('confidence-display-' + idx);
+
+        btnSure.classList.remove('bg-green-500', 'text-white');
+        btnUnsure.classList.remove('bg-yellow-500', 'text-white');
+        btnNo.classList.remove('bg-red-500', 'text-white');
+
+        if (level === 'sure') {
+            btnSure.classList.add('bg-green-500', 'text-white');
+            display.textContent = '鉁?鎴戠‘瀹氳繖閬撻浼氬仛';
+            display.className = 'mt-2 text-sm text-center text-green-600 font-medium';
+        } else if (level === 'unsure') {
+            btnUnsure.classList.add('bg-yellow-500', 'text-white');
+            display.textContent = '? 杩欓亾棰樻湁鐐规ā绯?;
+            display.className = 'mt-2 text-sm text-center text-yellow-600 font-medium';
+        } else if (level === 'no') {
+            btnNo.classList.add('bg-red-500', 'text-white');
+            display.textContent = '鉁?杩欓亾棰樺畬鍏ㄤ笉浼?;
+            display.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+        }
+        display.classList.remove('hidden');
+    }
+
+    function selectOption(idx, opt, isMultiple) {
+        if (isMultiple) {
+            if (!userAnswers[idx]) userAnswers[idx] = [];
+            const checkboxes = document.querySelectorAll('input[name="q' + idx + '"]');
+            const selected = [];
+            checkboxes.forEach(function(cb) {
+                if (cb.checked) {
+                    selected.push(cb.value);
+                    const label = cb.closest('label');
+                    if (label) label.classList.add('border-blue-500', 'bg-blue-50');
+                } else {
+                    const label = cb.closest('label');
+                    if (label) label.classList.remove('border-blue-500', 'bg-blue-50');
+                }
+            });
+            userAnswers[idx] = selected.sort().join('');
+        } else {
+            userAnswers[idx] = opt;
+            document.querySelectorAll('[data-idx="' + idx + '"]').forEach(function(label) {
+                if (label.dataset.opt === opt) {
+                    label.classList.add('border-blue-500', 'bg-blue-50');
+                } else {
+                    label.classList.remove('border-blue-500', 'bg-blue-50');
+                }
+            });
+        }
+
+        const statusEl = document.getElementById('status-' + idx);
+        if (statusEl) {
+            statusEl.textContent = '鉁?;
+            statusEl.className = 'text-green-500 text-xl font-bold';
+        }
+
+        updateProgress();
+        
+        // 璁板綍绛旈鍒板涔犺建杩?        recordQuestionAnswer(idx);
+    }
+
+    function updateProgress() {
+        const answered = Object.keys(userAnswers).length;
+        const progress = (answered / numQuestions) * 100;
+
+        document.getElementById('progressText').textContent = answered + '/' + numQuestions;
+        document.getElementById('progressBar').style.width = progress + '%';
+        document.getElementById('answeredCount').textContent = answered;
+        document.getElementById('submitBtn').disabled = answered < numQuestions;
+    }
+
+    function startTimer() {
+        let seconds = numQuestions * 6 * 60;
+        timerInterval = setInterval(function() {
+            seconds--;
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            document.getElementById('timer').textContent =
+                mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
+
+            if (seconds <= 0) {
+                clearInterval(timerInterval);
+                submitExam();
+            }
+        }, 1000);
+    }
+
+    // 鎻愪氦鎸夐挳
+    document.getElementById('submitBtn').addEventListener('click', submitExam);
+
+    async function submitExam() {
+        if (Object.keys(userAnswers).length < numQuestions) {
+            if (!confirm('杩樻湁棰樼洰鏈綔绛旓紝纭畾瑕佹彁浜ゅ悧锛?)) return;
+        }
+
+        clearInterval(timerInterval);
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('submitBtn').textContent = '鎵规敼涓?..';
+
+        try {
+            const answers = [];
+            for (let i = 0; i < numQuestions; i++) {
+                answers.push(userAnswers[i] || '');
+            }
+
+            const submitData = {
+                answers: answers,
+                confidence: userConfidence
+            };
+
+            const response = await fetch('/api/quiz/batch/submit/' + examId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(submitData)
+            });
+
+            if (!response.ok) throw new Error('鎻愪氦澶辫触');
+
+            const result = await response.json();
+            displayResults(result);
+
+        } catch (error) {
+            alert('鎻愪氦澶辫触: ' + error.message);
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('submitBtn').textContent = '鎻愪氦绛斿嵎';
+        }
+    }
+
+    function displayResults(result) {
+        // 淇濆瓨缁撴灉渚涘鍒舵姤鍛婁娇鐢?        lastExamResult = result;
+        
+        document.getElementById('examArea').classList.add('hidden');
+        document.getElementById('resultArea').classList.remove('hidden');
+
+        document.getElementById('scoreDisplay').textContent = result.score;
+        document.getElementById('correctCount').textContent = result.correct_count;
+        document.getElementById('wrongCount').textContent = result.wrong_count;
+        document.getElementById('accuracy').textContent =
+            Math.round(result.correct_count / result.total * 100) + '%';
+
+        const emoji = result.score >= 80 ? '馃帀' : result.score >= 60 ? '馃憤' : '馃挭';
+        document.getElementById('scoreEmoji').textContent = emoji;
+
+        // 闅惧害鍒嗘瀽
+        const diffDiv = document.getElementById('difficultyAnalysis');
+        const wrongByDiff = result.wrong_by_difficulty;
+        diffDiv.innerHTML =
+            '<div class="flex justify-between text-sm">' +
+            '<span class="text-green-600">鍩虹棰橀敊璇? ' + (wrongByDiff['鍩虹'] || 0) + '</span>' +
+            '<span class="text-yellow-600">鎻愰珮棰橀敊璇? ' + (wrongByDiff['鎻愰珮'] || 0) + '</span>' +
+            '<span class="text-red-600">闅鹃閿欒: ' + (wrongByDiff['闅鹃'] || 0) + '</span></div>';
+
+        // 鑷俊搴﹀垎鏋?        if (result.confidence_analysis) {
+            const conf = result.confidence_analysis;
+            const confHtml =
+                '<div class="mt-4 pt-4 border-t"><h4 class="font-medium mb-2">馃幆 鑷垜璇勪及鍒嗘瀽</h4>' +
+                '<div class="grid grid-cols-3 gap-2 text-center text-sm">' +
+                '<div class="p-2 bg-green-50 rounded"><div class="font-bold text-green-600">' + (conf.sure || 0) + '</div><div class="text-green-600">纭畾</div></div>' +
+                '<div class="p-2 bg-yellow-50 rounded"><div class="font-bold text-yellow-600">' + (conf.unsure || 0) + '</div><div class="text-yellow-600">妯＄硦</div></div>' +
+                '<div class="p-2 bg-red-50 rounded"><div class="font-bold text-red-600">' + (conf.no || 0) + '</div><div class="text-red-600">涓嶄細</div></div></div>' +
+                '<div class="mt-2 text-xs text-gray-500 text-center">姝ｇ‘鐜? 纭畾' + (conf.sure_rate || 0) + '% | 妯＄硦' + (conf.unsure_rate || 0) + '% | 涓嶄細' + (conf.no_rate || 0) + '%</div></div>';
+            diffDiv.innerHTML += confHtml;
+        }
+
+        // 璇︾粏瑙ｆ瀽
+        const container = document.getElementById('answerDetails');
+        container.innerHTML = '';
+
+        result.details.forEach(function(d, i) {
+            const q = questions[i];
+            const div = document.createElement('div');
+            div.className = 'p-6';
+            const explanationId = 'batchExplanation-' + i;
+            const userAnswer = d.user_answer || '';
+            const correctAnswer = d.correct_answer || '';
+
+            let optionsHtml = '';
+            ['A', 'B', 'C', 'D', 'E'].forEach(function(opt) {
+                const isSelected = userAnswer.includes(opt);
+                const isCorrect = correctAnswer.includes(opt);
+                let cls = 'p-2 rounded mb-1 ';
+                if (isCorrect) cls += 'bg-green-100 text-green-800 border border-green-300';
+                else if (isSelected && !isCorrect) cls += 'bg-red-100 text-red-800 border border-red-300';
+                else cls += 'text-gray-600';
+
+                optionsHtml += '<div class="' + cls + '"><span class="font-bold">' + opt + '.</span> ' + q.options[opt] +
+                    (isCorrect ? ' 鉁? : '') +
+                    (isSelected && !isCorrect ? ' 鉂?(浣犵殑绛旀)' : '') + '</div>';
+            });
+
+            div.innerHTML =
+                '<div class="flex items-center justify-between mb-3"><div class="flex items-center space-x-2">' +
+                '<span class="font-bold">绗? + (i + 1) + '棰?/span>' +
+                '<span class="' + (d.is_correct ? 'text-green-600' : 'text-red-600') + ' font-bold">' +
+                (d.is_correct ? '鉁?姝ｇ‘' : '鉁?閿欒') + '</span></div>' +
+                '<span class="text-sm text-gray-500">' + q.type + (q.type === 'X' ? '(澶氶€?' : '') + ' 路 ' + d.difficulty + '</span></div>' +
+                '<p class="mb-3 text-gray-800">' + q.question + '</p>' +
+                '<div class="mb-4">' + optionsHtml + '</div>' +
+                buildMaskedExplanationHtml(d.explanation, d.is_correct, d.confidence, explanationId, d.key_point);
+
+            container.appendChild(div);
+        });
+
+        // 鐭ヨ瘑鐐瑰垎鏋?        generateKnowledgeAnalysis(result);
+        
+        // 瀹屾垚瀛︿範杞ㄨ抗璁板綍
+        completeTrackingSession(result.score, result.total);
+    }
+
+    function generateKnowledgeAnalysis(result) {
+        const container = document.getElementById('knowledgeList');
+        const knowledgeMap = {};
+
+        result.details.forEach(function(d, i) {
+            const keyPoint = d.key_point || '鑰冪偣' + (i + 1);
+            if (!knowledgeMap[keyPoint]) {
+                knowledgeMap[keyPoint] = { correct: 0, wrong: 0, difficulty: d.difficulty };
+            }
+            if (d.is_correct) knowledgeMap[keyPoint].correct++;
+            else knowledgeMap[keyPoint].wrong++;
+        });
+
+        const knowledgeList = Object.entries(knowledgeMap).map(function([point, data]) {
+            return {
+                point: point,
+                correct: data.correct,
+                wrong: data.wrong,
+                difficulty: data.difficulty,
+                status: data.wrong === 0 ? 'good' : (data.correct > data.wrong ? 'partial' : 'weak')
+            };
+        });
+
+        let html = '';
+
+        const weakPoints = knowledgeList.filter(function(k) { return k.status === 'weak' || k.status === 'partial'; });
+        if (weakPoints.length > 0) {
+            html += '<div class="mb-4"><h4 class="font-medium text-red-600 mb-2">鉂?闇€瑕佸姞寮虹殑鐭ヨ瘑鐐癸細</h4><div class="space-y-2">';
+            weakPoints.forEach(function(k) {
+                html += '<div class="flex justify-between items-center p-2 bg-red-50 rounded"><span class="text-sm">' + k.point + '</span><span class="text-xs text-red-600">' + k.wrong + '閿?' + (k.correct + k.wrong) + '棰?/span></div>';
+            });
+            html += '</div></div>';
+        }
+
+        const goodPoints = knowledgeList.filter(function(k) { return k.status === 'good'; });
+        if (goodPoints.length > 0) {
+            html += '<div><h4 class="font-medium text-green-600 mb-2">鉁?宸叉帉鎻＄殑鐭ヨ瘑鐐癸細</h4><div class="flex flex-wrap gap-2">';
+            goodPoints.forEach(function(k) {
+                html += '<span class="px-2 py-1 bg-green-100 text-green-700 rounded text-sm">' + k.point + '</span>';
+            });
+            html += '</div></div>';
+        }
+
+        if (knowledgeList.length === 0) {
+            html = '<div class="text-gray-500 text-sm">鏆傛棤鐭ヨ瘑鐐规暟鎹?/div>';
+        }
+
+        container.innerHTML = html;
+    }
+
+    function goToDetailPractice() {
+        // 鐩存帴浣跨敤examId璺宠浆锛屼笉闇€瑕佷粠storage璇诲彇
+        if (!examId) {
+            alert('璇峰厛瀹屾垚涓€濂楁暣鍗锋祴璇?);
+            return;
+        }
+
+        const score = document.getElementById('scoreDisplay').textContent;
+        // 鍙紶閫抏xamId锛岀敱鏈嶅姟鍣ㄦ彁渚涙暟鎹?        window.location.href = '/quiz/detail?exam_id=' + examId + '&score=' + encodeURIComponent(score);
+    }
+
+    // ==========================================
+    // 瀛︿範杞ㄨ抗璁板綍鍔熻兘
+    // ==========================================
+    
+    // 寮€濮嬪涔犱細璇濊拷韪?    async function startTrackingSession(paperTitle) {
+        try {
+            const response = await fetch('/api/tracking/session/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_type: 'exam',
+                    chapter_id: confirmedChapterId || chapterId,
+                    title: paperTitle || '鏁村嵎娴嬭瘯',
+                    uploaded_content: uploadedContent
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                trackingSessionId = data.session_id;
+                console.log('[Tracking] 浼氳瘽寮€濮?', trackingSessionId);
+            }
+        } catch (error) {
+            console.error('[Tracking] 寮€濮嬩細璇濆け璐?', error);
+        }
+    }
+    
+    // 璁板綍绛旈
+    async function recordQuestionAnswer(questionIndex) {
+        if (!trackingSessionId) return;
+        
+        const q = questions[questionIndex];
+        const answer = userAnswers[questionIndex] || '';
+        const confidence = userConfidence[questionIndex] || '';
+        
+        try {
+            await fetch('/api/tracking/session/' + trackingSessionId + '/question', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    question_index: questionIndex,
+                    question_type: q.type,
+                    difficulty: q.difficulty,
+                    question_text: q.question,
+                    options: q.options,
+                    correct_answer: q.correct_answer,
+                    user_answer: answer,
+                    is_correct: answer === q.correct_answer,
+                    confidence: confidence,
+                    explanation: q.explanation,
+                    key_point: q.key_point
+                })
+            });
+        } catch (error) {
+            console.error('[Tracking] 璁板綍棰樼洰澶辫触:', error);
+        }
+    }
+    
+    // 瀹屾垚瀛︿範浼氳瘽
+    async function completeTrackingSession(score, totalQuestions) {
+        if (!trackingSessionId) return;
+        
+        try {
+            await fetch('/api/tracking/session/' + trackingSessionId + '/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    score: score,
+                    total_questions: totalQuestions
+                })
+            });
+            console.log('[Tracking] 浼氳瘽瀹屾垚');
+        } catch (error) {
+            console.error('[Tracking] 瀹屾垚浼氳瘽澶辫触:', error);
+        }
+    }
+
+    // 鍏ㄥ眬鍙橀噺淇濆瓨鏈€鍚庝竴娆＄粨鏋?    let lastExamResult = null;
+
+    // 涓€閿鍒跺仛棰樻姤鍛?    function copyExamReport() {
+        if (!lastExamResult || !questions || questions.length === 0) {
+            alert('鏆傛棤鍋氶鏁版嵁鍙鍒?);
+            return;
+        }
+
+        const result = lastExamResult;
+        const score = document.getElementById('scoreDisplay').textContent;
+        const accuracy = document.getElementById('accuracy').textContent;
+        
+        // 鏋勫缓鎶ュ憡鏂囨湰
+        let report = '';
+        report += '鈺斺晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晽\n';
+        report += '鈺?                   馃搵 鍖诲鑰冪爺鏁村嵎娴嬮獙鎶ュ憡                    鈺慭n';
+        report += '鈺氣晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨暆\n\n';
+        
+        // 鍩烘湰淇℃伅
+        report += '銆愬熀鏈俊鎭€慭n';
+        report += `鑰冭瘯鏃堕棿锛?{new Date().toLocaleString('zh-CN')}\n`;
+        report += `鎬诲垎锛?{score} 鍒哱n`;
+        report += `姝ｇ‘鐜囷細${accuracy}\n`;
+        report += `姝ｇ‘锛?{result.correct_count} 棰?/ 閿欒锛?{result.wrong_count} 棰?/ 鎬昏锛?{result.total} 棰榎n\n`;
+
+        // 闅惧害鍒嗘瀽
+        report += '銆愰毦搴﹀垎鏋愩€慭n';
+        const diff = result.wrong_by_difficulty || {};
+        report += `  鍩虹棰橀敊璇細${diff['鍩虹'] || 0} 棰榎n`;
+        report += `  鎻愰珮棰橀敊璇細${diff['鎻愰珮'] || 0} 棰榎n`;
+        report += `  闅鹃閿欒锛?{diff['闅鹃'] || 0} 棰榎n\n`;
+
+        // 钖勫急鐭ヨ瘑鐐?        if (result.weak_points && result.weak_points.length > 0) {
+            report += '銆愯杽寮辩煡璇嗙偣銆慭n';
+            result.weak_points.forEach((wp, i) => {
+                report += `  ${i + 1}. ${wp}\n`;
+            });
+            report += '\n';
+        }
+
+        // 姣忛亾棰樼殑璇︾粏鎯呭喌
+        report += '銆愰鐩鎯呫€慭n';
+        report += '鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲\n\n';
+        
+        result.details.forEach((d, i) => {
+            const q = questions[i];
+            const conf = userConfidence[i] || '鏈爣璁?;
+            const confMap = { 'sure': '鉁?纭畾', 'unsure': '? 妯＄硦', 'no': '鉁?涓嶄細', '鏈爣璁?: '鈼?鏈爣璁? };
+            
+            report += `绗?${i + 1} 棰?[${q.type}] [${d.difficulty}]\n`;
+            report += `${q.question}\n\n`;
+            
+            // 閫夐」
+            ['A', 'B', 'C', 'D', 'E'].forEach(opt => {
+                const isCorrect = d.correct_answer.includes(opt);
+                const isSelected = d.user_answer.includes(opt);
+                let mark = '   ';
+                if (isCorrect) mark = ' 鉁?';
+                else if (isSelected && !isCorrect) mark = ' 鉁?';
+                
+                report += `${mark}${opt}. ${q.options[opt] || ''}\n`;
+            });
+            
+            report += '\n';
+            report += `浣犵殑绛旀锛?{d.user_answer || '鏈綔绛?}\n`;
+            report += `姝ｇ‘绛旀锛?{d.correct_answer}\n`;
+            report += `鑷俊搴︼細${confMap[conf] || conf}\n`;
+            report += `缁撴灉锛?{d.is_correct ? '鉁?姝ｇ‘' : '鉁?閿欒'}\n`;
+            report += `鏍稿績鑰冪偣锛?{d.key_point}\n\n`;
+            report += `瑙ｆ瀽锛?{d.explanation}\n`;
+            report += '鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€\n\n';
+        });
+
+        report += '鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲\n';
+        report += '鎶ュ憡鐢熸垚鏃堕棿锛? + new Date().toLocaleString('zh-CN') + '\n';
+        report += '鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲\n';
+
+        // 澶嶅埗鍒板壀璐存澘
+        navigator.clipboard.writeText(report).then(function() {
+            // 鏄剧ず鎴愬姛鎻愮ず
+            const btn = document.getElementById('copyReportBtn');
+            const btnText = document.getElementById('copyBtnText');
+            const originalText = btnText.textContent;
+            
+            btn.classList.remove('bg-indigo-500', 'hover:bg-indigo-600');
+            btn.classList.add('bg-green-500', 'hover:bg-green-600');
+            btnText.textContent = '鉁?宸插鍒跺埌鍓创鏉?;
+            
+            setTimeout(function() {
+                btn.classList.remove('bg-green-500', 'hover:bg-green-600');
+                btn.classList.add('bg-indigo-500', 'hover:bg-indigo-600');
+                btnText.textContent = originalText;
+            }, 2000);
+            
+        }).catch(function(err) {
+            console.error('澶嶅埗澶辫触:', err);
+            alert('澶嶅埗澶辫触锛岃鎵嬪姩澶嶅埗浠ヤ笅鍐呭锛歕n\n' + report.substring(0, 500) + '...');
+        });
+    }
+
+    function endStudySession() {
+        const score = document.getElementById('scoreDisplay').textContent;
+        const accuracy = document.getElementById('accuracy').textContent;
+        const correct = document.getElementById('correctCount').textContent;
+        const wrong = document.getElementById('wrongCount').textContent;
+        alert('鏈瀛︿範宸茬粨鏉燂紒\n\n寰楀垎锛? + score + ' 鍒哱n姝ｇ‘鐜囷細' + accuracy + '\n姝ｇ‘锛? + correct + ' 棰?/ 閿欒锛? + wrong + ' 棰榎n\n鏁版嵁宸茶褰曞埌瀛︿範杞ㄨ抗锛岀户缁姞娌癸紒');
+        window.location.href = '/';
+    }
+
+    console.log('JavaScript 鍔犺浇瀹屾垚');
+</script>
+{% endblock %}
+
+
+

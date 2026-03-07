@@ -1,0 +1,381 @@
+{
+  "case": "case_6500_single",
+  "content_length": 6540,
+  "elapsed_seconds": 219.22,
+  "quality": {
+    "total_questions": 20,
+    "complete_questions": 20,
+    "complete_ratio": 1.0,
+    "valid_answer_count": 20,
+    "valid_answer_ratio": 1.0,
+    "has_explanation_count": 20,
+    "has_explanation_ratio": 1.0,
+    "exact_duplicate_questions": 0,
+    "near_duplicate_pairs": 182,
+    "unique_key_points": 20,
+    "key_point_coverage_ratio": 1.0
+  },
+  "result": {
+    "paper_title": "⚠️ AI 生成失败 - 请重试",
+    "total_questions": 20,
+    "difficulty_distribution": {
+      "基础": 10,
+      "提高": 6,
+      "难题": 3
+    },
+    "questions": [
+      {
+        "id": 1,
+        "type": "A1",
+        "difficulty": "基础",
+        "question": "第1题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第1题解析",
+        "key_point": "考点1",
+        "related_questions": "[2]"
+      },
+      {
+        "id": 2,
+        "type": "A1",
+        "difficulty": "基础",
+        "question": "第2题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第2题解析",
+        "key_point": "考点2",
+        "related_questions": "[3]"
+      },
+      {
+        "id": 3,
+        "type": "A2",
+        "difficulty": "基础",
+        "question": "第3题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第3题解析",
+        "key_point": "考点3",
+        "related_questions": "[4]"
+      },
+      {
+        "id": 4,
+        "type": "A2",
+        "difficulty": "基础",
+        "question": "第4题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第4题解析",
+        "key_point": "考点4",
+        "related_questions": "[5]"
+      },
+      {
+        "id": 5,
+        "type": "A2",
+        "difficulty": "基础",
+        "question": "第5题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第5题解析",
+        "key_point": "考点5",
+        "related_questions": "[6]"
+      },
+      {
+        "id": 6,
+        "type": "A3",
+        "difficulty": "基础",
+        "question": "第6题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第6题解析",
+        "key_point": "考点6",
+        "related_questions": "[7]"
+      },
+      {
+        "id": 7,
+        "type": "A3",
+        "difficulty": "基础",
+        "question": "第7题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第7题解析",
+        "key_point": "考点7",
+        "related_questions": "[8]"
+      },
+      {
+        "id": 8,
+        "type": "A3",
+        "difficulty": "基础",
+        "question": "第8题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第8题解析",
+        "key_point": "考点8",
+        "related_questions": "[9]"
+      },
+      {
+        "id": 9,
+        "type": "X",
+        "difficulty": "基础",
+        "question": "第9题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第9题解析",
+        "key_point": "考点9",
+        "related_questions": "[10]"
+      },
+      {
+        "id": 10,
+        "type": "A1",
+        "difficulty": "基础",
+        "question": "第10题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第10题解析",
+        "key_point": "考点10",
+        "related_questions": "[11]"
+      },
+      {
+        "id": 11,
+        "type": "A1",
+        "difficulty": "提高",
+        "question": "第11题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第11题解析",
+        "key_point": "考点11",
+        "related_questions": "[12]"
+      },
+      {
+        "id": 12,
+        "type": "A1",
+        "difficulty": "提高",
+        "question": "第12题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第12题解析",
+        "key_point": "考点12",
+        "related_questions": "[13]"
+      },
+      {
+        "id": 13,
+        "type": "A2",
+        "difficulty": "提高",
+        "question": "第13题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第13题解析",
+        "key_point": "考点13",
+        "related_questions": "[14]"
+      },
+      {
+        "id": 14,
+        "type": "A2",
+        "difficulty": "提高",
+        "question": "第14题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第14题解析",
+        "key_point": "考点14",
+        "related_questions": "[15]"
+      },
+      {
+        "id": 15,
+        "type": "A2",
+        "difficulty": "提高",
+        "question": "第15题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第15题解析",
+        "key_point": "考点15",
+        "related_questions": "[16]"
+      },
+      {
+        "id": 16,
+        "type": "A3",
+        "difficulty": "提高",
+        "question": "第16题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第16题解析",
+        "key_point": "考点16",
+        "related_questions": "[17]"
+      },
+      {
+        "id": 17,
+        "type": "A3",
+        "difficulty": "难题",
+        "question": "第17题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第17题解析",
+        "key_point": "考点17",
+        "related_questions": "[18]"
+      },
+      {
+        "id": 18,
+        "type": "A3",
+        "difficulty": "难题",
+        "question": "第18题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第18题解析",
+        "key_point": "考点18",
+        "related_questions": "[19]"
+      },
+      {
+        "id": 19,
+        "type": "X",
+        "difficulty": "难题",
+        "question": "第19题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第19题解析",
+        "key_point": "考点19",
+        "related_questions": "[20]"
+      },
+      {
+        "id": 20,
+        "type": "A1",
+        "difficulty": "难题",
+        "question": "第20题：请根据讲课内容回答问题",
+        "options": {
+          "A": "选项A",
+          "B": "选项B",
+          "C": "选项C",
+          "D": "选项D",
+          "E": "选项E"
+        },
+        "correct_answer": "A",
+        "explanation": "第20题解析",
+        "key_point": "考点20",
+        "related_questions": "[19]"
+      }
+    ],
+    "summary": {
+      "coverage": "基础知识点覆盖",
+      "focus": "概念理解和应用",
+      "advice": "仔细审题，注意辨析"
+    },
+    "error_message": "AI 生成失败: Unterminated string starting at: line 335 column 22 (char 9441)",
+    "chapter_prediction": {
+      "book": "未分类",
+      "chapter_id": "0",
+      "chapter_title": "自动补齐章节(0)",
+      "confidence": "low"
+    }
+  }
+}

@@ -1,0 +1,782 @@
+{% extends "base.html" %}
+
+{% block title %}细节强化练习{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <a href="/quiz/batch/0" class="hover:text-blue-500">整卷测试</a>
+        <span class="mx-2">/</span>
+        <span>细节强化</span>
+    </div>
+
+    <h1 class="text-2xl font-bold">细节强化练习</h1>
+    <p class="text-gray-500">基于整卷测试结果，针对薄弱知识点进行强化训练</p>
+</div>
+
+<!-- 无数据提示 -->
+<div id="noData" class="hidden bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+    <p class="text-yellow-700">请先完成整卷测试，再来这里练习。</p>
+    <div class="mt-2">
+        <a href="/quiz/batch/0" class="text-blue-600 hover:underline">去进行整卷测试</a>
+        <button onclick="location.reload()" class="ml-4 text-blue-600 hover:underline">刷新页面重试</button>
+    </div>
+</div>
+
+<!-- 练习内容 -->
+<div id="practiceArea" class="hidden space-y-6">
+    <!-- 知识点选择 -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="font-bold text-lg mb-4">选择要练习的知识点（点击开始）</h3>
+        <div id="knowledgeList" class="space-y-3"></div>
+    </div>
+
+    <!-- 答题区域 -->
+    <div id="questionArea" class="hidden space-y-6">
+        <!-- 进度 -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <div class="flex justify-between items-center mb-2">
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm text-gray-500">练习进度</span>
+                    <span class="text-xs text-gray-400">| 快捷键：1-5 选项 | Q 确定 W 模糊 E 不会 | ↑↓ 切换</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="knowledgeTitle" class="text-blue-600 font-medium"></span>
+                    <span id="questionProgress" class="text-sm font-bold text-blue-600">1/5</span>
+                </div>
+            </div>
+            <div class="bg-gray-200 rounded-full h-3">
+                <div id="practiceProgressBar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- 题目容器 -->
+        <div id="questionsContainer"></div>
+
+        <!-- 底部操作 -->
+        <div class="bg-white rounded-lg shadow p-4 sticky bottom-4">
+            <div class="flex justify-between items-center">
+                <div class="text-sm text-gray-500">
+                    已答：<span id="answeredCount" class="font-bold text-blue-600">0</span>/<span id="totalPractice">5</span>
+                </div>
+                <div class="flex space-x-4">
+                    <button id="prevQuestion" type="button" class="text-gray-500 hover:text-gray-700 px-4">上一题</button>
+                    <button id="submitPracticeBtn" type="button" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">下一题</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 练习结果 -->
+    <div id="resultArea" class="hidden space-y-6">
+        <div class="bg-white rounded-lg shadow p-6 text-center">
+            <div class="text-6xl mb-4" id="practiceEmoji"></div>
+            <div class="text-5xl font-bold text-blue-600 mb-2" id="practiceScore">0</div>
+            <div class="text-gray-500">分</div>
+            <div class="mt-4 flex justify-center space-x-6">
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-green-600" id="practiceCorrect">0</div>
+                    <div class="text-sm text-gray-500">正确</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-red-600" id="practiceWrong">0</div>
+                    <div class="text-sm text-gray-500">错误</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 答案解析 -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b">
+                <h3 class="font-bold text-lg">答案与解析</h3>
+            </div>
+            <div id="practiceDetails" class="divide-y"></div>
+        </div>
+
+        <div class="flex justify-center space-x-4">
+            <a href="/quiz/batch/0" class="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600">再做一套整卷</a>
+            <button type="button" onclick="backToList()" class="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600">继续练习其他知识点</button>
+            <button type="button" onclick="endStudySession()" class="bg-emerald-600 text-white px-6 py-3 rounded-lg hover:bg-emerald-700 font-bold">✅ 结束学习</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // ========== 安全工具函数 ==========
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function handleFetchError(error, userMessage, showAlert = true) {
+        console.error('API Error:', error);
+        const message = userMessage || '操作失败，请稍后重试';
+        if (showAlert) alert(message);
+        return message;
+    }
+
+    async function safeFetch(url, options = {}, errorMessage = '请求失败') {
+        try {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            handleFetchError(error, errorMessage);
+            throw error;
+        }
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const examId = urlParams.get('exam_id');
+    const scoreFromUrl = urlParams.get('score') || '';
+
+    let examData = null;
+    let knowledgeMap = {};
+    let currentKnowledge = null;
+    let practiceQuestions = [];
+    let currentPracticeIndex = 0;
+    let practiceAnswers = {};
+    let practiceConfidence = {};
+    let isPracticeMode = false;
+    let detailTrackingSessionId = null;
+
+    function revealMaskedExplanation(revealId, triggerBtn) {
+        const explanationEl = document.getElementById(revealId);
+        if (explanationEl) explanationEl.classList.remove('hidden');
+        if (triggerBtn) triggerBtn.classList.add('hidden');
+    }
+
+    function buildMaskedExplanationHtml(explanation, isCorrect, confidence, revealId) {
+        const text = explanation || '暂无解析';
+        if (!explanation || (isCorrect && confidence === 'sure')) {
+            return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div><p class="text-gray-600 text-sm">' + text + '</p></div>';
+        }
+        return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div>' +
+            '<button type="button" onclick="revealMaskedExplanation(\'' + revealId + '\', this)" class="w-full text-left bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 rounded-lg text-sm hover:bg-amber-100 transition">先自行反思后，再查看解析</button>' +
+            '<p id="' + revealId + '" class="text-gray-600 text-sm mt-3 hidden">' + text + '</p></div>';
+    }
+
+    async function loadExamData() {
+        if (!examId) {
+            console.log('没有 examId，无法加载数据');
+            return null;
+        }
+
+        try {
+            return await safeFetch('/api/quiz/batch/detail/' + examId, {}, '操作失败');
+        } catch (e) {
+            console.error('加载试卷数据失败:', e);
+            return null;
+        }
+    }
+
+    async function startDetailTrackingSession(knowledgePoint) {
+        try {
+            const data = await safeFetch('/api/tracking/session/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_type: 'detail_practice',
+                    chapter_id: examData.chapter_id,
+                    title: `细节练习: ${knowledgePoint}`,
+                    knowledge_point: knowledgePoint
+                })
+            }, '操作失败');
+            detailTrackingSessionId = data.session_id;
+            console.log('[Tracking] 细节练习会话已开启:', detailTrackingSessionId);
+        } catch (error) {
+            console.error('[Tracking] 开始细节练习会话失败:', error);
+        }
+    }
+
+    async function recordDetailQuestionAnswer(questionIndex) {
+        if (!detailTrackingSessionId) return;
+
+        const q = practiceQuestions[questionIndex];
+        if (!q) return;
+
+        const answer = practiceAnswers[questionIndex] || '';
+        const confidence = practiceConfidence[questionIndex] || '';
+
+        // 清理答案格式函数
+        const cleanAnswer = function(ans) {
+            return (ans || '').toString().toUpperCase().replace(/[^A-E]/g, '');
+        };
+
+        const cleanUserAnswer = cleanAnswer(answer);
+        const cleanCorrectAnswer = cleanAnswer(q.correct_answer);
+
+        try {
+            await safeFetch('/api/tracking/session/' + detailTrackingSessionId + '/question', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    question_index: questionIndex,
+                    question_type: q.type,
+                    difficulty: q.difficulty,
+                    question_text: q.question,
+                    options: q.options,
+                    correct_answer: q.correct_answer,
+                    user_answer: answer,
+                    is_correct: (q.type === 'X')
+                        ? cleanUserAnswer.split('').sort().join('') === cleanCorrectAnswer.split('').sort().join('')
+                        : cleanUserAnswer === cleanCorrectAnswer,
+                    confidence: confidence,
+                    explanation: q.explanation,
+                    key_point: currentKnowledge
+                })
+            }, '操作失败');
+        } catch (error) {
+            console.error('[Tracking] 记录细节练习题目失败:', error);
+        }
+    }
+
+    async function completeDetailTrackingSession(score, totalQuestions) {
+        if (!detailTrackingSessionId) return;
+        try {
+            await safeFetch('/api/tracking/session/' + detailTrackingSessionId + '/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    score: score,
+                    total_questions: totalQuestions
+                })
+            }, '操作失败');
+            console.log('[Tracking] 细节练习会话完成');
+        } catch (error) {
+            console.error('[Tracking] 完成细节练习会话失败:', error);
+        }
+    }
+
+    async function generateVariationQuestions(keyPoint) {
+        const k = knowledgeMap[keyPoint];
+        if (!k) {
+            alert('知识点数据不存在');
+            return;
+        }
+
+        const container = document.getElementById('questionsContainer');
+        container.innerHTML =
+            '<div class="text-center p-8">' +
+            '<div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>' +
+            '<div class="text-lg">DeepSeek 正在生成变式题...</div>' +
+            '<div class="text-sm text-gray-400 mt-2">基于同一知识点，生成 5 道不同角度的变式</div>' +
+            '</div>';
+        document.getElementById('questionArea').classList.remove('hidden');
+
+        let generationFailed = false;
+        try {
+            const resp = await fetch('/api/quiz/batch/generate-variations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    key_point: keyPoint,
+                    base_question: k,
+                    uploaded_content: examData.uploadedContent || '',
+                    num_variations: 5
+                })
+            });
+            const data = await resp.json();
+
+            // 检查后端是否返回了 fallback 标记
+            if (data.is_fallback || data.error) {
+                console.error('[细节练习] 后端返回生成失败:', data.error);
+                generationFailed = true;
+            } else {
+                practiceQuestions = (data.variations || []).filter(v => v && v.question);
+                console.log('[细节练习] AI生成变式题数量:', practiceQuestions.length);
+                if (practiceQuestions.length === 0) {
+                    generationFailed = true;
+                }
+            }
+        } catch (error) {
+            console.error('[细节练习] 请求失败:', error);
+            generationFailed = true;
+        }
+
+        // 生成失败：显示重试界面
+        if (generationFailed) {
+            container.innerHTML =
+                '<div class="bg-red-50 border-l-4 border-red-400 p-6 rounded-lg">' +
+                '<div class="text-lg font-bold text-red-700 mb-2">变式题生成失败</div>' +
+                '<p class="text-red-600 mb-4">AI 模型暂时不可用（可能是网络波动或服务繁忙），请稍后重试。</p>' +
+                '<div class="flex space-x-4">' +
+                '<button type="button" onclick="retryGeneration(\'' + keyPoint.replace(/'/g, "\\'") + '\')" class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 font-bold">重新生成</button>' +
+                '<button type="button" onclick="backToList()" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">返回知识点列表</button>' +
+                '</div></div>';
+            return;
+        }
+
+        document.getElementById('totalPractice').textContent = practiceQuestions.length;
+        displayPracticeQuestion();
+    }
+
+    function updateAnsweredCount() {
+        // 只统计真正有值的答案（排除空字符串和 undefined）
+        const answered = Object.keys(practiceAnswers).filter(function(k) {
+            const ans = practiceAnswers[k];
+            return ans && ans.length > 0;
+        }).length;
+        document.getElementById('answeredCount').textContent = answered;
+    }
+
+    function updatePracticeControls() {
+        document.getElementById('questionProgress').textContent = (currentPracticeIndex + 1) + '/' + practiceQuestions.length;
+        const progress = ((currentPracticeIndex + 1) / practiceQuestions.length) * 100;
+        document.getElementById('practiceProgressBar').style.width = progress + '%';
+        document.getElementById('prevQuestion').style.visibility = currentPracticeIndex > 0 ? 'visible' : 'hidden';
+        document.getElementById('submitPracticeBtn').textContent = currentPracticeIndex < practiceQuestions.length - 1 ? '下一题' : '提交练习';
+        updateAnsweredCount();
+    }
+
+    function setPracticeConfidence(idx, level) {
+        const currentConfidence = practiceConfidence[idx];
+
+        // 如果已选中相同等级，则取消选择
+        if (currentConfidence === level) {
+            practiceConfidence[idx] = '';
+
+            const btnSure = document.getElementById('practice-btn-sure-' + idx);
+            const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
+            const btnNo = document.getElementById('practice-btn-no-' + idx);
+            const display = document.getElementById('practice-confidence-display-' + idx);
+
+            btnSure.classList.remove('bg-green-500', 'text-white');
+            btnUnsure.classList.remove('bg-yellow-500', 'text-white');
+            btnNo.classList.remove('bg-red-500', 'text-white');
+
+            display.textContent = '';
+            display.className = 'mt-2 text-sm text-center hidden';
+            return;
+        }
+
+        practiceConfidence[idx] = level;
+        const btnSure = document.getElementById('practice-btn-sure-' + idx);
+        const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
+        const btnNo = document.getElementById('practice-btn-no-' + idx);
+        const display = document.getElementById('practice-confidence-display-' + idx);
+
+        btnSure.classList.remove('bg-green-500', 'text-white');
+        btnUnsure.classList.remove('bg-yellow-500', 'text-white');
+        btnNo.classList.remove('bg-red-500', 'text-white');
+
+        if (level === 'sure') {
+            btnSure.classList.add('bg-green-500', 'text-white');
+            display.textContent = '✓ 我确定这道题会做';
+            display.className = 'mt-2 text-sm text-center text-green-600 font-medium';
+        } else if (level === 'unsure') {
+            btnUnsure.classList.add('bg-yellow-500', 'text-white');
+            display.textContent = '？这道题有点模糊';
+            display.className = 'mt-2 text-sm text-center text-yellow-600 font-medium';
+        } else {
+            btnNo.classList.add('bg-red-500', 'text-white');
+            display.textContent = '✗ 这道题完全不会';
+            display.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+        }
+        display.classList.remove('hidden');
+    }
+
+    function selectPracticeOption(opt) {
+        const q = practiceQuestions[currentPracticeIndex];
+        if (!q) return;
+        const isMultiple = (q.type || 'A1') === 'X';
+        const currentAnswer = practiceAnswers[currentPracticeIndex] || '';
+
+        if (isMultiple) {
+            // 多选题：切换选中状态
+            const selected = currentAnswer ? currentAnswer.split('') : [];
+            const optIndex = selected.indexOf(opt);
+
+            if (optIndex > -1) {
+                // 已选中，取消选中
+                selected.splice(optIndex, 1);
+            } else {
+                // 未选中，添加选中
+                selected.push(opt);
+            }
+
+            practiceAnswers[currentPracticeIndex] = selected.sort().join('');
+
+            // 更新UI
+            document.querySelectorAll('input[name="practiceOpt"]').forEach(function(cb) {
+                const isChecked = selected.includes(cb.value);
+                cb.checked = isChecked;
+                if (isChecked) {
+                    cb.closest('label').classList.add('border-blue-500', 'bg-blue-50');
+                } else {
+                    cb.closest('label').classList.remove('border-blue-500', 'bg-blue-50');
+                }
+            });
+        } else {
+            // 单选题：如果已选中则取消，否则选中
+            if (currentAnswer === opt) {
+                // 已选中该选项，取消选择
+                practiceAnswers[currentPracticeIndex] = '';
+                document.querySelectorAll('[data-opt]').forEach(function(label) {
+                    label.classList.remove('border-blue-500', 'bg-blue-50');
+                });
+                // 取消radio选中
+                const radio = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
+                if (radio) radio.checked = false;
+            } else {
+                // 选中该选项
+                practiceAnswers[currentPracticeIndex] = opt;
+                document.querySelectorAll('[data-opt]').forEach(function(label) {
+                    if (label.dataset.opt === opt) label.classList.add('border-blue-500', 'bg-blue-50');
+                    else label.classList.remove('border-blue-500', 'bg-blue-50');
+                });
+            }
+        }
+
+        const statusEl = document.getElementById('status-' + currentPracticeIndex);
+        if (statusEl) {
+            statusEl.textContent = '✓';
+            statusEl.className = 'text-green-500 text-xl font-bold';
+        }
+
+        updateAnsweredCount();
+        recordDetailQuestionAnswer(currentPracticeIndex);
+    }
+
+    function displayPracticeQuestion() {
+        const q = practiceQuestions[currentPracticeIndex];
+        if (!q) return;
+
+        const container = document.getElementById('questionsContainer');
+        const isMultiple = q.type === 'X';
+        const inputType = isMultiple ? 'checkbox' : 'radio';
+        const variationBadge = q.variation_type
+            ? '<span class="bg-purple-100 text-purple-700 px-2 py-1 rounded text-sm ml-2">' + q.variation_type + '</span>'
+            : '';
+
+        let optionsHtml = '';
+        ['A', 'B', 'C', 'D', 'E'].forEach(function(opt) {
+            optionsHtml += '<label class="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:border-blue-500 transition option-label" data-opt="' + opt + '">' +
+                '<input type="' + inputType + '" name="practiceOpt" value="' + opt + '" class="mt-1 mr-3" onchange="selectPracticeOption(\'' + opt + '\')">' +
+                '<span class="font-bold mr-2">' + opt + '.</span><span>' + (q.options[opt] || ('选项' + opt)) + '</span></label>';
+        });
+
+        container.innerHTML =
+            '<div class="bg-white rounded-lg shadow p-6">' +
+            '<div class="flex items-center justify-between mb-4">' +
+            '<div class="flex items-center space-x-2">' +
+            '<span class="bg-blue-100 text-blue-800 px-3 py-1 rounded text-sm font-bold">第' + (currentPracticeIndex + 1) + '题</span>' +
+            '<span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-sm">' + (q.type || 'A1') + (q.type === 'X' ? '（多选）' : '') + '</span>' +
+            '<span class="text-purple-600 text-sm font-medium">变式</span>' + variationBadge +
+            '</div>' +
+            '<span id="status-' + currentPracticeIndex + '" class="text-gray-300 text-xl">○</span>' +
+            '</div>' +
+            '<div class="mb-4"><p class="text-lg font-medium leading-relaxed">' + escapeHtml(q.question) + '</p></div>' +
+            '<div class="space-y-2 mb-4">' + optionsHtml + '</div>' +
+            '<div class="pt-4 border-t border-gray-100">' +
+            '<div class="flex items-center justify-between">' +
+            '<span class="text-sm text-gray-500">自我评估</span>' +
+            '<div class="flex space-x-2">' +
+            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'sure\')" id="practice-btn-sure-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-green-500 text-green-600 hover:bg-green-500 hover:text-white transition">Q 确定</button>' +
+            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'unsure\')" id="practice-btn-unsure-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white transition">W 模糊</button>' +
+            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'no\')" id="practice-btn-no-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white transition">E 不会</button>' +
+            '</div></div>' +
+            '<div id="practice-confidence-display-' + currentPracticeIndex + '" class="mt-2 text-sm text-center hidden"></div>' +
+            '</div>' +
+            '</div>';
+
+        // 恢复之前保存的答案（如果有）
+        // 使用 hasOwnProperty 确保键真实存在，避免 undefined 被误判
+        if (practiceAnswers.hasOwnProperty(currentPracticeIndex) && practiceAnswers[currentPracticeIndex]) {
+            const savedAns = practiceAnswers[currentPracticeIndex];
+            if (isMultiple) {
+                savedAns.split('').forEach(function(opt) {
+                    const input = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
+                    if (input) {
+                        input.checked = true;
+                        input.closest('label').classList.add('border-blue-500', 'bg-blue-50');
+                    }
+                });
+            } else {
+                const input = document.querySelector('input[name="practiceOpt"][value="' + savedAns + '"]');
+                if (input) {
+                    input.checked = true;
+                    input.closest('label').classList.add('border-blue-500', 'bg-blue-50');
+                }
+            }
+            const statusEl = document.getElementById('status-' + currentPracticeIndex);
+            if (statusEl) {
+                statusEl.textContent = '✓';
+                statusEl.className = 'text-green-500 text-xl font-bold';
+            }
+        }
+
+        // 恢复信心度
+        if (practiceConfidence.hasOwnProperty(currentPracticeIndex) && practiceConfidence[currentPracticeIndex]) {
+            setPracticeConfidence(currentPracticeIndex, practiceConfidence[currentPracticeIndex]);
+        }
+
+        updatePracticeControls();
+    }
+
+    function submitPractice() {
+        let correctCount = 0;
+        const details = [];
+
+        practiceQuestions.forEach(function(q, i) {
+            // 清理答案格式：去除空格、点号、逗号等，只保留字母
+            const cleanAnswer = function(ans) {
+                return (ans || '').toString().toUpperCase().replace(/[^A-E]/g, '');
+            };
+
+            const userAns = cleanAnswer(practiceAnswers[i]);
+            const correctAns = cleanAnswer(q.correct_answer);
+            const isMultiple = (q.type || 'A1') === 'X';
+
+            // 比对答案
+            const isCorrect = isMultiple
+                ? userAns.split('').sort().join('') === correctAns.split('').sort().join('')
+                : userAns === correctAns;
+
+            if (isCorrect) correctCount++;
+            details.push({
+                question: q.question,
+                options: q.options,
+                user_answer: userAns,
+                correct_answer: correctAns,
+                is_correct: isCorrect,
+                explanation: q.explanation,
+                confidence: practiceConfidence[i]
+            });
+        });
+
+        const total = practiceQuestions.length;
+        const score = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+
+        document.getElementById('questionArea').classList.add('hidden');
+        document.getElementById('resultArea').classList.remove('hidden');
+        document.getElementById('practiceScore').textContent = score;
+        document.getElementById('practiceCorrect').textContent = correctCount;
+        document.getElementById('practiceWrong').textContent = total - correctCount;
+        document.getElementById('practiceEmoji').textContent = score >= 80 ? '🏆' : score >= 60 ? '👍' : '📚';
+
+        completeDetailTrackingSession(score, total);
+
+        const container = document.getElementById('practiceDetails');
+        container.innerHTML = '';
+
+        details.forEach(function(d, i) {
+            const userAnswer = d.user_answer || '';
+            const correctAnswer = d.correct_answer || '';
+            let optionsHtml = '';
+
+            ['A', 'B', 'C', 'D', 'E'].forEach(function(opt) {
+                const isSelected = userAnswer.includes(opt);
+                const isCorrectOpt = correctAnswer.includes(opt);
+                let cls = 'p-2 rounded mb-1 ';
+                if (isCorrectOpt) cls += 'bg-green-100 text-green-800 border border-green-300';
+                else if (isSelected && !isCorrectOpt) cls += 'bg-red-100 text-red-800 border border-red-300';
+                else cls += 'text-gray-600';
+
+                optionsHtml += '<div class="' + cls + '"><span class="font-bold">' + opt + '.</span> ' + ((d.options && d.options[opt]) || ('选项' + opt)) +
+                    (isCorrectOpt ? ' ✓' : '') +
+                    (isSelected && !isCorrectOpt ? ' ✗（你的答案）' : '') + '</div>';
+            });
+
+            const div = document.createElement('div');
+            div.className = 'p-6';
+            const explanationId = 'detailExplanation-' + i;
+            div.innerHTML =
+                '<div class="flex items-center justify-between mb-3">' +
+                '<div class="flex items-center space-x-2">' +
+                '<span class="font-bold">第' + (i + 1) + '题</span>' +
+                '<span class="' + (d.is_correct ? 'text-green-600' : 'text-red-600') + ' font-bold">' + (d.is_correct ? '✓ 正确' : '✗ 错误') + '</span>' +
+                '</div></div>' +
+                '<p class="mb-3 text-gray-800">' + escapeHtml(d.question) + '</p>' +
+                '<div class="mb-4">' + optionsHtml + '</div>' +
+                buildMaskedExplanationHtml(d.explanation, d.is_correct, d.confidence, explanationId);
+            container.appendChild(div);
+        });
+    }
+
+    function bindEvents() {
+        document.getElementById('prevQuestion').addEventListener('click', function() {
+            if (currentPracticeIndex > 0) {
+                currentPracticeIndex--;
+                displayPracticeQuestion();
+            }
+        });
+
+        document.getElementById('submitPracticeBtn').addEventListener('click', function() {
+            // 检查当前题目是否已回答（排除空字符串）
+            const currentAnswer = practiceAnswers[currentPracticeIndex];
+            if (!currentAnswer || currentAnswer.length === 0) {
+                alert('请先完成当前题目。');
+                return;
+            }
+
+            if (currentPracticeIndex < practiceQuestions.length - 1) {
+                currentPracticeIndex++;
+                displayPracticeQuestion();
+            } else {
+                submitPractice();
+            }
+        });
+
+        document.addEventListener('keydown', function(e) {
+            const questionArea = document.getElementById('questionArea');
+            if (!questionArea || questionArea.classList.contains('hidden') || !isPracticeMode) return;
+
+            const key = e.key;
+            if (key >= '1' && key <= '5') {
+                const options = ['A', 'B', 'C', 'D', 'E'];
+                const opt = options[parseInt(key, 10) - 1];
+                const input = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
+                if (input) {
+                    input.checked = true;
+                    selectPracticeOption(opt);
+                }
+                e.preventDefault();
+                return;
+            }
+
+            const keyLower = key.toLowerCase();
+            if (keyLower === 'q') { setPracticeConfidence(currentPracticeIndex, 'sure'); e.preventDefault(); }
+            if (keyLower === 'w') { setPracticeConfidence(currentPracticeIndex, 'unsure'); e.preventDefault(); }
+            if (keyLower === 'e') { setPracticeConfidence(currentPracticeIndex, 'no'); e.preventDefault(); }
+
+            if (key === 'ArrowDown') {
+                if (currentPracticeIndex < practiceQuestions.length - 1) {
+                    currentPracticeIndex++;
+                    displayPracticeQuestion();
+                }
+                e.preventDefault();
+            }
+
+            if (key === 'ArrowUp') {
+                if (currentPracticeIndex > 0) {
+                    currentPracticeIndex--;
+                    displayPracticeQuestion();
+                }
+                e.preventDefault();
+            }
+
+            if (key === 'Enter') {
+                const currentAnswer = practiceAnswers[currentPracticeIndex];
+                if (!currentAnswer || currentAnswer.length === 0) return;
+                if (currentPracticeIndex < practiceQuestions.length - 1) {
+                    currentPracticeIndex++;
+                    displayPracticeQuestion();
+                } else {
+                    submitPractice();
+                }
+                e.preventDefault();
+            }
+        });
+    }
+
+    function initPractice() {
+        if (!examData) {
+            document.getElementById('noData').classList.remove('hidden');
+            return;
+        }
+
+        document.getElementById('practiceArea').classList.remove('hidden');
+
+        const questions = examData.questions || [];
+
+        // 构建知识点映射：每个知识点对应第一道相关题目
+        knowledgeMap = {};
+        questions.forEach(function(q, i) {
+            const keyPoint = q.key_point || ('考点' + (i + 1));
+            // 只保留第一次出现的知识点对应的题目
+            if (!knowledgeMap[keyPoint]) {
+                knowledgeMap[keyPoint] = {
+                    type: q.type || 'A1',
+                    difficulty: q.difficulty || '基础',
+                    question: q.question || '',
+                    options: q.options || {},
+                    correct_answer: q.correct_answer || 'A',
+                    explanation: q.explanation || '',
+                    key_point: keyPoint
+                };
+            }
+        });
+
+        const knowledgeList = document.getElementById('knowledgeList');
+        knowledgeList.innerHTML = '';
+        Object.keys(knowledgeMap).forEach(function(key) {
+            const k = knowledgeMap[key];
+            const statusClass = k.difficulty === '基础' ? 'text-green-600'
+                : (k.difficulty === '提高' ? 'text-yellow-600' : 'text-red-600');
+
+            const div = document.createElement('div');
+            div.className = 'flex items-center justify-between p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-blue-50 cursor-pointer transition';
+            div.innerHTML = '<div><span class="font-bold text-lg">' + key + '</span><span class="ml-2 ' + statusClass + '">' + k.difficulty + '</span></div>' +
+                '<span class="bg-blue-500 text-white px-4 py-2 rounded-lg">开始练习</span>';
+
+            div.addEventListener('click', async function() {
+                currentKnowledge = key;
+                currentPracticeIndex = 0;
+                practiceAnswers = {};
+                practiceConfidence = {};
+                isPracticeMode = true;
+
+                document.getElementById('knowledgeList').parentElement.classList.add('hidden');
+                document.getElementById('questionArea').classList.remove('hidden');
+                document.getElementById('knowledgeTitle').textContent = key;
+
+                await startDetailTrackingSession(key);
+                await generateVariationQuestions(key);
+            });
+
+            knowledgeList.appendChild(div);
+        });
+    }
+
+    window.selectPracticeOption = selectPracticeOption;
+    window.setPracticeConfidence = setPracticeConfidence;
+    window.retryGeneration = async function(keyPoint) {
+        currentPracticeIndex = 0;
+        practiceAnswers = {};
+        practiceConfidence = {};
+        await generateVariationQuestions(keyPoint);
+    };
+    window.backToList = function() {
+        document.getElementById('resultArea').classList.add('hidden');
+        document.getElementById('questionArea').classList.add('hidden');
+        document.getElementById('knowledgeList').parentElement.classList.remove('hidden');
+        isPracticeMode = false;
+    };
+    window.endStudySession = function() {
+        const score = document.getElementById('practiceScore').textContent;
+        const correct = document.getElementById('practiceCorrect').textContent;
+        const wrong = document.getElementById('practiceWrong').textContent;
+        const total = parseInt(correct, 10) + parseInt(wrong, 10);
+        const accuracy = total > 0 ? Math.round((parseInt(correct, 10) / total) * 100) + '%' : '0%';
+        alert(
+            '本次学习已结束！\n\n' +
+            '得分：' + score + ' 分\n' +
+            '正确率：' + accuracy + '\n' +
+            '正确：' + correct + ' 题 / 错误：' + wrong + ' 题\n\n' +
+            '数据已记录到学习轨迹，继续加油！'
+        );
+        window.location.href = '/';
+    };
+
+    (async function initPage() {
+        console.log('开始读取整卷测试数据...');
+        examData = await loadExamData();
+        if (examData) {
+            examData.score = scoreFromUrl;
+            bindEvents();
+            initPractice();
+        } else {
+            document.getElementById('noData').classList.remove('hidden');
+        }
+    })();
+</script>
+{% endblock %}

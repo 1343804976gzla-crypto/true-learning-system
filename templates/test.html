@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试页面</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .box { background: #f0f0f0; padding: 20px; margin: 10px 0; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <h1>✅ 如果你能看到这个，说明服务器正常</h1>
+    <div class="box">
+        <h2>系统状态</h2>
+        <p>服务器运行正常</p>
+        <p>时间: {{ now }}</p>
+    </div>
+    <div class="box">
+        <h2>导航</h2>
+        <ul>
+            <li><a href="/">🏠 仪表盘</a></li>
+            <li><a href="/upload">📤 上传</a></li>
+            <li><a href="/graph">🕸️ 知识图谱</a></li>
+        </ul>
+    </div>
+</body>
+</html>

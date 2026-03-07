@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>测试下一步按钮</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-2xl mx-auto">
+        <h1 class="text-2xl font-bold mb-4">测试下一步按钮</h1>
+
+        <!-- 步骤1 -->
+        <div id="step1" class="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 class="font-bold text-lg mb-4">第一步：输入内容</h3>
+            <textarea id="contentInput" class="w-full h-40 p-4 border rounded-lg"
+                      placeholder="请输入至少100字的内容"></textarea>
+            <div class="mt-4 flex justify-between items-center">
+                <span class="text-sm text-gray-500" id="charCount">0 字符</span>
+                <button type="button" id="nextBtn" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+                    下一步
+                </button>
+            </div>
+        </div>
+
+        <!-- 步骤2 -->
+        <div id="step2" class="hidden bg-white rounded-lg shadow p-6 mb-6">
+            <h3 class="font-bold text-lg mb-4">第二步：成功！</h3>
+            <p class="text-green-600">✅ 下一步按钮工作正常！</p>
+            <button type="button" onclick="location.reload()" class="mt-4 bg-gray-500 text-white px-4 py-2 rounded">
+                重新测试
+            </button>
+        </div>
+
+        <!-- 日志 -->
+        <div class="bg-gray-800 text-white p-4 rounded-lg">
+            <h4 class="font-bold mb-2">控制台日志：</h4>
+            <div id="log" class="text-sm font-mono"></div>
+        </div>
+    </div>
+
+    <script>
+        // 日志函数
+        function log(msg) {
+            const logEl = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logEl.innerHTML += `[${time}] ${msg}<br>`;
+            console.log(msg);
+        }
+
+        log('页面加载完成');
+
+        // 字符计数
+        const contentInput = document.getElementById('contentInput');
+        const nextBtn = document.getElementById('nextBtn');
+        const charCountEl = document.getElementById('charCount');
+
+        log('获取元素: contentInput=' + !!contentInput + ', nextBtn=' + !!nextBtn);
+
+        contentInput.addEventListener('input', function() {
+            const charCount = this.value.length;
+            charCountEl.textContent = charCount + ' 字符';
+            log('输入字符数: ' + charCount);
+
+            if (charCount >= 100) {
+                nextBtn.disabled = false;
+                nextBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                log('按钮已启用');
+            } else {
+                nextBtn.disabled = true;
+                nextBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                log('按钮已禁用');
+            }
+        });
+
+        // 初始化按钮状态
+        const initialLength = contentInput.value.length;
+        if (initialLength < 100) {
+            nextBtn.disabled = true;
+            nextBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            log('初始化: 按钮已禁用');
+        }
+
+        // 下一步按钮
+        nextBtn.addEventListener('click', function(e) {
+            log('点击下一步按钮');
+
+            if (this.disabled) {
+                log('按钮被禁用，无法点击');
+                alert('请先输入至少100字的内容');
+                return;
+            }
+
+            const content = contentInput.value.trim();
+            log('内容长度: ' + content.length);
+
+            if (content.length < 100) {
+                alert('请至少输入100字的内容，当前只有 ' + content.length + ' 字。');
+                return;
+            }
+
+            log('切换到步骤2');
+            document.getElementById('step1').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+            log('切换成功！');
+        });
+
+        log('事件监听器已绑定');
+    </script>
+</body>
+</html>

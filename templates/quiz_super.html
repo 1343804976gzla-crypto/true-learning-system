@@ -1,0 +1,523 @@
+{% extends "base.html" %}
+
+{% block title %}极速10题 - True Learning System{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <!-- 头部 -->
+    <div class="mb-6">
+        <div class="flex items-center text-sm text-gray-500 mb-2">
+            <a href="/" class="hover:text-blue-500">仪表盘</a>
+            <span class="mx-2">/</span>
+            <a href="/chapter/{{ chapter_id }}" class="hover:text-blue-500">章节</a>
+            <span class="mx-2">/</span>
+            <span>极速10题</span>
+        </div>
+        
+        <h1 class="text-2xl font-bold">⚡ 极速10题</h1>
+        <p class="text-gray-500">预生成题目+本地快速批改+AI智能分析</p>
+    </div>
+
+    <!-- 步骤1: 预生成题目 -->
+    <div id="step1Generate" class="bg-white rounded-lg shadow p-12 text-center">
+        <div class="inline-flex items-center justify-center w-20 h-20 bg-blue-100 rounded-full mb-6">
+            <span class="text-4xl">📝</span>
+        </div>
+        
+        <h2 class="text-xl font-semibold mb-4">AI预生成题目</h2>
+        
+        <p class="text-gray-600 mb-6 max-w-md mx-auto">
+            点击开始，AI将同时生成10道题目、答案和详细解析。
+            <br>
+            生成后可直接做题，提交后秒出成绩！
+        </p>
+        
+        <button onclick="startGeneration()" id="startBtn"
+                class="px-8 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-lg">
+            开始生成
+        </button>
+        
+        <!-- 生成进度 -->
+        <div id="generateProgress" class="hidden mt-6 max-w-md mx-auto">
+            <div class="flex justify-between text-sm text-gray-600 mb-2">
+                <span>正在预生成题目...⏳</span>
+                <span id="genTimer">0s</span>
+            </div>            
+            <div class="h-3 bg-gray-200 rounded-full overflow-hidden">
+                <div id="progressBar" class="h-full bg-blue-500 rounded-full transition-all duration-500"
+                     style="width: 0%"></div>
+            </div>            
+            <p class="text-sm text-gray-500 mt-2">预计15-25秒</p>
+        </div>
+    </div>
+
+    <!-- 步骤2: 做题 -->
+    <div id="step2Answer" class="hidden">
+        <!-- 进度条 -->
+        <div class="bg-white rounded-lg shadow p-4 mb-4">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-500">题目 <span id="currentQ">1</span> / 10</span>
+                <span class="text-sm text-gray-500" id="answerTimer">00:00</span>
+            </div>            
+            <div class="h-2 bg-gray-200 rounded-full">
+                <div class="h-full bg-blue-500 rounded-full transition-all" style="width: 10%"></div>
+            </div>        
+        </div>
+
+        <!-- 题目 -->
+        <div class="bg-white rounded-lg shadow p-6 mb-4">
+            <div class="mb-4 flex items-center space-x-2">
+                <span id="conceptBadge" class="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm"></span>
+                <span id="difficultyBadge" class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm"></span>
+            </div>
+            
+            <h3 id="questionDisplay" class="text-lg font-medium mb-6"></h3>            
+            <!-- 选项 -->
+            <div id="optionsList" class="space-y-3"></div>
+
+            <!-- 信心度 -->
+            <div class="mt-6 pt-6 border-t">
+                <p class="text-sm text-gray-500 mb-3">你的把握程度？</p>                
+                <div class="flex space-x-4">
+                    <label class="flex items-center cursor-pointer hover:bg-green-50 p-2 rounded transition">
+                        <input type="radio" name="confidence" value="sure" class="mr-2">
+                        <span class="text-green-600 font-medium">✓ 确定会</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer hover:bg-yellow-50 p-2 rounded transition">
+                        <input type="radio" name="confidence" value="unsure" class="mr-2" checked>
+                        <span class="text-yellow-600 font-medium">? 有点模糊</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer hover:bg-red-50 p-2 rounded transition">
+                        <input type="radio" name="confidence" value="dont_know" class="mr-2">
+                        <span class="text-red-600 font-medium">✗ 完全不会</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- 导航 -->
+        <div class="flex justify-between">
+            <button onclick="prevQ()" id="prevBtn" disabled
+                    class="px-6 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 transition">
+                ← 上一题
+            </button>            
+            <button onclick="nextQ()" id="nextBtn"
+                    class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition">
+                下一题 →
+            </button>
+        </div>
+    </div>
+
+    <!-- 步骤3: 结果和AI分析 -->
+    <div id="step3Result" class="hidden">
+        <!-- 分数总览 -->
+        <div class="bg-white rounded-lg shadow p-8 text-center mb-6">
+            <div id="finalScore" class="text-6xl font-bold mb-2"></div>
+            <p id="scoreText" class="text-gray-500 mb-6"></p>
+            
+            <div class="grid grid-cols-3 gap-4 max-w-md mx-auto">
+                <div class="p-3 bg-green-50 rounded">
+                    <div id="correctNum" class="text-2xl font-bold text-green-600"></div>
+                    <div class="text-sm text-gray-500">正确</div>
+                </div>                
+                <div class="p-3 bg-red-50 rounded">
+                    <div id="wrongNum" class="text-2xl font-bold text-red-600"></div>
+                    <div class="text-sm text-gray-500">错误</div>
+                </div>                
+                <div class="p-3 bg-blue-50 rounded">
+                    <div id="timeUsed" class="text-2xl font-bold text-blue-600"></div>
+                    <div class="text-sm text-gray-500">用时</div>
+                </div>
+            </div>        
+        </div>
+
+        <!-- AI综合分析 -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 class="text-lg font-semibold mb-4 flex items-center">
+                <span class="text-2xl mr-2">🤖</span>
+                AI 智能分析报告
+            </h3>            
+            
+            <div id="analysisResult" class="space-y-4">
+                <!-- 总体评价 -->
+                <div class="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-l-4 border-blue-500">
+                    <h4 class="font-medium text-blue-800 mb-2">📊 总体评价</h4>
+                    <p id="overallText" class="text-gray-700"></p>
+                </div>
+                
+                <!-- 信心度分析 -->
+                <div class="p-4 bg-yellow-50 rounded-lg">
+                    <h4 class="font-medium text-yellow-800 mb-2">💡 信心度分析</h4>
+                    <p id="confidenceText" class="text-yellow-700"></p>
+                </div>
+                
+                <!-- 优势和待改进 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="p-4 bg-green-50 rounded-lg">
+                        <h4 class="font-medium text-green-800 mb-2">✓ 你的优势</h4>
+                        <ul id="strengthList" class="text-green-700 space-y-1"></ul>
+                    </div>                    
+                    <div class="p-4 bg-red-50 rounded-lg">
+                        <h4 class="font-medium text-red-800 mb-2">⚠️ 待改进</h4>
+                        <ul id="weakList" class="text-red-700 space-y-1"></ul>
+                    </div>
+                </div>
+                
+                <!-- 危险盲区 -->
+                <div id="dangerZoneBox" class="p-4 bg-red-100 rounded-lg border-2 border-red-300 hidden">
+                    <h4 class="font-medium text-red-800 mb-2">🚨 危险盲区（高信心但答错）</h4>
+                    <ul id="dangerList" class="text-red-700 space-y-1"></ul>
+                </div>
+                
+                <!-- 学习建议 -->
+                <div class="p-4 bg-green-50 rounded-lg">
+                    <h4 class="font-medium text-green-800 mb-2">📚 学习建议</h4>
+                    <ul id="adviceList" class="text-green-700 space-y-1"></ul>
+                </div>
+                
+                <!-- 优先复习 -->
+                <div class="p-4 bg-purple-50 rounded-lg">
+                    <h4 class="font-medium text-purple-800 mb-2">🎯 优先复习</h4>
+                    <ul id="priorityList" class="text-purple-700 space-y-1"></ul>
+                </div>
+                
+                <!-- 下一步 -->
+                <div class="p-4 bg-blue-50 rounded-lg">
+                    <h4 class="font-medium text-blue-800 mb-2">🚀 下一步行动计划</h4>
+                    <p id="nextStepText" class="text-blue-700"></p>
+                </div>
+            </div>        
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="flex justify-center space-x-4">
+            <a href="/wrong-answers" class="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition">
+                查看错题
+            </a>            
+            <a href="/chapter/{{ chapter_id }}" class="px-6 py-3 bg-gray-200 rounded-lg hover:bg-gray-300 transition">
+                返回章节
+            </a>            
+            <button onclick="location.reload()" class="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                再练一次
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const chapterId = '{{ chapter_id }}';
+    let sessionId = null;
+    let questions = [];
+    let currentIdx = 0;
+    let userAnswers = [];
+    let genStartTime = null;
+    let answerStartTime = null;
+
+    // 步骤1: 预生成题目
+    async function startGeneration() {
+        document.getElementById('startBtn').classList.add('hidden');
+        document.getElementById('generateProgress').classList.remove('hidden');
+        
+        genStartTime = Date.now();
+        updateGenTimer();
+        
+        // 模拟进度条
+        let progress = 0;
+        const progressInterval = setInterval(() => {
+            progress += Math.random() * 8;
+            if (progress > 95) progress = 95;
+            document.getElementById('progressBar').style.width = progress + '%';
+        }, 1000);
+        
+        try {
+            const response = await fetch(`/api/quiz-fast/start/${chapterId}`, {
+                method: 'POST'
+            });
+            
+            clearInterval(progressInterval);
+            document.getElementById('progressBar').style.width = '100%';
+            
+            if (!response.ok) throw new Error('生成失败');
+            
+            const data = await response.json();
+            sessionId = data.session_id;
+            questions = data.questions;
+            
+            // 初始化答案
+            userAnswers = questions.map(() => ({
+                question_index: 0,
+                user_answer: '',
+                confidence: 'unsure',
+                time_spent: 0
+            }));
+            
+            // 进入步骤2
+            setTimeout(() => {
+                document.getElementById('step1Generate').classList.add('hidden');
+                document.getElementById('step2Answer').classList.remove('hidden');
+                answerStartTime = Date.now();
+                startAnswerTimer();
+                showQuestion(0);
+            }, 500);
+            
+        } catch (error) {
+            alert('生成题目失败: ' + error.message);
+            document.getElementById('startBtn').classList.remove('hidden');
+            document.getElementById('generateProgress').classList.add('hidden');
+        }
+    }
+
+    function updateGenTimer() {
+        const elapsed = Math.floor((Date.now() - genStartTime) / 1000);
+        document.getElementById('genTimer').textContent = elapsed + 's';
+        if (document.getElementById('generateProgress').classList.contains('hidden') === false) {
+            setTimeout(updateGenTimer, 1000);
+        }
+    }
+
+    function startAnswerTimer() {
+        setInterval(() => {
+            const elapsed = Math.floor((Date.now() - answerStartTime) / 1000);
+            const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const s = (elapsed % 60).toString().padStart(2, '0');
+            document.getElementById('answerTimer').textContent = m + ':' + s;
+        }, 1000);
+    }
+
+    // 显示题目
+    function showQuestion(idx) {
+        currentIdx = idx;
+        const q = questions[idx];
+        
+        document.getElementById('currentQ').textContent = idx + 1;
+        document.querySelector('#step2Answer .h-full').style.width = ((idx + 1) / 10 * 100) + '%';
+        
+        document.getElementById('conceptBadge').textContent = q.concept_name;
+        const diffMap = {easy: '简单', medium: '中等', hard: '困难'};
+        document.getElementById('difficultyBadge').textContent = diffMap[q.difficulty] || '中等';
+        
+        document.getElementById('questionDisplay').textContent = (idx + 1) + '. ' + q.question;
+        
+        // 选项
+        const optsDiv = document.getElementById('optionsList');
+        optsDiv.innerHTML = '';
+        
+        Object.entries(q.options || {}).forEach(([key, val]) => {
+            const btn = document.createElement('button');
+            btn.className = 'w-full p-4 border-2 rounded-lg text-left transition hover:border-blue-500 hover:bg-blue-50';
+            btn.innerHTML = '<span class="font-bold mr-2">' + key + '.</span>' + val;
+            btn.onclick = () => selectOption(key);
+            
+            if (userAnswers[idx].user_answer === key) {
+                btn.classList.add('border-blue-500', 'bg-blue-50');
+            }
+            
+            optsDiv.appendChild(btn);
+        });
+        
+        // 恢复信心度
+        const conf = userAnswers[idx].confidence || 'unsure';
+        document.querySelector('input[name="confidence"][value="' + conf + '"]').checked = true;
+        
+        // 更新按钮
+        document.getElementById('prevBtn').disabled = idx === 0;
+        document.getElementById('nextBtn').textContent = idx === 9 ? '提交答案' : '下一题 →';
+    }
+
+    function selectOption(opt) {
+        const currentAnswer = userAnswers[currentIdx].user_answer;
+
+        if (currentAnswer === opt) {
+            // 已选中该选项，取消选择
+            userAnswers[currentIdx].user_answer = '';
+            userAnswers[currentIdx].question_index = currentIdx;
+
+            // 更新UI - 取消选中
+            document.querySelectorAll('#optionsList button').forEach(btn => {
+                btn.classList.remove('border-blue-500', 'bg-blue-50');
+            });
+        } else {
+            // 选中该选项
+            userAnswers[currentIdx].user_answer = opt;
+            userAnswers[currentIdx].question_index = currentIdx;
+
+            // 更新UI
+            document.querySelectorAll('#optionsList button').forEach(btn => {
+                btn.classList.remove('border-blue-500', 'bg-blue-50');
+            });
+            event.target.closest('button').classList.add('border-blue-500', 'bg-blue-50');
+        }
+    }
+
+    function prevQ() {
+        saveAnswer();
+        if (currentIdx > 0) showQuestion(currentIdx - 1);
+    }
+
+    function nextQ() {
+        saveAnswer();
+        
+        if (!userAnswers[currentIdx].user_answer) {
+            alert('请选择一个答案');
+            return;
+        }
+        
+        if (currentIdx < 9) {
+            showQuestion(currentIdx + 1);
+        } else {
+            submitQuiz();
+        }
+    }
+
+    function saveAnswer() {
+        const conf = document.querySelector('input[name="confidence"]:checked');
+        userAnswers[currentIdx].confidence = conf ? conf.value : 'unsure';
+        userAnswers[currentIdx].time_spent = Math.floor((Date.now() - answerStartTime) / 1000);
+    }
+
+    // 提交
+    async function submitQuiz() {
+        saveAnswer();
+        
+        const btn = document.getElementById('nextBtn');
+        btn.disabled = true;
+        btn.textContent = '批改中...';
+        
+        try {
+            const response = await fetch(`/api/quiz-fast/submit/${sessionId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({answers: userAnswers})
+            });
+            
+            if (!response.ok) throw new Error('提交失败');
+            
+            const result = await response.json();
+            showResult(result);
+            
+        } catch (error) {
+            alert('提交失败: ' + error.message);
+            btn.disabled = false;
+            btn.textContent = '提交答案';
+        }
+    }
+
+    // 显示结果
+    function showResult(result) {
+        document.getElementById('step2Answer').classList.add('hidden');
+        document.getElementById('step3Result').classList.remove('hidden');
+        
+        const score = result.score;
+        const correct = result.correct_count;
+        const wrong = result.wrong_count;
+        
+        // 分数
+        const scoreDiv = document.getElementById('finalScore');
+        scoreDiv.textContent = score + '分';
+        scoreDiv.className = 'text-6xl font-bold mb-2 ' + 
+            (score >= 80 ? 'text-green-600' : score >= 60 ? 'text-yellow-600' : 'text-red-600');
+        
+        document.getElementById('scoreText').textContent = 
+            score >= 80 ? '优秀！继续加油！' : score >= 60 ? '及格，还有提升空间！' : '需要加强练习！';
+        
+        document.getElementById('correctNum').textContent = correct;
+        document.getElementById('wrongNum').textContent = wrong;
+        
+        const elapsed = Math.floor((Date.now() - answerStartTime) / 1000);
+        const m = Math.floor(elapsed / 60);
+        const s = elapsed % 60;
+        document.getElementById('timeUsed').textContent = m + ':' + s.toString().padStart(2, '0');
+        
+        // AI分析
+        const analysis = result.ai_analysis || {};
+        
+        document.getElementById('overallText').textContent = 
+            analysis.overall_assessment || '测验已完成！';
+        
+        document.getElementById('confidenceText').textContent = 
+            analysis.confidence_analysis || '信心度分析完成';
+        
+        // 优势
+        const sList = document.getElementById('strengthList');
+        sList.innerHTML = (analysis.strengths || ['完成了测验'])
+            .map(s => '<li class="flex items-start"><span class="mr-2">•</span>' + s + '</li>').join('');
+        
+        // 劣势
+        const wList = document.getElementById('weakList');
+        wList.innerHTML = (analysis.weaknesses || ['继续加油'])
+            .map(w => '<li class="flex items-start"><span class="mr-2">•</span>' + w + '</li>').join('');
+        
+        // 危险盲区
+        const dangers = analysis.danger_zones || [];
+        if (dangers.length > 0) {
+            document.getElementById('dangerZoneBox').classList.remove('hidden');
+            document.getElementById('dangerList').innerHTML = dangers
+                .map(d => '<li class="flex items-start"><span class="mr-2">⚠️</span>' + d + '</li>').join('');
+        }
+        
+        // 建议
+        const aList = document.getElementById('adviceList');
+        aList.innerHTML = (analysis.study_recommendations || ['复习错题'])
+            .map(a => '<li class="flex items-start"><span class="mr-2">💡</span>' + a + '</li>').join('');
+        
+        // 优先复习
+        const pList = document.getElementById('priorityList');
+        const priorities = analysis.priority_topics || analysis.weak_points_summary || [];
+        pList.innerHTML = priorities.length > 0 
+            ? priorities.map(p => '<li class="flex items-start"><span class="mr-2">🎯</span>' + p + '</li>').join('')
+            : '<li>继续巩固已学知识</li>';
+        
+        // 下一步
+        document.getElementById('nextStepText').textContent =
+            analysis.next_steps || '查看错题本，针对性复习薄弱环节';
+    }
+
+    // 键盘快捷键
+    document.addEventListener('keydown', function(e) {
+        const step2Answer = document.getElementById('step2Answer');
+        if (!step2Answer || step2Answer.classList.contains('hidden')) return;
+
+        const key = e.key;
+
+        // 数字键 1-4 选择选项 A-D
+        if (key >= '1' && key <= '4') {
+            const options = ['A', 'B', 'C', 'D'];
+            const opt = options[parseInt(key) - 1];
+            if (opt) {
+                // 模拟点击选项
+                const btn = Array.from(document.querySelectorAll('#optionsList button')).find(b => {
+                    return b.textContent.trim().startsWith(opt + '.');
+                });
+                if (btn) {
+                    selectOption(opt);
+                    // 更新UI
+                    document.querySelectorAll('#optionsList button').forEach(b => {
+                        b.classList.remove('border-blue-500', 'bg-blue-50');
+                    });
+                    btn.classList.add('border-blue-500', 'bg-blue-50');
+                }
+            }
+            e.preventDefault();
+            return;
+        }
+
+        // 上下箭头切换题目
+        if (key === 'ArrowDown' || key === 'ArrowRight') {
+            e.preventDefault();
+            nextQ();
+        }
+        if (key === 'ArrowUp' || key === 'ArrowLeft') {
+            e.preventDefault();
+            prevQ();
+        }
+
+        // Enter 提交或下一题
+        if (key === 'Enter') {
+            e.preventDefault();
+            nextQ();
+        }
+    });
+</script>
+{% endblock %}

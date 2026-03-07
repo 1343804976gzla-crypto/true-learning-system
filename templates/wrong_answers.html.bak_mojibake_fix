@@ -1,0 +1,1728 @@
+﻿{% extends "base.html" %}
+
+{% block title %}閿欓鏈?- True Learning System{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">浠〃鐩?/a>
+        <span class="mx-2">/</span>
+        <span>閿欓鏈?/span>
+    </div>
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold">鉂?閿欓鏈?/h1>
+            <p class="text-gray-500">鎸夌棝鐐归┍鍔ㄧ殑寮哄埗閲嶅仛绯荤粺</p>
+        </div>
+        <div class="flex space-x-2">
+            <button onclick="startChallenge()" class="bg-gradient-to-r from-orange-500 to-red-500 text-white px-5 py-2 rounded-lg hover:from-orange-600 hover:to-red-600 text-sm font-bold shadow">馃幆 浠婃棩闂叧</button>
+            <button onclick="exportMarkdown()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 text-sm">馃摑 瀵煎嚭</button>
+            <button onclick="syncAndReload()" id="syncBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 text-sm">馃攧 鍚屾</button>
+        </div>
+    </div>
+</div>
+
+<!-- 缁熻鍗＄墖 -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-red-500">
+        <div class="text-sm text-gray-500">娲昏穬閿欓</div>
+        <div id="statActive" class="text-3xl font-bold text-red-600">0</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-orange-500">
+        <div class="text-sm text-gray-500">馃毃 鐗圭骇閲嶇伨鍖?/div>
+        <div id="statCritical" class="text-3xl font-bold text-orange-600">0</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
+        <div class="text-sm text-gray-500">宸插綊妗?/div>
+        <div id="statArchived" class="text-3xl font-bold text-green-600">0</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
+        <div class="text-sm text-gray-500">閲嶅仛姝ｇ‘鐜?/div>
+        <div id="statRetryRate" class="text-3xl font-bold text-purple-600">0%</div>
+    </div>
+</div>
+
+<!-- 瑙嗗浘Tab + 绛涢€?-->
+<div class="bg-white rounded-lg shadow mb-6">
+    <div class="px-6 py-3 border-b flex flex-wrap items-center justify-between gap-3">
+        <div class="flex space-x-1">
+            <button onclick="switchView('severity')" id="tab-severity" class="px-4 py-2 rounded text-sm font-medium bg-red-500 text-white">馃敟 鎸変弗閲嶅害</button>
+            <button onclick="switchView('chapter')" id="tab-chapter" class="px-4 py-2 rounded text-sm font-medium text-gray-600 hover:bg-gray-100">馃摎 鎸夌珷鑺?/button>
+            <button onclick="switchView('timeline')" id="tab-timeline" class="px-4 py-2 rounded text-sm font-medium text-gray-600 hover:bg-gray-100">馃晲 鎸夋椂闂?/button>
+        </div>
+        <div class="flex items-center space-x-2 flex-wrap">
+            <div id="severityFilters" class="flex space-x-1">
+                <button onclick="toggleSeverity('')" class="sev-btn px-2 py-1 rounded text-xs bg-gray-200 text-gray-700 font-medium" data-sev="">鍏ㄩ儴</button>
+                <button onclick="toggleSeverity('critical')" class="sev-btn px-2 py-1 rounded text-xs text-gray-600 hover:bg-red-100" data-sev="critical">馃毃 鑷村懡</button>
+                <button onclick="toggleSeverity('stubborn')" class="sev-btn px-2 py-1 rounded text-xs text-gray-600 hover:bg-orange-100" data-sev="stubborn">馃殤 椤藉浐</button>
+                <button onclick="toggleSeverity('landmine')" class="sev-btn px-2 py-1 rounded text-xs text-gray-600 hover:bg-yellow-100" data-sev="landmine">鈿狅笍 鍦伴浄</button>
+                <button onclick="toggleSeverity('normal')" class="sev-btn px-2 py-1 rounded text-xs text-gray-600 hover:bg-gray-100" data-sev="normal">馃搵 鏅€?/button>
+            </div>
+            <select id="statusFilter" onchange="applyFilters()" class="text-sm border rounded px-2 py-1">
+                <option value="active">娲昏穬</option>
+                <option value="archived">宸插綊妗?/option>
+                <option value="all">鍏ㄩ儴</option>
+            </select>
+            <button onclick="openBatchSurgery()" class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">馃敩 鎵归噺閲嶅仛</button>
+        </div>
+    </div>
+    <!-- 鏃堕棿瑙嗗浘宸ュ叿鏍?-->
+    <div id="timelineToolbar" class="hidden px-6 py-3 bg-gray-50 border-b flex items-center space-x-3 flex-wrap">
+        <span class="text-xs text-gray-500">蹇嵎绛涢€?</span>
+        <button onclick="timeFilter('7d')" class="tf-btn px-3 py-1 rounded text-xs border hover:bg-blue-50">杩?澶?/button>
+        <button onclick="timeFilter('month')" class="tf-btn px-3 py-1 rounded text-xs border hover:bg-blue-50">鏈湀</button>
+        <button onclick="timeFilter('all')" class="tf-btn px-3 py-1 rounded text-xs border bg-gray-200 font-medium">鍏ㄩ儴</button>
+        <input type="month" id="monthPicker" onchange="timeFilter('pick')" class="border rounded px-2 py-1 text-xs">
+    </div>
+    <div id="listContainer" class="divide-y">
+        <div class="p-8 text-center text-gray-400">鐐瑰嚮鈥滃悓姝ユ暟鎹€濆紑濮?..</div>
+    </div>
+</div>
+
+<!-- AI鍙樺紡鎸戞垬璇存槑 -->
+<div class="bg-purple-50 border border-purple-200 rounded-lg p-4">
+    <div class="flex items-center space-x-3">
+        <span class="text-2xl">馃К</span>
+        <div>
+            <div class="font-bold text-purple-800">AI 鍙樺紡鎵嬫湳鍙板凡鍚敤</div>
+            <div class="text-sm text-purple-600">馃毃 鑷村懡鐩插尯閿欓鐐瑰嚮銆岎煍?閲嶅仛銆嶅皢鑷姩杩涘叆涓夐樁娈靛彉寮忔寫鎴橈細闄烽槺 鈫?閫昏緫鑷瘉 鈫?AI瀹″垽</div>
+        </div>
+    </div>
+</div>
+
+<!-- 鍦伴浄鐩叉祴璇存槑 -->
+<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-3">
+    <div class="flex items-center space-x-3">
+        <span class="text-2xl">馃挘</span>
+        <div>
+            <div class="font-bold text-yellow-800">鍦伴浄鐩叉祴鎺掗櫎宸插惎鐢?/div>
+            <div class="text-sm text-yellow-600">鈿狅笍 闅愬舰鍦伴浄閿欓鐐瑰嚮銆岎煍?閲嶅仛銆嶅皢杩涘叆涓ら樁娈电洸娴嬶細鍏堝嚟璁板繂鍐欒鐐?鈫?鍐嶇湅閫夐」楠岃瘉</div>
+        </div>
+    </div>
+</div>
+
+<!-- 闂叧璇存槑 -->
+<div class="bg-orange-50 border border-orange-200 rounded-lg p-4 mt-3">
+    <div class="flex items-center space-x-3">
+        <span class="text-2xl">馃幆</span>
+        <div>
+            <div class="font-bold text-orange-800">SM-2 闈跺悜闂叧宸插惎鐢?/div>
+            <div class="text-sm text-orange-600">鐐瑰嚮銆岎煄?浠婃棩闂叧銆嶈繘鍏ラ€愰鎸戞垬妯″紡锛欰I鍙樺紡棰?鈫?閫愰鍒ゅ畾 鈫?闂撮殧閲嶅璋冨害锛岃繛缁?娆℃纭嚜鍔ㄥ綊妗?/div>
+        </div>
+    </div>
+</div>
+
+<!-- 闂叧 Modal -->
+<div id="challengeModal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 overflow-y-auto">
+    <div class="min-h-screen px-4 py-8 flex items-start justify-center">
+        <div class="w-full max-w-3xl bg-white rounded-xl shadow-2xl">
+            <div class="px-6 py-4 border-b flex justify-between items-center">
+                <div>
+                    <h3 id="challengeTitle" class="font-bold text-xl">馃幆 閿欓闈跺悜闂叧</h3>
+                    <span id="challengeProgress" class="text-sm text-gray-400"></span>
+                </div>
+                <button onclick="closeChallenge()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div id="challengeContent" class="p-6"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 鎵嬫湳鍙?Modal -->
+<div id="surgeryModal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 overflow-y-auto">
+    <div class="min-h-screen px-4 py-8 flex items-start justify-center">
+        <div class="w-full max-w-3xl bg-white rounded-xl shadow-2xl">
+            <div class="px-6 py-4 border-b flex justify-between items-center">
+                <div>
+                    <h3 id="surgeryTitle" class="font-bold text-xl">馃敩 閿欓鎵嬫湳鍙?/h3>
+                    <span id="surgeryProgress" class="text-sm text-gray-400"></span>
+                </div>
+                <button onclick="closeSurgery()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div id="surgeryContent" class="p-6"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+// ========== Global State ==========
+var currentView = 'severity';
+var currentSeverity = '';
+var currentStatus = 'active';
+var listData = null;
+var batchQueue = [];
+var batchIndex = 0;
+var currentSurgeryId = null;
+var surgeryStartTime = 0;
+var selectedAnswer = '';
+var selectedConfidence = 'unsure';
+var treeCollapsed = {};          // 鎶樺彔鐘舵€佺紦瀛?{sectionId: true/false}
+var timelineTreeData = null;     // 鏃堕棿瑙嗗浘鍘熷鏁版嵁缂撳瓨锛堢敤浜庡墠绔繃婊わ級
+var currentTimeFilter = 'all';   // 褰撳墠鏃堕棿绛涢€夋ā寮?
+var landmineRecallText = '';     // 鍦伴浄鐩叉祴鍥炲繂鏂囨湰
+var landmineDetail = null;       // 鍦伴浄鐩叉祴棰樼洰璇︽儏缂撳瓨
+
+document.addEventListener('DOMContentLoaded', function() { syncAndReload(); });
+
+// ========== Sync ==========
+async function syncAndReload() {
+    var btn = document.getElementById('syncBtn');
+    btn.textContent = '\u23f3 \u540c\u6b65\u4e2d...';
+    btn.disabled = true;
+    try {
+        await fetch('/api/wrong-answers/sync', { method: 'POST' });
+        await loadStats();
+        await loadList();
+    } catch(e) { console.error('sync error', e); }
+    btn.textContent = '\ud83d\udd04 \u540c\u6b65\u6570\u636e';
+    btn.disabled = false;
+}
+
+async function loadStats() {
+    try {
+        var r = await fetch('/api/wrong-answers/stats');
+        var data = await r.json();
+        document.getElementById('statActive').textContent = data.total_active;
+        document.getElementById('statCritical').textContent = data.severity_counts.critical || 0;
+        document.getElementById('statArchived').textContent = data.total_archived;
+        document.getElementById('statRetryRate').textContent = data.retry_correct_rate + '%';
+    } catch(e) { console.error('stats error', e); }
+}
+
+function switchView(view) {
+    currentView = view;
+    ['severity','chapter','timeline'].forEach(function(v) {
+        var btn = document.getElementById('tab-' + v);
+        if (v === view) btn.className = 'px-4 py-2 rounded text-sm font-medium bg-red-500 text-white';
+        else btn.className = 'px-4 py-2 rounded text-sm font-medium text-gray-600 hover:bg-gray-100';
+    });
+    // 鏃堕棿瑙嗗浘宸ュ叿鏍忚仈鍔?
+    document.getElementById('timelineToolbar').classList.toggle('hidden', view !== 'timeline');
+    loadList();
+}
+
+function toggleSeverity(sev) {
+    currentSeverity = sev;
+    document.querySelectorAll('.sev-btn').forEach(function(btn) {
+        if (btn.dataset.sev === sev) btn.className = 'sev-btn px-2 py-1 rounded text-xs bg-gray-200 text-gray-700 font-medium';
+        else btn.className = 'sev-btn px-2 py-1 rounded text-xs text-gray-600 hover:bg-gray-100';
+    });
+    loadList();
+}
+
+function applyFilters() {
+    currentStatus = document.getElementById('statusFilter').value;
+    loadList();
+}
+
+async function loadList() {
+    var container = document.getElementById('listContainer');
+    container.innerHTML = '<div class="p-8 text-center text-gray-400">\u52a0\u8f7d\u4e2d...</div>';
+    try {
+        var url = '/api/wrong-answers/list?view=' + currentView + '&status=' + currentStatus;
+        if (currentSeverity) url += '&severity=' + currentSeverity;
+        var r = await fetch(url);
+        listData = await r.json();
+        if (currentView === 'severity') renderSeverityView(listData);
+        else if (currentView === 'chapter') renderChapterView(listData);
+        else if (currentView === 'timeline') renderTimelineView(listData);
+    } catch(e) {
+        container.innerHTML = '<div class="p-8 text-center text-red-400">\u52a0\u8f7d\u5931\u8d25</div>';
+    }
+}
+
+// ========== Renderers ==========
+function renderSeverityView(data) {
+    var container = document.getElementById('listContainer');
+    if (!data.items || data.items.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-gray-400">\u6682\u65e0\u9519\u9898\uff0c\u7ee7\u7eed\u4fdd\u6301 \ud83c\udf89</div>';
+        return;
+    }
+    var html = '';
+    data.items.forEach(function(item) { html += renderCard(item); });
+    container.innerHTML = html;
+}
+
+function renderChapterView(data) {
+    var container = document.getElementById('listContainer');
+    if (!data.tree || Object.keys(data.tree).length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-gray-400">\u6682\u65e0\u9519\u9898</div>';
+        return;
+    }
+    var html = '';
+    var bookIdx = 0;
+    for (var book in data.tree) {
+        var bookData = data.tree[book];
+        var bs = bookData._stats || {};
+        var bookId = 'ch-book-' + bookIdx;
+        var bookOpen = !treeCollapsed[bookId];
+        html += '<div class="border-b">';
+        // 绉戠洰绾?
+        html += '<div class="px-6 py-3 bg-blue-50 cursor-pointer hover:bg-blue-100 flex items-center justify-between" onclick="toggleSection(\'' + bookId + '\')">';
+        html += '<div class="flex items-center space-x-2">';
+        html += '<span id="arrow-' + bookId + '" class="text-sm text-gray-400">' + (bookOpen ? '\u25bc' : '\u25b6') + '</span>';
+        html += '<span class="font-bold text-blue-800">\ud83d\udcda ' + book + '</span>';
+        html += '</div>';
+        html += '<div class="flex items-center space-x-3 text-xs">';
+        html += '<span class="text-gray-500">' + (bs.total || 0) + '\u9898</span>';
+        if (bs.critical) html += '<span class="text-red-600 font-bold">\ud83d\udea8' + bs.critical + '</span>';
+        html += '<span class="text-gray-400">\u7d2f\u8ba1\u9519' + (bs.error_sum || 0) + '\u6b21</span>';
+        html += '</div></div>';
+        // 绔犺妭鍒楄〃
+        html += '<div id="' + bookId + '" class="' + (bookOpen ? '' : 'hidden') + '">';
+        var chIdx = 0;
+        var chapters = bookData.chapters || {};
+        for (var ch in chapters) {
+            var chData = chapters[ch];
+            var cs = chData._stats || {};
+            var chId = bookId + '-ch-' + chIdx;
+            var chOpen = !treeCollapsed[chId];
+            html += '<div class="border-t">';
+            // 绔犺妭绾?
+            html += '<div class="px-8 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100 flex items-center justify-between" onclick="toggleSection(\'' + chId + '\')">';
+            html += '<div class="flex items-center space-x-2">';
+            html += '<span id="arrow-' + chId + '" class="text-xs text-gray-400">' + (chOpen ? '\u25bc' : '\u25b6') + '</span>';
+            html += '<span class="text-sm font-medium text-gray-700">\ud83d\udcd6 ' + ch + '</span>';
+            html += '</div>';
+            html += '<div class="flex items-center space-x-3 text-xs">';
+            html += '<span class="text-gray-500">' + (cs.total || 0) + '\u9898</span>';
+            if (cs.critical) html += '<span class="text-red-600 font-bold">\ud83d\udea8' + cs.critical + '</span>';
+            html += '<span class="text-gray-400">\u7d2f\u8ba1\u9519' + (cs.error_sum || 0) + '\u6b21</span>';
+            html += '</div></div>';
+            // 鐭ヨ瘑鐐?+ 閿欓鍗＄墖
+            html += '<div id="' + chId + '" class="' + (chOpen ? '' : 'hidden') + '">';
+            var kps = chData.key_points || {};
+            for (var kp in kps) {
+                html += '<div class="px-10 py-1 text-xs text-gray-500 border-t border-dashed bg-white">\ud83d\udccc ' + kp + ' (' + kps[kp].length + ')</div>';
+                kps[kp].forEach(function(item) { html += renderCard(item); });
+            }
+            html += '</div></div>';
+            chIdx++;
+        }
+        html += '</div></div>';
+        bookIdx++;
+    }
+    container.innerHTML = html;
+}
+
+function renderTimelineView(data) {
+    var container = document.getElementById('listContainer');
+    var tree = data.tree || {};
+    var currentMonth = data.current_month || '';
+    timelineTreeData = data; // 缂撳瓨鐢ㄤ簬鍓嶇杩囨护
+
+    var months = Object.keys(tree);
+    if (months.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-gray-400">\u6682\u65e0\u9519\u9898</div>';
+        return;
+    }
+
+    // 搴旂敤鏃堕棿绛涢€?
+    var filteredMonths = months;
+    if (currentTimeFilter === '7d') {
+        var cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 7);
+        var cutoffStr = cutoff.toISOString().slice(0, 10);
+        filteredMonths = months.filter(function(m) {
+            var dates = Object.keys(tree[m].dates || {});
+            return dates.some(function(d) { return d >= cutoffStr; });
+        });
+    } else if (currentTimeFilter === 'month') {
+        filteredMonths = currentMonth ? months.filter(function(m) { return m === currentMonth; }) : months.slice(0, 1);
+    } else if (currentTimeFilter === 'pick') {
+        var picked = document.getElementById('monthPicker').value;
+        if (picked) filteredMonths = months.filter(function(m) { return m === picked; });
+    }
+
+    if (filteredMonths.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-gray-400">\u8be5\u65f6\u95f4\u8303\u56f4\u5185\u65e0\u9519\u9898</div>';
+        return;
+    }
+
+    var html = '';
+    filteredMonths.forEach(function(monthKey, mi) {
+        var monthData = tree[monthKey];
+        var ms = monthData._stats || {};
+        var monthId = 'tl-month-' + mi;
+        // 榛樿灞曞紑褰撳墠鏈堟垨绛涢€夊悗鍙湁涓€涓湀
+        var defaultOpen = (monthKey === currentMonth) || filteredMonths.length === 1;
+        var monthOpen = treeCollapsed[monthId] === undefined ? defaultOpen : !treeCollapsed[monthId];
+
+        // 鏈堜唤鏍囬
+        var parts = monthKey.split('-');
+        var monthLabel = parts.length === 2 ? parts[0] + '\u5e74' + parseInt(parts[1]) + '\u6708' : monthKey;
+
+        html += '<div class="border-b">';
+        html += '<div class="px-6 py-3 bg-purple-50 cursor-pointer hover:bg-purple-100 flex items-center justify-between" onclick="toggleSection(\'' + monthId + '\')">';
+        html += '<div class="flex items-center space-x-2">';
+        html += '<span id="arrow-' + monthId + '" class="text-sm text-gray-400">' + (monthOpen ? '\u25bc' : '\u25b6') + '</span>';
+        html += '<span class="font-bold text-purple-800">\ud83d\udcc5 ' + monthLabel + '</span>';
+        html += '</div>';
+        html += '<div class="flex items-center space-x-3 text-xs">';
+        html += '<span class="text-gray-500">' + (ms.total || 0) + '\u9898</span>';
+        if (ms.critical) html += '<span class="text-red-600 font-bold">\ud83d\udea8' + ms.critical + '</span>';
+        html += '</div></div>';
+
+        // 鏃ユ湡鍒楄〃
+        html += '<div id="' + monthId + '" class="' + (monthOpen ? '' : 'hidden') + '">';
+        var dates = Object.keys(monthData.dates || {}).sort().reverse();
+
+        // 7澶╂ā寮忎笅杩囨护鏃ユ湡
+        if (currentTimeFilter === '7d') {
+            dates = dates.filter(function(d) { return d >= cutoffStr; });
+        }
+
+        dates.forEach(function(dateKey, di) {
+            var items = monthData.dates[dateKey] || [];
+            var dateId = monthId + '-d-' + di;
+            var dateOpen = !treeCollapsed[dateId];
+
+            // 鏃ユ湡鏍囩锛?鏈?鏃?鍛ㄤ笁
+            var dd = new Date(dateKey + 'T00:00:00');
+            var weekdays = ['\u5468\u65e5','\u5468\u4e00','\u5468\u4e8c','\u5468\u4e09','\u5468\u56db','\u5468\u4e94','\u5468\u516d'];
+            var dateLabel = (dd.getMonth() + 1) + '\u6708' + dd.getDate() + '\u65e5 ' + weekdays[dd.getDay()];
+
+            html += '<div class="border-t">';
+            html += '<div class="px-8 py-2 bg-gray-50 cursor-pointer hover:bg-gray-100 flex items-center justify-between" onclick="toggleSection(\'' + dateId + '\')">';
+            html += '<div class="flex items-center space-x-2">';
+            html += '<span id="arrow-' + dateId + '" class="text-xs text-gray-400">' + (dateOpen ? '\u25bc' : '\u25b6') + '</span>';
+            html += '<span class="text-sm font-medium text-gray-700">' + dateLabel + '</span>';
+            html += '</div>';
+            html += '<span class="text-xs text-gray-400">' + items.length + '\u9898</span>';
+            html += '</div>';
+
+            html += '<div id="' + dateId + '" class="' + (dateOpen ? '' : 'hidden') + '">';
+            items.forEach(function(item) { html += renderCard(item); });
+            html += '</div></div>';
+        });
+        html += '</div></div>';
+    });
+    container.innerHTML = html;
+}
+
+function renderCard(item) {
+    var badge = severityBadge(item.severity_tag);
+    var retryInfo = '';
+    if (item.retry_count > 0) {
+        retryInfo = '<span class="text-xs ' + (item.last_retry_correct ? 'text-green-500' : 'text-red-500') + '">\u91cd\u505a' + item.retry_count + '\u6b21 ' + (item.last_retry_correct ? '\u2713' : '\u2717') + '</span>';
+    }
+    var statusBadge = '';
+    if (item.mastery_status === 'archived') {
+        statusBadge = '<span class="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs ml-2">\u5df2\u5f52\u6863</span>';
+    }
+    return '<div class="px-6 py-4 hover:bg-gray-50 transition border-b last:border-b-0">' +
+        '<div class="flex items-center justify-between mb-2">' +
+            '<div class="flex items-center space-x-2 flex-1 min-w-0">' +
+                badge + statusBadge +
+                '<span class="text-xs text-gray-400">' + (item.question_type || 'A1') + ' | ' + (item.difficulty || '\u57fa\u7840') + '</span>' +
+                '<span class="text-xs text-red-500 font-bold">\u9519' + item.error_count + '\u6b21</span>' +
+                retryInfo +
+            '</div>' +
+            '<button onclick="openSurgery(' + item.id + ')" class="bg-red-50 text-red-600 px-3 py-1 rounded text-sm hover:bg-red-100 flex-shrink-0 ml-2">\ud83d\udd2c \u91cd\u505a</button>' +
+        '</div>' +
+        '<div class="text-sm text-gray-800 mb-1">' + item.question_preview + '</div>' +
+        '<div class="flex items-center space-x-2 text-xs text-gray-400">' +
+            (item.key_point ? '<span>\ud83d\udccc ' + item.key_point + '</span>' : '') +
+            (item.last_wrong_at ? '<span>' + formatTimeAgo(item.last_wrong_at) + '</span>' : '') +
+        '</div>' +
+    '</div>';
+}
+
+// ========== Surgery Modal ==========
+var variantData = null;  // 缂撳瓨鍙樺紡棰樻暟鎹?
+
+async function openSurgery(id) {
+    currentSurgeryId = id;
+    batchQueue = [id];
+    batchIndex = 0;
+    variantData = null;
+    document.getElementById('surgeryModal').classList.remove('hidden');
+    document.getElementById('surgeryProgress').textContent = '';
+
+    // 鍏堣幏鍙栬鎯呭垽鏂?severity
+    try {
+        var r = await fetch('/api/wrong-answers/' + id);
+        var detail = await r.json();
+        if (detail.severity_tag === 'critical') {
+            await renderVariantPhase1(id, detail);
+        } else if (detail.severity_tag === 'landmine') {
+            renderLandminePhase1(id, detail);
+        } else {
+            await renderPhase1(id);
+        }
+    } catch(e) {
+        await renderPhase1(id);
+    }
+}
+
+async function openBatchSurgery() {
+    try {
+        var r = await fetch('/api/wrong-answers/retry-batch/next?count=5');
+        var data = await r.json();
+        if (!data.items || data.items.length === 0) {
+            alert('\u6682\u65e0\u5f85\u91cd\u505a\u7684\u9519\u9898');
+            return;
+        }
+        batchQueue = data.items.map(function(i) { return i.id; });
+        batchIndex = 0;
+        currentSurgeryId = batchQueue[0];
+        document.getElementById('surgeryModal').classList.remove('hidden');
+        updateBatchProgress();
+        await renderPhase1(batchQueue[0]);
+    } catch(e) { alert('\u52a0\u8f7d\u5931\u8d25'); }
+}
+
+function updateBatchProgress() {
+    if (batchQueue.length > 1) {
+        document.getElementById('surgeryProgress').textContent = '\u7b2c ' + (batchIndex + 1) + ' / ' + batchQueue.length + ' \u9898';
+    }
+}
+
+async function renderPhase1(id) {
+    var content = document.getElementById('surgeryContent');
+    content.innerHTML = '<div class="text-center text-gray-400 py-8">\u52a0\u8f7d\u9898\u76ee...</div>';
+    surgeryStartTime = Date.now();
+    selectedAnswer = '';
+    selectedConfidence = 'unsure';
+
+    try {
+        var r = await fetch('/api/wrong-answers/' + id);
+        var data = await r.json();
+        currentSurgeryId = id;
+
+        var badge = severityBadge(data.severity_tag);
+        var html = '<div class="mb-4">' + badge +
+            '<span class="text-xs text-gray-400 ml-2">[' + (data.question_type || 'A1') + '] [' + (data.difficulty || '\u57fa\u7840') + '] \u9519' + data.error_count + '\u6b21</span>' +
+            (data.key_point ? '<span class="text-xs text-blue-500 ml-2">\ud83d\udccc ' + data.key_point + '</span>' : '') +
+            '</div>';
+
+        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + data.question_text + '</div></div>';
+
+        // Options (no correct answer shown)
+        html += '<div class="space-y-2 mb-6">';
+        if (data.options) {
+            for (var opt in data.options) {
+                html += '<label class="block p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition option-label" data-opt="' + opt + '" onclick="selectOption(this,\'' + opt + '\')">' +
+                    '<span class="font-bold mr-2">' + opt + '.</span>' + data.options[opt] +
+                '</label>';
+            }
+        }
+        html += '</div>';
+
+        // Confidence
+        html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">\u4f60\u7684\u628a\u63e1\uff1a</div>' +
+            '<div class="flex space-x-2">' +
+                '<button onclick="setConfidence(\'sure\')" id="conf-sure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">\u2713 \u786e\u5b9a</button>' +
+                '<button onclick="setConfidence(\'unsure\')" id="conf-unsure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-yellow-50">? \u6a21\u7cca</button>' +
+                '<button onclick="setConfidence(\'no\')" id="conf-no" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-red-50">\u2717 \u4e0d\u4f1a</button>' +
+            '</div></div>';
+
+        // Submit
+        html += '<button onclick="submitRetry()" id="submitRetryBtn" disabled class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">\u8bf7\u5148\u9009\u62e9\u7b54\u6848</button>';
+
+        content.innerHTML = html;
+    } catch(e) {
+        content.innerHTML = '<div class="text-center text-red-400 py-8">\u52a0\u8f7d\u5931\u8d25</div>';
+    }
+}
+
+function selectOption(el, opt) {
+    selectedAnswer = opt;
+    document.querySelectorAll('.option-label').forEach(function(label) {
+        label.classList.remove('bg-blue-100', 'border-blue-500');
+    });
+    el.classList.add('bg-blue-100', 'border-blue-500');
+    var btn = document.getElementById('submitRetryBtn') || document.getElementById('variantNextBtn');
+    if (btn) {
+        btn.disabled = false;
+        btn.className = 'w-full bg-red-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-red-600 cursor-pointer';
+        btn.textContent = btn.id === 'variantNextBtn' ? '\u2192 \u9501\u5b9a\u7b54\u6848\uff0c\u8fdb\u5165\u81ea\u8bc1' : '\u63d0\u4ea4\u7b54\u6848';
+    }
+}
+
+function setConfidence(conf) {
+    selectedConfidence = conf;
+    document.querySelectorAll('.conf-btn').forEach(function(btn) {
+        btn.classList.remove('bg-green-100', 'bg-yellow-100', 'bg-red-100', 'border-green-500', 'border-yellow-500', 'border-red-500');
+    });
+    var el = document.getElementById('conf-' + conf);
+    var colors = { sure: ['bg-green-100', 'border-green-500'], unsure: ['bg-yellow-100', 'border-yellow-500'], no: ['bg-red-100', 'border-red-500'] };
+    if (colors[conf]) colors[conf].forEach(function(c) { el.classList.add(c); });
+}
+
+// ========== Submit & Phase 2 ==========
+async function submitRetry() {
+    if (!selectedAnswer || !currentSurgeryId) return;
+    var btn = document.getElementById('submitRetryBtn');
+    btn.disabled = true;
+    btn.textContent = '\u5224\u5b9a\u4e2d...';
+
+    var elapsed = Math.round((Date.now() - surgeryStartTime) / 1000);
+    try {
+        var r = await fetch('/api/wrong-answers/' + currentSurgeryId + '/retry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_answer: selectedAnswer,
+                confidence: selectedConfidence,
+                time_spent_seconds: elapsed
+            })
+        });
+        var result = await r.json();
+        renderPhase2(result);
+    } catch(e) {
+        btn.textContent = '\u63d0\u4ea4\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5';
+        btn.disabled = false;
+    }
+}
+
+function renderPhase2(result) {
+    var content = document.getElementById('surgeryContent');
+    var isCorrect = result.is_correct;
+    var confLabels = { sure: '\u2713 \u786e\u5b9a', unsure: '? \u6a21\u7cca', no: '\u2717 \u4e0d\u4f1a' };
+
+    var html = '<div class="text-center mb-6">';
+    if (isCorrect) {
+        html += '<div class="text-6xl mb-2">\u2705</div><div class="text-2xl font-bold text-green-600">\u56de\u7b54\u6b63\u786e\uff01</div>';
+    } else {
+        html += '<div class="text-6xl mb-2">\u274c</div><div class="text-2xl font-bold text-red-600">\u56de\u7b54\u9519\u8bef</div>';
+    }
+    html += '</div>';
+
+    // Comparison
+    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
+        '<div class="p-4 rounded-lg ' + (isCorrect ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200') + '">' +
+            '<div class="text-xs text-gray-500 mb-1">\u8fd9\u6b21\u9009\u62e9</div>' +
+            '<div class="text-xl font-bold ' + (isCorrect ? 'text-green-600' : 'text-red-600') + '">' + selectedAnswer + ' (' + (confLabels[selectedConfidence] || selectedConfidence) + ')</div>' +
+        '</div>' +
+        '<div class="p-4 rounded-lg bg-green-50 border border-green-200">' +
+            '<div class="text-xs text-gray-500 mb-1">\u6b63\u786e\u7b54\u6848</div>' +
+            '<div class="text-xl font-bold text-green-600">' + result.correct_answer + '</div>' +
+        '</div>' +
+    '</div>';
+
+    // Previous attempts
+    if (result.previous_attempts && result.previous_attempts.length > 1) {
+        html += '<div class="bg-gray-50 rounded-lg p-3 mb-4"><div class="text-xs text-gray-500 mb-2">\u5386\u53f2\u91cd\u505a\u8bb0\u5f55</div>';
+        result.previous_attempts.slice(0, 5).forEach(function(a, i) {
+            var icon = a.is_correct ? '\u2705' : '\u274c';
+            html += '<div class="text-sm">' + icon + ' \u7b2c' + (i + 1) + '\u6b21: \u9009' + a.user_answer + ' (' + (confLabels[a.confidence] || '') + ')</div>';
+        });
+        html += '</div>';
+    }
+
+    // Explanation (micro-friction for wrong/unsure/no)
+    if (result.explanation) {
+        html += buildExplanationSection(
+            result.explanation,
+            '\ud83d\udcd6 \u89e3\u6790',
+            isCorrect,
+            selectedConfidence,
+            'retry'
+        );
+    }
+
+    // Action buttons
+    html += '<div class="flex space-x-3">';
+    if (result.can_archive) {
+        html += '<button onclick="archiveAndNext()" class="flex-1 bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600">\u2705 \u6807\u8bb0\u5df2\u638c\u63e1</button>';
+    }
+    if (batchQueue.length > 1 && batchIndex < batchQueue.length - 1) {
+        html += '<button onclick="nextQuestion()" class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600">\u2192 \u4e0b\u4e00\u9898</button>';
+    } else {
+        html += '<button onclick="closeSurgery()" class="flex-1 bg-gray-500 text-white py-3 rounded-lg font-bold hover:bg-gray-600">\u5173\u95ed</button>';
+    }
+    html += '</div>';
+
+    content.innerHTML = html;
+}
+
+async function archiveAndNext() {
+    if (!currentSurgeryId) return;
+    await fetch('/api/wrong-answers/' + currentSurgeryId + '/archive', { method: 'POST' });
+    if (batchQueue.length > 1 && batchIndex < batchQueue.length - 1) {
+        nextQuestion();
+    } else {
+        closeSurgery();
+    }
+}
+
+function nextQuestion() {
+    batchIndex++;
+    if (batchIndex < batchQueue.length) {
+        currentSurgeryId = batchQueue[batchIndex];
+        updateBatchProgress();
+        renderPhase1(batchQueue[batchIndex]);
+    } else {
+        closeSurgery();
+    }
+}
+
+function closeSurgery() {
+    document.getElementById('surgeryModal').classList.add('hidden');
+    currentSurgeryId = null;
+    selectedAnswer = '';
+    selectedConfidence = 'unsure';
+    variantData = null;
+    landmineRecallText = '';
+    landmineDetail = null;
+    batchQueue = [];
+    batchIndex = 0;
+    loadStats();
+    loadList();
+}
+
+// ========== Variant Surgery (3-Phase) ==========
+
+async function renderVariantPhase1(id, detail) {
+    var content = document.getElementById('surgeryContent');
+    content.innerHTML = '<div class="text-center text-gray-400 py-8">\ud83e\uddec \u6b63\u5728\u751f\u6210\u53d8\u5f0f\u9898...</div>';
+    surgeryStartTime = Date.now();
+    selectedAnswer = '';
+    selectedConfidence = 'unsure';
+    document.getElementById('surgeryTitle').innerHTML = '\ud83e\uddec \u53d8\u5f0f\u624b\u672f\u53f0 <span class="text-sm font-normal text-red-400">(\u81f4\u547d\u76f2\u533a)</span>';
+
+    try {
+        var r = await fetch('/api/wrong-answers/' + id + '/variant/generate', { method: 'POST' });
+        if (!r.ok) {
+            var err = await r.json();
+            content.innerHTML = '<div class="text-center py-8"><div class="text-red-400 mb-2">' + (err.detail || '\u53d8\u5f0f\u751f\u6210\u5931\u8d25') + '</div><button onclick="renderPhase1(' + id + ')" class="text-blue-500 underline">\u56de\u9000\u5230\u666e\u901a\u91cd\u505a</button></div>';
+            return;
+        }
+        variantData = await r.json();
+        // Keep original question context for Phase 2 rationale
+        variantData.original_question_text = detail && detail.question_text ? detail.question_text : '';
+        variantData.original_options = detail && detail.options ? detail.options : {};
+
+        var badge = severityBadge('critical');
+        var html = '<div class="mb-3">' + badge +
+            '<span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold ml-2">\ud83e\uddec ' + (variantData.transform_type || '\u53d8\u5f0f\u9898') + '</span>' +
+            '</div>';
+
+        html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm text-yellow-800">' +
+            '\u26a0\ufe0f \u8fd9\u662f AI \u751f\u6210\u7684<b>\u53d8\u5f0f\u9898</b>\uff0c\u4e0d\u662f\u539f\u9898\uff01\u8003\u5bdf\u7684\u77e5\u8bc6\u70b9\u76f8\u540c\uff0c\u4f46\u573a\u666f/\u9009\u9879\u5df2\u6539\u53d8\u3002' +
+            (variantData.core_knowledge ? '<br>\u6838\u5fc3\u8003\u70b9\uff1a<b>' + variantData.core_knowledge + '</b>' : '') +
+            '</div>';
+
+        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + variantData.variant_question + '</div></div>';
+
+        // Options
+        html += '<div class="space-y-2 mb-6">';
+        if (variantData.variant_options) {
+            for (var opt in variantData.variant_options) {
+                html += '<label class="block p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition option-label" data-opt="' + opt + '" onclick="selectOption(this,\'' + opt + '\')">' +
+                    '<span class="font-bold mr-2">' + opt + '.</span>' + variantData.variant_options[opt] +
+                '</label>';
+            }
+        }
+        html += '</div>';
+
+        // Confidence
+        html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">\u4f60\u7684\u628a\u63e1\uff1a</div>' +
+            '<div class="flex space-x-2">' +
+                '<button onclick="setConfidence(\'sure\')" id="conf-sure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">\u2713 \u786e\u5b9a</button>' +
+                '<button onclick="setConfidence(\'unsure\')" id="conf-unsure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-yellow-50">? \u6a21\u7cca</button>' +
+                '<button onclick="setConfidence(\'no\')" id="conf-no" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-red-50">\u2717 \u4e0d\u4f1a</button>' +
+            '</div></div>';
+
+        // Next button (goes to Phase 2, not submit)
+        html += '<button onclick="renderVariantPhase2()" id="variantNextBtn" disabled class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">\u8bf7\u5148\u9009\u62e9\u7b54\u6848</button>';
+
+        content.innerHTML = html;
+    } catch(e) {
+        content.innerHTML = '<div class="text-center py-8 text-red-400">\u53d8\u5f0f\u751f\u6210\u5931\u8d25<br><button onclick="renderPhase1(' + id + ')" class="text-blue-500 underline mt-2">\u56de\u9000\u5230\u666e\u901a\u91cd\u505a</button></div>';
+    }
+}
+
+function renderVariantPhase2() {
+    if (!selectedAnswer) return;
+    var content = document.getElementById('surgeryContent');
+    var originalQuestionText = variantData && variantData.original_question_text ? variantData.original_question_text : '';
+    var originalOptions = variantData && variantData.original_options ? variantData.original_options : {};
+
+    var html = '<div class="mb-4">' +
+        '<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">' +
+            '<div class="text-sm text-blue-700 font-bold mb-2">\ud83d\udd12 Phase 2: \u903b\u8f91\u81ea\u8bc1</div>' +
+            '<div class="text-sm text-blue-600">\u4f60\u7684\u9009\u62e9\u5df2\u9501\u5b9a\uff0c\u73b0\u5728\u8bf7\u89e3\u91ca\u4f60\u7684\u63a8\u7406\u8fc7\u7a0b\u3002</div>' +
+        '</div>' +
+    '</div>';
+
+    if (originalQuestionText) {
+        html += '<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">' +
+            '<div class="text-sm text-indigo-700 font-bold mb-2">\ud83d\udccc \u539f\u9898\u56de\u770b\uff08\u4ec5\u4f9b\u81ea\u8ff0\uff0c\u4e0d\u542b\u7b54\u6848\uff09</div>' +
+            '<div class="text-sm text-gray-700 leading-relaxed mb-3">' + escapeHtml(originalQuestionText) + '</div>';
+
+        var hasOption = false;
+        var optionsHtml = '';
+        for (var opt in originalOptions) {
+            if (!originalOptions[opt]) continue;
+            hasOption = true;
+            optionsHtml += '<div class="text-sm text-gray-700"><span class="font-bold mr-1">' + escapeHtml(opt) + '.</span>' +
+                escapeHtml(originalOptions[opt]) + '</div>';
+        }
+        if (hasOption) {
+            html += '<div class="space-y-1">' + optionsHtml + '</div>';
+        }
+        html += '</div>';
+    }
+
+    // Show locked answer
+    var confLabels = { sure: '\u2713 \u786e\u5b9a', unsure: '? \u6a21\u7cca', no: '\u2717 \u4e0d\u4f1a' };
+    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
+        '<div class="p-3 bg-gray-50 rounded-lg border">' +
+            '<div class="text-xs text-gray-500 mb-1">\u5df2\u9501\u5b9a\u7b54\u6848</div>' +
+            '<div class="text-2xl font-bold text-blue-600">' + selectedAnswer + '</div>' +
+        '</div>' +
+        '<div class="p-3 bg-gray-50 rounded-lg border">' +
+            '<div class="text-xs text-gray-500 mb-1">\u81ea\u4fe1\u5ea6</div>' +
+            '<div class="text-lg font-bold">' + (confLabels[selectedConfidence] || selectedConfidence) + '</div>' +
+        '</div>' +
+    '</div>';
+
+    // Rationale textarea
+    html += '<div class="mb-4">' +
+        '<label class="block text-sm font-bold text-gray-700 mb-2">\u8bf7\u5199\u51fa\u4f60\u7684\u63a8\u7406\u8fc7\u7a0b <span class="text-red-500">*</span></label>' +
+        '<div class="text-xs text-gray-400 mb-2">\u4e3a\u4ec0\u4e48\u9009\u8fd9\u4e2a\u7b54\u6848\uff1f\u6d89\u53ca\u54ea\u4e2a\u77e5\u8bc6\u70b9\uff1f\u6392\u9664\u5176\u4ed6\u9009\u9879\u7684\u7406\u7531\u662f\u4ec0\u4e48\uff1f</div>' +
+        '<textarea id="rationaleInput" oninput="updateRationaleCount()" rows="6" class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300" placeholder="\u4f8b\u5982\uff1a\u6211\u9009A\u662f\u56e0\u4e3a...\u8fd9\u4e2a\u77e5\u8bc6\u70b9\u7684\u6838\u5fc3\u662f...\u6392\u9664B\u662f\u56e0\u4e3a..."></textarea>' +
+        '<div class="flex justify-between mt-1">' +
+            '<span id="rationaleCount" class="text-xs text-gray-400">0/30 \u5b57\uff08\u6700\u5c1130\u5b57\uff09</span>' +
+            '<span class="text-xs text-gray-400">\u5199\u5f97\u8d8a\u8be6\u7ec6\uff0cAI\u8bc4\u5206\u8d8a\u9ad8</span>' +
+        '</div>' +
+    '</div>';
+
+    // Submit button
+    html += '<button onclick="submitVariantJudge()" id="variantSubmitBtn" disabled class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">\u81f3\u5c1130\u5b57\u624d\u80fd\u63d0\u4ea4</button>';
+
+    content.innerHTML = html;
+}
+
+function updateRationaleCount() {
+    var text = document.getElementById('rationaleInput').value;
+    var len = text.length;
+    var countEl = document.getElementById('rationaleCount');
+    var btn = document.getElementById('variantSubmitBtn');
+    countEl.textContent = len + '/30 \u5b57' + (len < 30 ? '\uff08\u6700\u5c1130\u5b57\uff09' : ' \u2713');
+    countEl.className = len >= 30 ? 'text-xs text-green-500' : 'text-xs text-gray-400';
+    if (len >= 30) {
+        btn.disabled = false;
+        btn.className = 'w-full bg-red-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-red-600 cursor-pointer';
+        btn.textContent = '\ud83d\udd2c \u63d0\u4ea4\u5ba1\u5224';
+    } else {
+        btn.disabled = true;
+        btn.className = 'w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed';
+        btn.textContent = '\u81f3\u5c1130\u5b57\u624d\u80fd\u63d0\u4ea4';
+    }
+}
+
+async function submitVariantJudge() {
+    var rationale = document.getElementById('rationaleInput').value;
+    if (rationale.length < 30 || !currentSurgeryId) return;
+
+    var btn = document.getElementById('variantSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = '\ud83e\udde0 AI\u5ba1\u5224\u4e2d...';
+
+    var elapsed = Math.round((Date.now() - surgeryStartTime) / 1000);
+    try {
+        var r = await fetch('/api/wrong-answers/' + currentSurgeryId + '/variant/judge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_answer: selectedAnswer,
+                confidence: selectedConfidence,
+                rationale_text: rationale,
+                time_spent_seconds: elapsed
+            })
+        });
+        var result = await r.json();
+        renderVariantPhase3(result);
+    } catch(e) {
+        btn.textContent = '\u63d0\u4ea4\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5';
+        btn.disabled = false;
+    }
+}
+
+function renderVariantPhase3(result) {
+    var content = document.getElementById('surgeryContent');
+    var verdict = result.verdict;
+    var score = result.reasoning_score || 0;
+
+    // Header based on verdict
+    var html = '<div class="text-center mb-6">';
+    if (verdict === 'logic_closed') {
+        html += '<div class="text-6xl mb-2">\u2705</div>' +
+            '<div class="text-2xl font-bold text-green-600">\u903b\u8f91\u95ed\u73af\uff01</div>' +
+            '<div class="text-sm text-green-500">\u7b54\u6848\u6b63\u786e + \u63a8\u7406\u5b8c\u6574\uff0c\u771f\u6b63\u638c\u63e1\u4e86\u8fd9\u4e2a\u77e5\u8bc6\u70b9</div>';
+    } else if (verdict === 'lucky_guess') {
+        html += '<div class="text-6xl mb-2">\ud83c\udf40</div>' +
+            '<div class="text-2xl font-bold text-yellow-600">\u8499\u5bf9\u4e86\uff01</div>' +
+            '<div class="text-sm text-yellow-500">\u7b54\u6848\u6b63\u786e\u4f46\u63a8\u7406\u6709\u6f0f\u6d1e\uff0c\u5df2\u964d\u7ea7\u4e3a\u300c\u9690\u5f62\u5730\u96f7\u300d</div>';
+    } else {
+        html += '<div class="text-6xl mb-2">\u274c</div>' +
+            '<div class="text-2xl font-bold text-red-600">\u53d8\u5f0f\u4e5f\u6ca1\u8fc7</div>' +
+            '<div class="text-sm text-red-500">\u9519\u8bef\u6b21\u6570+1\uff0c\u8fd9\u4e2a\u77e5\u8bc6\u70b9\u9700\u8981\u91cd\u70b9\u653b\u514b</div>';
+    }
+    html += '</div>';
+
+    // Answer comparison
+    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
+        '<div class="p-4 rounded-lg ' + (result.is_correct ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200') + '">' +
+            '<div class="text-xs text-gray-500 mb-1">\u4f60\u7684\u7b54\u6848</div>' +
+            '<div class="text-xl font-bold ' + (result.is_correct ? 'text-green-600' : 'text-red-600') + '">' + selectedAnswer + '</div>' +
+        '</div>' +
+        '<div class="p-4 rounded-lg bg-green-50 border border-green-200">' +
+            '<div class="text-xs text-gray-500 mb-1">\u6b63\u786e\u7b54\u6848</div>' +
+            '<div class="text-xl font-bold text-green-600">' + result.variant_answer + '</div>' +
+        '</div>' +
+    '</div>';
+
+    // Reasoning score bar
+    var scoreColor = score >= 70 ? 'bg-green-500' : (score >= 40 ? 'bg-yellow-500' : 'bg-red-500');
+    var scoreTextColor = score >= 70 ? 'text-green-600' : (score >= 40 ? 'text-yellow-600' : 'text-red-600');
+    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4">' +
+        '<div class="flex justify-between items-center mb-2">' +
+            '<span class="text-sm font-bold text-gray-700">\ud83e\udde0 \u63a8\u7406\u8bc4\u5206</span>' +
+            '<span class="text-2xl font-bold ' + scoreTextColor + '">' + score + '<span class="text-sm text-gray-400">/100</span></span>' +
+        '</div>' +
+        '<div class="w-full bg-gray-200 rounded-full h-3">' +
+            '<div class="' + scoreColor + ' h-3 rounded-full transition-all" style="width:' + score + '%"></div>' +
+        '</div>' +
+    '</div>';
+
+    // AI Diagnosis
+    if (result.diagnosis) {
+        html += '<div class="bg-blue-50 rounded-lg p-4 mb-4">' +
+            '<div class="text-sm font-bold text-blue-700 mb-1">\ud83d\udd2c AI\u8bca\u65ad</div>' +
+            '<div class="text-sm text-gray-700 leading-relaxed">' + result.diagnosis + '</div>' +
+        '</div>';
+    }
+
+    // Weak links
+    if (result.weak_links && result.weak_links.length > 0) {
+        html += '<div class="mb-4"><div class="text-sm font-bold text-gray-700 mb-2">\u8584\u5f31\u73af\u8282</div><div class="flex flex-wrap gap-2">';
+        result.weak_links.forEach(function(w) {
+            html += '<span class="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-medium">' + w + '</span>';
+        });
+        html += '</div></div>';
+    }
+
+    // Explanation
+    if (result.variant_explanation) {
+        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4">' +
+            '<div class="text-sm font-bold text-gray-700 mb-1">\ud83d\udcd6 \u53d8\u5f0f\u9898\u89e3\u6790</div>' +
+            '<div class="text-sm text-gray-600 leading-relaxed">' + result.variant_explanation + '</div>' +
+        '</div>';
+    }
+
+    // Action buttons
+    html += '<div class="flex space-x-3">';
+    // Rescue report button (always show)
+    html += '<button onclick="copyRescueReport()" class="flex-1 bg-purple-500 text-white py-3 rounded-lg font-bold hover:bg-purple-600">\ud83d\udccb \u590d\u5236\u6c42\u52a9\u62a5\u544a</button>';
+
+    if (result.can_archive) {
+        html += '<button onclick="archiveAndNext()" class="flex-1 bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600">\u2705 \u6807\u8bb0\u5df2\u638c\u63e1</button>';
+    }
+    if (batchQueue.length > 1 && batchIndex < batchQueue.length - 1) {
+        html += '<button onclick="nextQuestion()" class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600">\u2192 \u4e0b\u4e00\u9898</button>';
+    } else {
+        html += '<button onclick="closeSurgery()" class="flex-1 bg-gray-500 text-white py-3 rounded-lg font-bold hover:bg-gray-600">\u5173\u95ed</button>';
+    }
+    html += '</div>';
+
+    content.innerHTML = html;
+}
+
+async function copyRescueReport() {
+    if (!currentSurgeryId) return;
+    try {
+        var r = await fetch('/api/wrong-answers/' + currentSurgeryId + '/variant/rescue-report', { method: 'POST' });
+        var data = await r.json();
+        await navigator.clipboard.writeText(data.content);
+        alert('\u2713 \u6c42\u52a9\u62a5\u544a\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\uff0c\u53ef\u7c98\u8d34\u7ed9AI\u8f85\u5bfc\u8001\u5e08');
+    } catch(e) {
+        alert('\u590d\u5236\u5931\u8d25');
+    }
+}
+
+// ========== Export ==========
+async function exportMarkdown() {
+    try {
+        var r = await fetch('/api/wrong-answers/export?status=' + currentStatus);
+        var data = await r.json();
+        navigator.clipboard.writeText(data.content).then(function() {
+            alert('\u2713 \u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\uff08' + data.total + '\u9053\u9519\u9898\uff09');
+        });
+    } catch(e) { alert('\u5bfc\u51fa\u5931\u8d25'); }
+}
+
+// ========== Landmine Blind Recall (2-Phase) ==========
+
+function renderLandminePhase1(id, detail) {
+    landmineDetail = detail;
+    currentSurgeryId = id;
+    surgeryStartTime = Date.now();
+    selectedAnswer = '';
+    selectedConfidence = 'unsure';
+    landmineRecallText = '';
+
+    document.getElementById('surgeryTitle').innerHTML = '\ud83d\udca3 \u5730\u96f7\u6392\u9664 <span class="text-sm font-normal text-yellow-500">(\u76f2\u6d4b\u56de\u5fc6)</span>';
+
+    var content = document.getElementById('surgeryContent');
+    var badge = severityBadge('landmine');
+
+    var html = '<div class="mb-3">' + badge +
+        '<span class="text-xs text-gray-400 ml-2">[' + (detail.question_type || 'A1') +
+        '] [' + (detail.difficulty || '\u57fa\u7840') + '] \u9519' + detail.error_count + '\u6b21</span>' +
+        '</div>';
+
+    html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm text-yellow-800">' +
+        '\u26a0\ufe0f \u4f60\u4e0a\u6b21<b>\u7b54\u5bf9\u4e86\u4f46\u4e0d\u786e\u5b9a</b>\uff0c\u53ef\u80fd\u662f\u8499\u5bf9\u7684\u3002<br>' +
+        '\u73b0\u5728\u8bf7<b>\u4e0d\u770b\u9009\u9879</b>\uff0c\u51ed\u8bb0\u5fc6\u5199\u51fa\u7b54\u6848\u8981\u70b9\uff0c\u9a8c\u8bc1\u662f\u5426\u771f\u6b63\u7406\u89e3\u3002</div>';
+
+    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + detail.question_text + '</div></div>';
+
+    if (detail.key_point) {
+        html += '<div class="bg-blue-50 rounded-lg p-3 mb-4 text-sm">' +
+            '\ud83d\udca1 \u63d0\u793a\u77e5\u8bc6\u70b9\uff1a<b>' + detail.key_point + '</b></div>';
+    }
+
+    html += '<div class="mb-4">' +
+        '<label class="block text-sm font-bold text-gray-700 mb-2">' +
+        '\u8bf7\u51ed\u8bb0\u5fc6\u5199\u51fa\u7b54\u6848\u8981\u70b9 <span class="text-red-500">*</span></label>' +
+        '<div class="text-xs text-gray-400 mb-2">\u5173\u952e\u8bcd\u5373\u53ef\uff1a\u6b63\u786e\u7b54\u6848\u662f\u4ec0\u4e48\uff1f\u4e3a\u4ec0\u4e48\uff1f\u6d89\u53ca\u4ec0\u4e48\u673a\u5236\uff1f</div>' +
+        '<textarea id="landmineRecallInput" oninput="updateLandmineRecallCount()" rows="4" ' +
+        'class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-yellow-300 focus:border-yellow-300" ' +
+        'placeholder="\u4f8b\u5982\uff1a\u7b54\u6848\u5e94\u8be5\u662fB\uff0c\u56e0\u4e3a\u8be5\u75c5\u7684\u7279\u5f81\u6027\u8868\u73b0\u662f...\u673a\u5236\u662f..."></textarea>' +
+        '<div class="flex justify-between mt-1">' +
+        '<span id="landmineRecallCount" class="text-xs text-gray-400">0/10 \u5b57\uff08\u6700\u5c1110\u5b57\uff09</span>' +
+        '<span class="text-xs text-gray-400">\u5199\u5b8c\u540e\u53ef\u67e5\u770b\u9009\u9879\u9a8c\u8bc1</span></div></div>';
+
+    html += '<button onclick="renderLandminePhase2()" id="landmineRevealBtn" disabled ' +
+        'class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">' +
+        '\u81f3\u5c1110\u5b57\u624d\u80fd\u67e5\u770b\u9009\u9879</button>';
+
+    content.innerHTML = html;
+}
+
+function updateLandmineRecallCount() {
+    var text = document.getElementById('landmineRecallInput').value;
+    var len = text.length;
+    var countEl = document.getElementById('landmineRecallCount');
+    var btn = document.getElementById('landmineRevealBtn');
+
+    countEl.textContent = len + '/10 \u5b57' + (len < 10 ? '\uff08\u6700\u5c1110\u5b57\uff09' : ' \u2713');
+    countEl.className = len >= 10 ? 'text-xs text-green-500' : 'text-xs text-gray-400';
+
+    if (len >= 10) {
+        btn.disabled = false;
+        btn.className = 'w-full bg-yellow-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-yellow-600 cursor-pointer';
+        btn.textContent = '\ud83d\udc41 \u663e\u793a\u9009\u9879\uff0c\u8fdb\u5165\u9a8c\u8bc1';
+    } else {
+        btn.disabled = true;
+        btn.className = 'w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed';
+        btn.textContent = '\u81f3\u5c1110\u5b57\u624d\u80fd\u67e5\u770b\u9009\u9879';
+    }
+}
+
+function renderLandminePhase2() {
+    landmineRecallText = document.getElementById('landmineRecallInput').value;
+    var detail = landmineDetail;
+    var content = document.getElementById('surgeryContent');
+    selectedAnswer = '';
+    selectedConfidence = 'unsure';
+
+    document.getElementById('surgeryTitle').innerHTML = '\ud83d\udca3 \u5730\u96f7\u6392\u9664 <span class="text-sm font-normal text-yellow-500">(\u9a8c\u8bc1\u9009\u62e9)</span>';
+
+    var html = '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">' +
+        '<div class="text-xs text-yellow-600 font-bold mb-1">\ud83d\udcdd \u4f60\u7684\u76f2\u6d4b\u56de\u5fc6</div>' +
+        '<div class="text-sm text-gray-700 italic">\u201c' + escapeHtml(landmineRecallText) + '\u201d</div></div>';
+
+    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + detail.question_text + '</div></div>';
+
+    html += '<div class="space-y-2 mb-6">';
+    if (detail.options) {
+        for (var opt in detail.options) {
+            html += '<label class="block p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition option-label" ' +
+                'data-opt="' + opt + '" onclick="selectOption(this,\'' + opt + '\')">' +
+                '<span class="font-bold mr-2">' + opt + '.</span>' + detail.options[opt] + '</label>';
+        }
+    }
+    html += '</div>';
+
+    html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">\u4f60\u7684\u628a\u63e1\uff1a</div>' +
+        '<div class="flex space-x-2">' +
+        '<button onclick="setConfidence(\'sure\')" id="conf-sure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">\u2713 \u786e\u5b9a</button>' +
+        '<button onclick="setConfidence(\'unsure\')" id="conf-unsure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-yellow-50">? \u6a21\u7cca</button>' +
+        '<button onclick="setConfidence(\'no\')" id="conf-no" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-red-50">\u2717 \u4e0d\u4f1a</button>' +
+        '</div></div>';
+
+    html += '<button onclick="submitLandmineRetry()" id="submitRetryBtn" disabled ' +
+        'class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">\u8bf7\u5148\u9009\u62e9\u7b54\u6848</button>';
+
+    content.innerHTML = html;
+}
+
+async function submitLandmineRetry() {
+    if (!selectedAnswer || !currentSurgeryId) return;
+    var btn = document.getElementById('submitRetryBtn');
+    btn.disabled = true;
+    btn.textContent = '\u5224\u5b9a\u4e2d...';
+
+    var elapsed = Math.round((Date.now() - surgeryStartTime) / 1000);
+    try {
+        var r = await fetch('/api/wrong-answers/' + currentSurgeryId + '/retry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_answer: selectedAnswer,
+                confidence: selectedConfidence,
+                time_spent_seconds: elapsed,
+                recall_text: landmineRecallText,
+                is_landmine_recall: true
+            })
+        });
+        var result = await r.json();
+        renderLandmineResult(result);
+    } catch(e) {
+        btn.textContent = '\u63d0\u4ea4\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5';
+        btn.disabled = false;
+    }
+}
+
+function renderLandmineResult(result) {
+    var content = document.getElementById('surgeryContent');
+    var isCorrect = result.is_correct;
+    var needReflectionBeforeExplanation = shouldGateExplanation(isCorrect, selectedConfidence);
+    var confLabels = { sure: '\u2713 \u786e\u5b9a', unsure: '? \u6a21\u7cca', no: '\u2717 \u4e0d\u4f1a' };
+
+    var html = '<div class="text-center mb-6">';
+    if (isCorrect && selectedConfidence === 'sure') {
+        html += '<div class="text-6xl mb-2">\ud83d\udca3\u2705</div>' +
+            '<div class="text-2xl font-bold text-green-600">\u5730\u96f7\u6392\u9664\uff01</div>' +
+            '<div class="text-sm text-green-500">\u7b54\u5bf9 + \u786e\u5b9a = \u771f\u6b63\u7406\u89e3\uff0c\u53ef\u4ee5\u5f52\u6863</div>';
+    } else if (isCorrect) {
+        html += '<div class="text-6xl mb-2">\ud83d\udca3\u26a0\ufe0f</div>' +
+            '<div class="text-2xl font-bold text-yellow-600">\u7b54\u5bf9\u4e86\uff0c\u4f46\u8fd8\u4e0d\u591f\u786e\u5b9a</div>' +
+            '<div class="text-sm text-yellow-500">\u5730\u96f7\u6807\u7b7e\u4fdd\u7559\uff0c\u4e0b\u6b21\u7ee7\u7eed\u76f2\u6d4b</div>';
+    } else {
+        html += '<div class="text-6xl mb-2">\ud83d\udca5</div>' +
+            '<div class="text-2xl font-bold text-red-600">\u5730\u96f7\u5f15\u7206\uff01</div>' +
+            '<div class="text-sm text-red-500">\u679c\u7136\u6ca1\u6709\u771f\u6b63\u638c\u63e1\uff0c\u9700\u8981\u91cd\u70b9\u590d\u4e60</div>';
+    }
+    html += '</div>';
+
+    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
+        '<div class="p-4 rounded-lg ' + (isCorrect ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200') + '">' +
+        '<div class="text-xs text-gray-500 mb-1">\u8fd9\u6b21\u9009\u62e9</div>' +
+        '<div class="text-xl font-bold ' + (isCorrect ? 'text-green-600' : 'text-red-600') + '">' +
+        selectedAnswer + ' (' + (confLabels[selectedConfidence] || '') + ')</div></div>' +
+        '<div class="p-4 rounded-lg bg-green-50 border border-green-200">' +
+        '<div class="text-xs text-gray-500 mb-1">\u6b63\u786e\u7b54\u6848</div>' +
+        '<div class="text-xl font-bold text-green-600">' + result.correct_answer + '</div></div></div>';
+
+    html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">' +
+        '<div class="text-sm font-bold text-yellow-700 mb-2">\ud83d\udcdd \u76f2\u6d4b\u56de\u5fc6 vs \u6b63\u786e\u89e3\u6790</div>' +
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' +
+        '<div class="bg-white rounded p-3 border">' +
+        '<div class="text-xs text-gray-400 mb-1">\u4f60\u5199\u7684</div>' +
+        '<div class="text-sm text-gray-700">' + escapeHtml(landmineRecallText) + '</div></div>' +
+        '<div class="bg-white rounded p-3 border">' +
+        '<div class="text-xs text-gray-400 mb-1">\u6b63\u786e\u89e3\u6790</div>' +
+        '<div class="text-sm text-gray-700">' +
+            ((needReflectionBeforeExplanation && result.explanation) ? '\u5b8c\u6210\u4e0b\u65b9\u53cd\u601d\u540e\u663e\u793a\u89e3\u6790' : (result.explanation || '\u65e0\u89e3\u6790')) +
+        '</div></div>' +
+        '</div>' +
+        '<div class="text-xs text-gray-400 mt-2">\u5bf9\u6bd4\u56de\u5fc6\u548c\u89e3\u6790\uff0c\u627e\u51fa\u7406\u89e3\u504f\u5dee</div></div>';
+
+    if (result.explanation) {
+        html += buildExplanationSection(
+            result.explanation,
+            '\ud83d\udcd6 \u5b8c\u6574\u89e3\u6790',
+            isCorrect,
+            selectedConfidence,
+            'landmine'
+        );
+    }
+
+    html += '<div class="flex space-x-3">';
+    if (result.can_archive) {
+        html += '<button onclick="archiveAndNext()" class="flex-1 bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600">\ud83d\udca3\u2705 \u5730\u96f7\u5df2\u6392\u9664</button>';
+    }
+    if (batchQueue.length > 1 && batchIndex < batchQueue.length - 1) {
+        html += '<button onclick="nextQuestion()" class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600">\u2192 \u4e0b\u4e00\u9898</button>';
+    } else {
+        html += '<button onclick="closeSurgery()" class="flex-1 bg-gray-500 text-white py-3 rounded-lg font-bold hover:bg-gray-600">\u5173\u95ed</button>';
+    }
+    html += '</div>';
+
+    content.innerHTML = html;
+}
+
+// ========== Utilities ==========
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function shouldGateExplanation(isCorrect, confidence) {
+    return !isCorrect || confidence !== 'sure';
+}
+
+function buildExplanationSection(explanation, title, isCorrect, confidence, prefix) {
+    if (!explanation) return '';
+    var needGate = shouldGateExplanation(isCorrect, confidence);
+    var html = '';
+
+    if (needGate) {
+        html += '<div id="' + prefix + 'ReflectionGate" class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">' +
+            '<div class="text-sm font-bold text-amber-800 mb-2">\ud83e\udde0 \u5148\u505a\u4e00\u6b65\u53cd\u601d</div>' +
+            '<div class="text-sm text-amber-700 mb-3">\u4f60\u4f3c\u4e4e\u5728\u8fd9\u91cc\u9047\u5230\u4e86\u56f0\u96be\u3002\u5728\u770b\u89e3\u6790\u524d\uff0c\u8bf7\u5148\u5199\u4e0b\uff08\u6216\u5728\u8111\u6d77\u4e2d\u60f3\u4e00\u4e0b\uff09\u4f60\u8ba4\u4e3a\u81ea\u5df1\u54ea\u91cc\u60f3\u9519\u4e86\u3002</div>' +
+            '<textarea id="' + prefix + 'ReflectionInput" oninput="updateReflectionGate(\'' + prefix + '\')" rows="3" class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-amber-300 focus:border-amber-300" placeholder="\u4f8b\u5982\uff1a\u6211\u6df7\u6dc6\u4e86... / \u6211\u5ffd\u7565\u4e86..."></textarea>' +
+            '<div class="flex items-center justify-between mt-2 gap-2">' +
+                '<span id="' + prefix + 'ReflectionCount" class="text-xs text-amber-600">0/10 \u5b57</span>' +
+                '<label class="text-xs text-amber-700 flex items-center gap-1">' +
+                    '<input id="' + prefix + 'ReflectionMental" type="checkbox" onchange="updateReflectionGate(\'' + prefix + '\')" class="rounded border-amber-300">' +
+                    '<span>\u6211\u5df2\u5728\u8111\u6d77\u4e2d\u5b8c\u6210\u53cd\u601d</span>' +
+                '</label>' +
+            '</div>' +
+            '<button id="' + prefix + 'RevealBtn" onclick="revealExplanationAfterReflection(\'' + prefix + '\')" disabled class="mt-3 w-full bg-gray-300 text-white py-2 rounded-lg font-bold cursor-not-allowed">\u5b8c\u6210\u53cd\u601d\u540e\u67e5\u770b\u89e3\u6790</button>' +
+        '</div>';
+    }
+
+    html += '<div id="' + prefix + 'ExplanationPanel" class="bg-blue-50 rounded-lg p-4 mb-4' + (needGate ? ' hidden' : '') + '">' +
+        '<div class="text-sm font-bold text-blue-700 mb-1">' + title + '</div>' +
+        '<div class="text-sm text-gray-700 leading-relaxed">' + explanation + '</div></div>';
+
+    return html;
+}
+
+function updateReflectionGate(prefix) {
+    var input = document.getElementById(prefix + 'ReflectionInput');
+    var check = document.getElementById(prefix + 'ReflectionMental');
+    var count = document.getElementById(prefix + 'ReflectionCount');
+    var btn = document.getElementById(prefix + 'RevealBtn');
+    if (!btn) return;
+
+    var textLen = input ? input.value.trim().length : 0;
+    if (count) {
+        count.textContent = textLen + '/10 \u5b57' + (textLen >= 10 ? ' \u2713' : '');
+    }
+
+    var ready = textLen >= 10 || (check && check.checked);
+    btn.disabled = !ready;
+    if (ready) {
+        btn.className = 'mt-3 w-full bg-blue-500 text-white py-2 rounded-lg font-bold hover:bg-blue-600 cursor-pointer';
+    } else {
+        btn.className = 'mt-3 w-full bg-gray-300 text-white py-2 rounded-lg font-bold cursor-not-allowed';
+    }
+}
+
+function revealExplanationAfterReflection(prefix) {
+    var input = document.getElementById(prefix + 'ReflectionInput');
+    var check = document.getElementById(prefix + 'ReflectionMental');
+    var textLen = input ? input.value.trim().length : 0;
+    var ready = textLen >= 10 || (check && check.checked);
+    if (!ready) return;
+
+    var gate = document.getElementById(prefix + 'ReflectionGate');
+    var panel = document.getElementById(prefix + 'ExplanationPanel');
+    if (gate) gate.classList.add('hidden');
+    if (panel) panel.classList.remove('hidden');
+}
+
+function severityBadge(tag) {
+    var map = {
+        critical: '<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold">\ud83d\udea8 \u81f4\u547d\u76f2\u533a</span>',
+        stubborn: '<span class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xs font-bold">\ud83d\ude91 \u987d\u56fa\u75c5\u7076</span>',
+        landmine: '<span class="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-xs font-bold">\u26a0\ufe0f \u9690\u5f62\u5730\u96f7</span>',
+        normal: '<span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-bold">\ud83d\udccb \u666e\u901a</span>'
+    };
+    return map[tag] || map.normal;
+}
+
+function formatTimeAgo(isoStr) {
+    if (!isoStr) return '';
+    var d = new Date(isoStr);
+    var now = new Date();
+    var diff = Math.floor((now - d) / 1000);
+    if (diff < 60) return '\u521a\u521a';
+    if (diff < 3600) return Math.floor(diff / 60) + '\u5206\u949f\u524d';
+    if (diff < 86400) return Math.floor(diff / 3600) + '\u5c0f\u65f6\u524d';
+    if (diff < 604800) return Math.floor(diff / 86400) + '\u5929\u524d';
+    return d.toLocaleDateString('zh-CN');
+}
+
+// ========== Accordion Toggle ==========
+function toggleSection(id) {
+    var el = document.getElementById(id);
+    var arrow = document.getElementById('arrow-' + id);
+    if (!el) return;
+    treeCollapsed[id] = !el.classList.contains('hidden');
+    el.classList.toggle('hidden');
+    if (arrow) arrow.textContent = el.classList.contains('hidden') ? '\u25b6' : '\u25bc';
+}
+
+// ========== Timeline Filter ==========
+function timeFilter(mode) {
+    currentTimeFilter = mode;
+    // 楂樹寒鎸夐挳
+    document.querySelectorAll('.tf-btn').forEach(function(btn) {
+        btn.className = 'tf-btn px-3 py-1 rounded text-xs border hover:bg-blue-50';
+    });
+    var activeMap = {'7d': 0, 'month': 1, 'all': 2};
+    var btns = document.querySelectorAll('.tf-btn');
+    if (activeMap[mode] !== undefined && btns[activeMap[mode]]) {
+        btns[activeMap[mode]].className = 'tf-btn px-3 py-1 rounded text-xs border bg-gray-200 font-medium';
+    }
+    // 鐢ㄧ紦瀛樻暟鎹噸鏂版覆鏌擄紙涓嶉噸鏂拌姹傚悗绔級
+    if (timelineTreeData) {
+        renderTimelineView(timelineTreeData);
+    }
+}
+
+// Click outside modal to close
+document.getElementById('surgeryModal').addEventListener('click', function(e) {
+    if (e.target === this) closeSurgery();
+});
+document.getElementById('challengeModal').addEventListener('click', function(e) {
+    if (e.target === this) closeChallenge();
+});
+
+// ========== Challenge Mode (闈跺悜闂叧) ==========
+var challengeQueue = [];       // 闂叧闃熷垪
+var challengeIdx = 0;          // 褰撳墠棰樼洰绱㈠紩
+var challengeVariantCache = {};// 棰勫姞杞藉彉寮忛缂撳瓨 {wrongId: variantData}
+var challengeStartTime = 0;    // 褰撳墠棰樼洰寮€濮嬫椂闂?
+var challengeAnswer = '';      // 褰撳墠閫夋嫨鐨勭瓟妗?
+var challengeConfidence = 'unsure';
+var challengeIsVariant = false;// 褰撳墠棰樼洰鏄惁鍙樺紡
+var challengeResults = [];     // 闂叧缁撴灉璁板綍
+
+async function startChallenge() {
+    var content = document.getElementById('challengeContent');
+    document.getElementById('challengeModal').classList.remove('hidden');
+    content.innerHTML = '<div class="text-center py-8 text-gray-400">鈴?鍔犺浇闂叧闃熷垪...</div>';
+
+    try {
+        var r = await fetch('/api/challenge/queue?count=10');
+        var data = await r.json();
+        if (!data.items || data.items.length === 0) {
+            content.innerHTML = '<div class="text-center py-12">' +
+                '<div class="text-5xl mb-4">馃帀</div>' +
+                '<div class="text-xl font-bold text-green-600 mb-2">浠婃棩鏃犲緟闂叧閿欓</div>' +
+                '<div class="text-gray-400 text-sm">鎵€鏈夐敊棰橀兘鏈埌澶嶄範鏃堕棿锛屾垨宸插叏閮ㄦ帉鎻?/div>' +
+                '<button onclick="closeChallenge()" class="mt-6 bg-gray-500 text-white px-6 py-2 rounded-lg">鍏抽棴</button></div>';
+            return;
+        }
+        challengeQueue = data.items;
+        challengeIdx = 0;
+        challengeResults = [];
+        challengeVariantCache = {};
+
+        // 棰勫姞杞界1棰樺彉寮?
+        prefetchVariant(challengeQueue[0].id);
+        // 棰勫姞杞界2棰樺彉寮?
+        if (challengeQueue.length > 1) prefetchVariant(challengeQueue[1].id);
+
+        renderChallengeQuestion();
+    } catch(e) {
+        content.innerHTML = '<div class="text-center py-8 text-red-400">鍔犺浇澶辫触: ' + e.message + '</div>';
+    }
+}
+
+function prefetchVariant(wrongId) {
+    if (challengeVariantCache[wrongId]) return; // 宸茬紦瀛?
+    challengeVariantCache[wrongId] = 'loading';
+    fetch('/api/challenge/variant?wrong_answer_id=' + wrongId, { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.variant_question && !data.fallback) {
+                challengeVariantCache[wrongId] = data;
+            } else {
+                challengeVariantCache[wrongId] = null; // 鐢熸垚澶辫触锛岀敤鍘熼
+            }
+        })
+        .catch(function() {
+            challengeVariantCache[wrongId] = null;
+        });
+}
+
+function renderChallengeQuestion() {
+    var item = challengeQueue[challengeIdx];
+    var content = document.getElementById('challengeContent');
+    challengeStartTime = Date.now();
+    challengeAnswer = '';
+    challengeConfidence = 'unsure';
+    challengeIsVariant = false;
+
+    document.getElementById('challengeProgress').textContent =
+        '绗?' + (challengeIdx + 1) + ' / ' + challengeQueue.length + ' 棰?;
+
+    // 妫€鏌ュ彉寮忛缂撳瓨
+    var variant = challengeVariantCache[item.id];
+    var questionText, options;
+
+    if (variant && variant !== 'loading' && variant.variant_question) {
+        // 浣跨敤鍙樺紡棰?
+        challengeIsVariant = true;
+        questionText = variant.variant_question;
+        options = variant.variant_options;
+    } else {
+        // 鐢ㄥ師棰?
+        challengeIsVariant = false;
+        questionText = item.question_text;
+        options = item.options;
+    }
+
+    var badge = severityBadge(item.severity_tag);
+    var html = '<div class="mb-3">' + badge +
+        '<span class="text-xs text-gray-400 ml-2">[' + (item.question_type || 'A1') + '] [' + (item.difficulty || '鍩虹') + '] 閿? + item.error_count + '娆?/span>' +
+        (item.key_point ? '<span class="text-xs text-blue-500 ml-2">馃搶 ' + item.key_point + '</span>' : '');
+
+    if (challengeIsVariant) {
+        html += '<span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold ml-2">馃К 鍙樺紡</span>';
+    }
+
+    // SM-2 鐘舵€?
+    if (item.sm2_repetitions > 0) {
+        html += '<span class="text-xs text-gray-400 ml-2">杩炲' + item.sm2_repetitions + '娆?| 闂撮殧' + item.sm2_interval + '澶?/span>';
+    }
+    html += '</div>';
+
+    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + questionText + '</div></div>';
+
+    // 閫夐」
+    html += '<div class="space-y-2 mb-6">';
+    if (options) {
+        for (var opt in options) {
+            if (!options[opt]) continue;
+            html += '<label class="block p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition ch-option-label" data-opt="' + opt + '" onclick="selectChallengeOption(this,\'' + opt + '\')">' +
+                '<span class="font-bold mr-2">' + opt + '.</span>' + options[opt] + '</label>';
+        }
+    }
+    html += '</div>';
+
+    // 鑷俊搴?
+    html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">浣犵殑鎶婃彙锛?/div>' +
+        '<div class="flex space-x-2">' +
+        '<button onclick="setChallengeConfidence(\'sure\')" id="ch-conf-sure" class="ch-conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">鉁?纭畾</button>' +
+        '<button onclick="setChallengeConfidence(\'unsure\')" id="ch-conf-unsure" class="ch-conf-btn px-4 py-2 rounded border text-sm hover:bg-yellow-50">? 妯＄硦</button>' +
+        '<button onclick="setChallengeConfidence(\'no\')" id="ch-conf-no" class="ch-conf-btn px-4 py-2 rounded border text-sm hover:bg-red-50">鉁?涓嶄細</button>' +
+        '</div></div>';
+
+    // 鎻愪氦
+    html += '<button onclick="submitChallengeAnswer()" id="chSubmitBtn" disabled class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">璇峰厛閫夋嫨绛旀</button>';
+
+    content.innerHTML = html;
+
+    // 棰勫姞杞戒笅涓€棰樺彉寮?
+    if (challengeIdx + 2 < challengeQueue.length) {
+        prefetchVariant(challengeQueue[challengeIdx + 2].id);
+    }
+}
+
+function selectChallengeOption(el, opt) {
+    challengeAnswer = opt;
+    document.querySelectorAll('.ch-option-label').forEach(function(label) {
+        label.classList.remove('bg-blue-100', 'border-blue-500');
+    });
+    el.classList.add('bg-blue-100', 'border-blue-500');
+    var btn = document.getElementById('chSubmitBtn');
+    btn.disabled = false;
+    btn.className = 'w-full bg-orange-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-orange-600 cursor-pointer';
+    btn.textContent = '鎻愪氦绛旀';
+}
+
+function setChallengeConfidence(conf) {
+    challengeConfidence = conf;
+    document.querySelectorAll('.ch-conf-btn').forEach(function(btn) {
+        btn.classList.remove('bg-green-100', 'bg-yellow-100', 'bg-red-100', 'border-green-500', 'border-yellow-500', 'border-red-500');
+    });
+    var el = document.getElementById('ch-conf-' + conf);
+    var colors = { sure: ['bg-green-100', 'border-green-500'], unsure: ['bg-yellow-100', 'border-yellow-500'], no: ['bg-red-100', 'border-red-500'] };
+    if (colors[conf]) colors[conf].forEach(function(c) { el.classList.add(c); });
+}
+
+async function submitChallengeAnswer() {
+    if (!challengeAnswer) return;
+    var item = challengeQueue[challengeIdx];
+    var btn = document.getElementById('chSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = '鍒ゅ畾涓?..';
+
+    var elapsed = Math.round((Date.now() - challengeStartTime) / 1000);
+    try {
+        var r = await fetch('/api/challenge/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                wrong_answer_id: item.id,
+                user_answer: challengeAnswer,
+                confidence: challengeConfidence,
+                time_spent_seconds: elapsed,
+                is_variant: challengeIsVariant
+            })
+        });
+        var result = await r.json();
+        result._user_answer = challengeAnswer;
+        result._confidence = challengeConfidence;
+        result._item = item;
+        challengeResults.push(result);
+        renderChallengeResult(result);
+    } catch(e) {
+        btn.textContent = '鎻愪氦澶辫触锛岃閲嶈瘯';
+        btn.disabled = false;
+    }
+}
+
+function renderChallengeResult(result) {
+    var content = document.getElementById('challengeContent');
+    var isCorrect = result.is_correct;
+    var confLabels = { sure: '鉁?纭畾', unsure: '? 妯＄硦', no: '鉁?涓嶄細' };
+
+    var html = '<div class="text-center mb-6">';
+    if (isCorrect) {
+        html += '<div class="text-5xl mb-2">鉁?/div><div class="text-xl font-bold text-green-600">鍥炵瓟姝ｇ‘锛?/div>';
+    } else {
+        html += '<div class="text-5xl mb-2">鉂?/div><div class="text-xl font-bold text-red-600">鍥炵瓟閿欒</div>';
+    }
+    html += '</div>';
+
+    // 绛旀瀵规瘮
+    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
+        '<div class="p-3 rounded-lg ' + (isCorrect ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200') + '">' +
+        '<div class="text-xs text-gray-500 mb-1">浣犵殑閫夋嫨</div>' +
+        '<div class="text-xl font-bold ' + (isCorrect ? 'text-green-600' : 'text-red-600') + '">' + result._user_answer + ' (' + (confLabels[result._confidence] || '') + ')</div></div>' +
+        '<div class="p-3 rounded-lg bg-green-50 border border-green-200">' +
+        '<div class="text-xs text-gray-500 mb-1">姝ｇ‘绛旀</div>' +
+        '<div class="text-xl font-bold text-green-600">' + result.correct_answer + '</div></div></div>';
+
+    // SM-2 鐘舵€?
+    var sm2Html = '<div class="bg-gray-50 rounded-lg p-3 mb-4"><div class="flex items-center justify-between flex-wrap gap-2">';
+    sm2Html += '<span class="text-xs text-gray-500">馃搳 SM-2 鐘舵€?/span>';
+    sm2Html += '<div class="flex items-center space-x-3 text-xs">';
+    sm2Html += '<span>杩炲 <b>' + (result.sm2_repetitions || 0) + '</b>/3</span>';
+    sm2Html += '<span>闂撮殧 <b>' + (result.sm2_interval || 0) + '</b>澶?/span>';
+    sm2Html += '<span>EF <b>' + (result.sm2_ef || 2.5) + '</b></span>';
+    if (result.next_review_date) sm2Html += '<span>涓嬫 <b>' + result.next_review_date + '</b></span>';
+    sm2Html += '</div></div>';
+
+    // 杩涘害鏉?(repetitions / 3)
+    var reps = Math.min(result.sm2_repetitions || 0, 3);
+    var pct = Math.round(reps / 3 * 100);
+    var barColor = pct >= 100 ? 'bg-green-500' : (pct >= 66 ? 'bg-yellow-500' : 'bg-orange-500');
+    sm2Html += '<div class="w-full bg-gray-200 rounded-full h-2 mt-2"><div class="' + barColor + ' h-2 rounded-full" style="width:' + pct + '%"></div></div>';
+
+    if (result.auto_archived) {
+        sm2Html += '<div class="text-center mt-2 text-green-600 font-bold text-sm">馃帀 杩炵画3娆℃纭紝宸茶嚜鍔ㄥ綊妗ｏ紒</div>';
+    }
+    sm2Html += '</div>';
+    html += sm2Html;
+
+    // 瑙ｆ瀽
+    var explanation = result.variant_explanation || result.explanation;
+    if (explanation) {
+        html += buildExplanationSection(
+            explanation,
+            '馃摉 瑙ｆ瀽',
+            isCorrect,
+            result._confidence,
+            'challenge'
+        );
+    }
+
+    // 鎸夐挳
+    html += '<div class="flex space-x-3">';
+    if (challengeIdx < challengeQueue.length - 1) {
+        html += '<button onclick="nextChallengeQuestion()" class="flex-1 bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600">鈫?涓嬩竴棰?/button>';
+    } else {
+        html += '<button onclick="renderChallengeSummary()" class="flex-1 bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600">馃搳 鏌ョ湅鎬荤粨</button>';
+    }
+    html += '<button onclick="closeChallenge()" class="flex-1 bg-gray-400 text-white py-3 rounded-lg font-bold hover:bg-gray-500">閫€鍑?/button>';
+    html += '</div>';
+
+    content.innerHTML = html;
+}
+
+function nextChallengeQuestion() {
+    challengeIdx++;
+    if (challengeIdx < challengeQueue.length) {
+        renderChallengeQuestion();
+    } else {
+        renderChallengeSummary();
+    }
+}
+
+function renderChallengeSummary() {
+    var content = document.getElementById('challengeContent');
+    document.getElementById('challengeProgress').textContent = '闂叧瀹屾垚';
+
+    var total = challengeResults.length;
+    var correct = challengeResults.filter(function(r) { return r.is_correct; }).length;
+    var wrong = total - correct;
+    var accuracy = total > 0 ? Math.round(correct / total * 100) : 0;
+    var archived = challengeResults.filter(function(r) { return r.auto_archived; }).length;
+
+    var html = '<div class="text-center mb-6">';
+    if (accuracy >= 80) {
+        html += '<div class="text-5xl mb-2">馃弳</div><div class="text-2xl font-bold text-green-600">琛ㄧ幇浼樼锛?/div>';
+    } else if (accuracy >= 60) {
+        html += '<div class="text-5xl mb-2">馃挭</div><div class="text-2xl font-bold text-yellow-600">缁х画鍔犳补锛?/div>';
+    } else {
+        html += '<div class="text-5xl mb-2">馃摎</div><div class="text-2xl font-bold text-red-600">闇€瑕佸姞寮哄涔?/div>';
+    }
+    html += '</div>';
+
+    // 缁熻鍗＄墖
+    html += '<div class="grid grid-cols-4 gap-3 mb-6">' +
+        '<div class="bg-blue-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-blue-600">' + total + '</div><div class="text-xs text-gray-500">鎬婚鏁?/div></div>' +
+        '<div class="bg-green-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-green-600">' + correct + '</div><div class="text-xs text-gray-500">姝ｇ‘</div></div>' +
+        '<div class="bg-red-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-red-600">' + wrong + '</div><div class="text-xs text-gray-500">閿欒</div></div>' +
+        '<div class="bg-purple-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-purple-600">' + archived + '</div><div class="text-xs text-gray-500">宸叉帉鎻?/div></div>' +
+    '</div>';
+
+    // 姝ｇ‘鐜囨潯
+    var barColor = accuracy >= 80 ? 'bg-green-500' : (accuracy >= 60 ? 'bg-yellow-500' : 'bg-red-500');
+    html += '<div class="mb-6"><div class="flex justify-between text-sm mb-1"><span>姝ｇ‘鐜?/span><span class="font-bold">' + accuracy + '%</span></div>' +
+        '<div class="w-full bg-gray-200 rounded-full h-3"><div class="' + barColor + ' h-3 rounded-full" style="width:' + accuracy + '%"></div></div></div>';
+
+    // 閫愰鍥為【
+    html += '<div class="mb-4"><div class="text-sm font-bold text-gray-700 mb-2">閫愰鍥為【</div><div class="space-y-2">';
+    challengeResults.forEach(function(r, i) {
+        var icon = r.is_correct ? '鉁? : '鉂?;
+        var kp = r.key_point || '鏈爣娉?;
+        var archiveTag = r.auto_archived ? ' <span class="text-green-500 text-xs">馃帀宸叉帉鎻?/span>' : '';
+        var nextTag = r.next_review_date ? ' <span class="text-gray-400 text-xs">涓嬫:' + r.next_review_date + '</span>' : '';
+        html += '<div class="flex items-center justify-between bg-gray-50 rounded p-2 text-sm">' +
+            '<span>' + icon + ' ' + (i + 1) + '. ' + kp + archiveTag + '</span>' +
+            '<span class="text-xs text-gray-400">杩炲' + (r.sm2_repetitions || 0) + '/3 | 闂撮殧' + (r.sm2_interval || 0) + '澶? + nextTag + '</span></div>';
+    });
+    html += '</div></div>';
+
+    html += '<button onclick="closeChallenge()" class="w-full bg-gray-500 text-white py-3 rounded-lg font-bold hover:bg-gray-600">鍏抽棴</button>';
+
+    content.innerHTML = html;
+}
+
+function closeChallenge() {
+    document.getElementById('challengeModal').classList.add('hidden');
+    challengeQueue = [];
+    challengeIdx = 0;
+    challengeVariantCache = {};
+    challengeResults = [];
+    challengeAnswer = '';
+    challengeConfidence = 'unsure';
+    loadStats();
+    loadList();
+}
+
+// ========== Keyboard Shortcuts ==========
+function isModalVisible(modalId) {
+    var modal = document.getElementById(modalId);
+    return !!modal && !modal.classList.contains('hidden');
+}
+
+function isTypingTarget(el) {
+    if (!el) return false;
+    var tag = (el.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!el.isContentEditable;
+}
+
+function resolveOptionByKey(key, labels) {
+    if (!labels || labels.length === 0) return null;
+    var k = (key || '').toUpperCase();
+
+    if (/^[1-9]$/.test(k)) {
+        var idx = parseInt(k, 10) - 1;
+        if (idx >= 0 && idx < labels.length) {
+            var optByIndex = labels[idx].dataset ? labels[idx].dataset.opt : '';
+            return optByIndex ? optByIndex.toUpperCase() : null;
+        }
+    }
+
+    if (/^[A-E]$/.test(k)) {
+        var exists = labels.some(function(label) {
+            var opt = label.dataset ? label.dataset.opt : '';
+            return opt && opt.toUpperCase() === k;
+        });
+        return exists ? k : null;
+    }
+
+    return null;
+}
+
+function trySelectSurgeryOptionByKey(key) {
+    var labels = Array.from(document.querySelectorAll('#surgeryContent .option-label[data-opt]'));
+    var opt = resolveOptionByKey(key, labels);
+    if (!opt) return false;
+
+    var target = labels.find(function(label) {
+        return label.dataset.opt && label.dataset.opt.toUpperCase() === opt;
+    });
+    if (!target) return false;
+
+    selectOption(target, opt);
+    return true;
+}
+
+function trySelectChallengeOptionByKey(key) {
+    var labels = Array.from(document.querySelectorAll('#challengeContent .ch-option-label[data-opt]'));
+    var opt = resolveOptionByKey(key, labels);
+    if (!opt) return false;
+
+    var target = labels.find(function(label) {
+        return label.dataset.opt && label.dataset.opt.toUpperCase() === opt;
+    });
+    if (!target) return false;
+
+    selectChallengeOption(target, opt);
+    return true;
+}
+
+function resolveConfidenceByKey(key) {
+    var k = (key || '').toLowerCase();
+    if (k === 'q') return 'sure';
+    if (k === 'w') return 'unsure';
+    if (k === 'e') return 'no';
+    return null;
+}
+
+function trySetSurgeryConfidenceByKey(key) {
+    var conf = resolveConfidenceByKey(key);
+    if (!conf) return false;
+    if (!document.getElementById('conf-' + conf)) return false;
+    setConfidence(conf);
+    return true;
+}
+
+function trySetChallengeConfidenceByKey(key) {
+    var conf = resolveConfidenceByKey(key);
+    if (!conf) return false;
+    if (!document.getElementById('ch-conf-' + conf)) return false;
+    setChallengeConfidence(conf);
+    return true;
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (isTypingTarget(e.target)) return;
+
+    var handled = false;
+    if (isModalVisible('surgeryModal')) {
+        handled = trySelectSurgeryOptionByKey(e.key);
+        if (!handled) handled = trySetSurgeryConfidenceByKey(e.key);
+    } else if (isModalVisible('challengeModal')) {
+        handled = trySelectChallengeOptionByKey(e.key);
+        if (!handled) handled = trySetChallengeConfidenceByKey(e.key);
+    }
+
+    if (handled) {
+        e.preventDefault();
+    }
+});
+</script>
+{% endblock %}

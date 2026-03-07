@@ -1,0 +1,669 @@
+{% extends "base.html" %}
+
+{% block title %}整卷考试 - 医学考研{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <span>整卷考试</span>
+    </div>
+    
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold">📝 医学考研整卷考试</h1>
+            <p class="text-gray-500">一次性生成整套试卷，题目之间有辨析、对比、变式</p>
+        </div>
+    </div>
+</div>
+
+<!-- 第一步：上传内容 -->
+<div id="step1" class="bg-white rounded-lg shadow p-6 mb-6">
+    <h3 class="font-bold text-lg mb-4 flex items-center">
+        <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-2">1</span>
+        上传讲课内容
+    </h3>
+    
+    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+        <p class="text-sm text-yellow-700">
+            💡 <strong>提示</strong>：请粘贴完整的讲课内容，系统将基于<strong>整段内容的理解</strong>出题，
+            题目之间会有辨析、对比、变式，避免知识点重复考察。
+        </p>
+    </div>
+    
+    <textarea id="contentInput" class="w-full h-48 p-4 border rounded-lg" 
+              placeholder="请粘贴讲课内容...建议至少500字，内容越完整，题目质量越高"></textarea>
+    
+    <div class="mt-4 flex justify-between items-center">
+        <span class="text-sm text-gray-500" id="charCount">0 字符</span>
+        <button onclick="goToStep2()" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+            下一步 →
+        </button>
+    </div>
+</div>
+
+<!-- 第二步：选择题目数量 -->
+<div id="step2" class="hidden bg-white rounded-lg shadow p-6 mb-6">
+    <h3 class="font-bold text-lg mb-4 flex items-center">
+        <span class="bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-2">2</span>
+        选择题目数量
+    </h3>
+    
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <label class="cursor-pointer">
+            <input type="radio" name="questionCount" value="5" class="hidden peer">
+            <div class="p-4 border-2 rounded-lg text-center peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-300 transition">
+                <div class="text-2xl font-bold text-gray-700">5</div>
+                <div class="text-sm text-gray-500">道题</div>
+                <div class="text-xs text-gray-400 mt-1">快速测试</div>
+            </div>
+        </label>
+        
+        <label class="cursor-pointer">
+            <input type="radio" name="questionCount" value="10" class="hidden peer" checked>
+            <div class="p-4 border-2 rounded-lg text-center peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-300 transition">
+                <div class="text-2xl font-bold text-blue-600">10</div>
+                <div class="text-sm text-gray-500">道题</div>
+                <div class="text-xs text-blue-500 mt-1">⭐ 推荐</div>
+            </div>
+        </label>
+        
+        <label class="cursor-pointer">
+            <input type="radio" name="questionCount" value="15" class="hidden peer">
+            <div class="p-4 border-2 rounded-lg text-center peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-300 transition">
+                <div class="text-2xl font-bold text-gray-700">15</div>
+                <div class="text-sm text-gray-500">道题</div>
+                <div class="text-xs text-gray-400 mt-1">综合练习</div>
+            </div>
+        </label>
+        
+        <label class="cursor-pointer">
+            <input type="radio" name="questionCount" value="20" class="hidden peer">
+            <div class="p-4 border-2 rounded-lg text-center peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:border-gray-300 transition">
+                <div class="text-2xl font-bold text-gray-700">20</div>
+                <div class="text-sm text-gray-500">道题</div>
+                <div class="text-xs text-gray-400 mt-1">模拟考试</div>
+            </div>
+        </label>
+    </div>
+    
+    <div class="bg-gray-50 p-4 rounded-lg mb-4">
+        <h4 class="font-medium mb-2">📊 难度分布</h4>
+        <div class="flex space-x-4 text-sm">
+            <span class="text-green-600">● 基础 50%</span>
+            <span class="text-yellow-600">● 提高 30%</span>
+            <span class="text-red-600">● 难题 20%</span>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">题目之间会有辨析、对比、变式，确保不重复考察同一角度</p>
+    </div>
+    
+    <div class="flex justify-between">
+        <button onclick="goToStep1()" class="text-gray-500 hover:text-gray-700">← 上一步</button>
+        <button onclick="generateExam()" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">
+            开始生成试卷
+        </button>
+    </div>
+</div>
+
+<!-- 加载状态 -->
+<div id="loadingState" class="hidden bg-white rounded-lg shadow p-12 text-center">
+    <div class="animate-spin w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+    <p class="text-gray-600 text-lg">DeepSeek正在分析整段内容...</p>
+    <p class="text-sm text-gray-400 mt-2">一次性生成整套试卷，题目之间有辨析、对比、变式</p>
+    <p class="text-sm text-gray-400">预计需要30-90秒</p>
+</div>
+
+<!-- 考试区域 -->
+<div id="examArea" class="hidden space-y-6">
+    <!-- 试卷信息 -->
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="flex justify-between items-center">
+            <div>
+                <h2 id="paperTitle" class="font-bold text-xl">医学考研模拟试卷</h2>
+                <p id="paperSummary" class="text-sm text-gray-500 mt-1"></p>
+            </div>
+            <div class="text-right">
+                <div class="text-sm text-gray-500">剩余时间</div>
+                <div id="timer" class="text-2xl font-mono font-bold text-blue-600">60:00</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 进度条 -->
+    <div class="bg-white rounded-lg shadow p-4 sticky top-0 z-10">
+        <div class="flex justify-between items-center mb-2">
+            <span class="text-sm text-gray-500">答题进度</span>
+            <div class="flex items-center space-x-4">
+                <span id="progressDetail" class="text-sm"></span>
+                <span id="progressText" class="text-sm font-bold text-blue-600">0/10</span>
+            </div>
+        </div>
+        <div class="bg-gray-200 rounded-full h-3">
+            <div id="progressBar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+    </div>
+    
+    <!-- 题目列表 -->
+    <div id="questionsList" class="space-y-6">
+        <!-- 动态生成 -->
+    </div>
+    
+    <!-- 提交按钮 -->
+    <div class="bg-white rounded-lg shadow p-6 sticky bottom-4">
+        <div class="flex justify-between items-center">
+            <div class="text-sm text-gray-500">
+                已答: <span id="answeredCount" class="font-bold text-blue-600 text-lg">0</span>/<span id="totalCount">10</span>
+            </div>
+            <button id="submitBtn" onclick="submitExam()" disabled
+                    class="bg-blue-500 text-white px-8 py-3 rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed text-lg font-medium">
+                提交答卷
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 结果区域 -->
+<div id="resultArea" class="hidden space-y-6">
+    <!-- 成绩卡片 -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-center">
+            <div class="text-6xl mb-4" id="scoreEmoji">🎉</div>
+            <div class="text-5xl font-bold text-blue-600 mb-2" id="scoreDisplay">0</div>
+            <div class="text-gray-500">分</div>
+            <div class="mt-4 flex justify-center space-x-6">
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-green-600" id="correctCount">0</div>
+                    <div class="text-sm text-gray-500">正确</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-red-600" id="wrongCount">0</div>
+                    <div class="text-sm text-gray-500">错误</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-purple-600" id="accuracy">0%</div>
+                    <div class="text-sm text-gray-500">正确率</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    
+    <!-- 难度分析 -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="font-bold text-lg mb-4">📊 难度分析</h3>
+        <div id="difficultyAnalysis" class="space-y-2">
+            <!-- 动态填充 -->
+        </div>
+    </div>
+    
+    
+    <!-- 答案解析 -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b">
+            <h3 class="font-bold text-lg">📖 答案与解析</h3>
+        </div>
+        <div id="answerDetails" class="divide-y">
+            <!-- 动态填充 -->
+        </div>
+    </div>
+    
+    
+    <div class="flex justify-center space-x-4">
+        <a href="/" class="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600">← 返回首页</a>
+        <button onclick="location.reload()" class="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600">再做一套</button>
+        <button onclick="endStudySession()" class="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 font-bold">✓ 结束学习</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let uploadedContent = '';
+    let numQuestions = 10;
+    let examId = null;
+    let questions = [];
+    let userAnswers = {};
+    let timerInterval = null;
+    let trackingSessionId = null;  // 学习轨迹会话ID
+
+    // 字符计数
+    document.getElementById('contentInput').addEventListener('input', function() {
+        document.getElementById('charCount').textContent = this.value.length + ' 字符';
+    });
+
+    function goToStep2() {
+        const content = document.getElementById('contentInput').value.trim();
+        if (content.length < 100) {
+            alert('请至少输入100字的内容');
+            return;
+        }
+        uploadedContent = content;
+        document.getElementById('step1').classList.add('hidden');
+        document.getElementById('step2').classList.remove('hidden');
+    }
+
+    function goToStep1() {
+        document.getElementById('step2').classList.add('hidden');
+        document.getElementById('step1').classList.remove('hidden');
+    }
+
+    async function generateExam() {
+        // 获取选择的题目数量
+        const selected = document.querySelector('input[name="questionCount"]:checked');
+        numQuestions = parseInt(selected ? selected.value : 10);
+        
+        document.getElementById('step2').classList.add('hidden');
+        document.getElementById('loadingState').classList.remove('hidden');
+        
+        try {
+            const response = await fetch('/api/quiz/batch/generate/0', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uploaded_content: uploadedContent,
+                    num_questions: numQuestions
+                })
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '生成失败');
+            }
+            
+            const data = await response.json();
+            examId = data.exam_id;
+            questions = data.questions;
+            
+            // 显示试卷
+            displayExam(data);
+            startTimer();
+
+            // 开始学习轨迹记录
+            await startTrackingSession(data.paper_title);
+
+        } catch (error) {
+            alert('生成试卷失败: ' + error.message);
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+        }
+    }
+
+    function displayExam(data) {
+        document.getElementById('loadingState').classList.add('hidden');
+        document.getElementById('examArea').classList.remove('hidden');
+        
+        // 设置试卷信息
+        document.getElementById('paperTitle').textContent = data.paper_title;
+        document.getElementById('paperSummary').textContent = data.summary.coverage;
+        document.getElementById('totalCount').textContent = numQuestions;
+        document.getElementById('progressText').textContent = `0/${numQuestions}`;
+        
+        // 难度分布显示
+        const dist = data.difficulty_distribution;
+        document.getElementById('progressDetail').innerHTML = `
+            <span class="text-green-600">基础${dist['基础']}</span>/
+            <span class="text-yellow-600">提高${dist['提高']}</span>/
+            <span class="text-red-600">难题${dist['难题']}</span>
+        `;
+        
+        // 显示题目
+        const container = document.getElementById('questionsList');
+        container.innerHTML = '';
+        
+        questions.forEach((q, index) => {
+            const div = document.createElement('div');
+            div.className = 'bg-white rounded-lg shadow p-6';
+            div.id = `question-${index}`;
+            
+            const difficultyColor = q.difficulty === '基础' ? 'text-green-600' : 
+                                   (q.difficulty === '提高' ? 'text-yellow-600' : 'text-red-600');
+            
+            let optionsHtml = '';
+            ['A', 'B', 'C', 'D', 'E'].forEach(opt => {
+                optionsHtml += `
+                    <label class="flex items-start p-3 border-2 rounded-lg cursor-pointer hover:border-blue-500 transition option-label" 
+                           data-idx="${index}" data-opt="${opt}">
+                        <input type="radio" name="q${index}" value="${opt}" class="mt-1 mr-3" 
+                               onchange="selectOption(${index}, '${opt}')">
+                        <span class="font-bold mr-2">${opt}.</span>
+                        <span>${q.options[opt] || '选项' + opt}</span>
+                    </label>
+                `;
+            });
+            
+            div.innerHTML = `
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center space-x-2">
+                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-bold">第${index + 1}题</span>
+                        <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-sm">${q.type}</span>
+                        <span class="${difficultyColor} text-sm font-medium">${q.difficulty}</span>
+                    </div>
+                    <span id="status-${index}" class="text-gray-300 text-xl">○</span>
+                </div>
+                <div class="mb-4">
+                    <p class="text-lg font-medium leading-relaxed">${q.question}</p>
+                </div>
+                <div class="space-y-2">${optionsHtml}</div>
+            `;
+            
+            container.appendChild(div);
+        });
+        
+        updateProgress();
+    }
+
+    function selectOption(idx, opt) {
+        const currentAnswer = userAnswers[idx];
+
+        if (currentAnswer === opt) {
+            // 已选中该选项，取消选择
+            delete userAnswers[idx];
+
+            document.querySelectorAll(`[data-idx="${idx}"]`).forEach(label => {
+                label.classList.remove('border-blue-500', 'bg-blue-50');
+                const radio = label.querySelector('input[type="radio"]');
+                if (radio) radio.checked = false;
+            });
+
+            const statusEl = document.getElementById(`status-${idx}`);
+            if (statusEl) {
+                statusEl.textContent = '○';
+                statusEl.className = 'text-gray-300 text-xl';
+            }
+        } else {
+            // 选中该选项
+            userAnswers[idx] = opt;
+
+            document.querySelectorAll(`[data-idx="${idx}"]`).forEach(label => {
+                if (label.dataset.opt === opt) {
+                    label.classList.add('border-blue-500', 'bg-blue-50');
+                } else {
+                    label.classList.remove('border-blue-500', 'bg-blue-50');
+                }
+            });
+
+            const statusEl = document.getElementById(`status-${idx}`);
+            if (statusEl) {
+                statusEl.textContent = '✓';
+                statusEl.className = 'text-green-500 text-xl font-bold';
+            }
+        }
+
+        updateProgress();
+
+        // 记录答题到学习轨迹
+        recordQuestionAnswer(idx);
+    }
+
+    function updateProgress() {
+        const answered = Object.keys(userAnswers).length;
+        const progress = (answered / numQuestions) * 100;
+        
+        document.getElementById('progressText').textContent = `${answered}/${numQuestions}`;
+        document.getElementById('progressBar').style.width = `${progress}%`;
+        document.getElementById('answeredCount').textContent = answered;
+        document.getElementById('submitBtn').disabled = answered < numQuestions;
+    }
+
+    function startTimer() {
+        let seconds = numQuestions * 6; // 每题6分钟
+        timerInterval = setInterval(() => {
+            seconds--;
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            document.getElementById('timer').textContent = 
+                `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            
+            if (seconds <= 0) {
+                clearInterval(timerInterval);
+                submitExam();
+            }
+        }, 1000);
+    }
+
+    async function submitExam() {
+        if (Object.keys(userAnswers).length < numQuestions) {
+            if (!confirm('还有题目未作答，确定要提交吗？')) return;
+        }
+        
+        clearInterval(timerInterval);
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('submitBtn').textContent = '批改中...';
+        
+        try {
+            const answers = [];
+            for (let i = 0; i < numQuestions; i++) {
+                answers.push(userAnswers[i] || '');
+            }
+            
+            const response = await fetch(`/api/quiz/batch/submit/${examId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    answers: answers,
+                    confidence: {}
+                })
+            });
+            
+            if (!response.ok) throw new Error('提交失败');
+            
+            const result = await response.json();
+            displayResults(result);
+            
+        } catch (error) {
+            alert('提交失败: ' + error.message);
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('submitBtn').textContent = '提交答卷';
+        }
+    }
+
+    function displayResults(result) {
+        document.getElementById('examArea').classList.add('hidden');
+        document.getElementById('resultArea').classList.remove('hidden');
+        
+        document.getElementById('scoreDisplay').textContent = result.score;
+        document.getElementById('correctCount').textContent = result.correct_count;
+        document.getElementById('wrongCount').textContent = result.wrong_count;
+        document.getElementById('accuracy').textContent = 
+            Math.round(result.correct_count / result.total * 100) + '%';
+        
+        const emoji = result.score >= 80 ? '🎉' : result.score >= 60 ? '👍' : '💪';
+        document.getElementById('scoreEmoji').textContent = emoji;
+        
+        // 难度分析
+        const diffDiv = document.getElementById('difficultyAnalysis');
+        const wrongByDiff = result.wrong_by_difficulty;
+        diffDiv.innerHTML = `
+            <div class="flex justify-between text-sm">
+                <span class="text-green-600">基础题错误: ${wrongByDiff['基础'] || 0}</span>
+                <span class="text-yellow-600">提高题错误: ${wrongByDiff['提高'] || 0}</span>
+                <span class="text-red-600">难题错误: ${wrongByDiff['难题'] || 0}</span>
+            </div>
+        `;
+        
+        // 详细解析
+        const container = document.getElementById('answerDetails');
+        container.innerHTML = '';
+        
+        result.details.forEach((d, i) => {
+            const q = questions[i];
+            const div = document.createElement('div');
+            div.className = 'p-6';
+            
+            let optionsHtml = '';
+            ['A', 'B', 'C', 'D', 'E'].forEach(opt => {
+                const isSelected = d.user_answer === opt;
+                const isCorrect = d.correct_answer === opt;
+                let cls = 'p-2 rounded mb-1 ';
+                if (isCorrect) cls += 'bg-green-100 text-green-800 border border-green-300';
+                else if (isSelected && !isCorrect) cls += 'bg-red-100 text-red-800 border border-red-300';
+                else cls += 'text-gray-600';
+                
+                optionsHtml += `
+                    <div class="${cls}">
+                        <span class="font-bold">${opt}.</span> ${q.options[opt]}
+                        ${isCorrect ? ' ✅' : ''}
+                        ${isSelected && !isCorrect ? ' ❌ (你的答案)' : ''}
+                    </div>
+                `;
+            });
+            
+            div.innerHTML = `
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="font-bold">第${i + 1}题</span>
+                        <span class="${d.is_correct ? 'text-green-600' : 'text-red-600'} font-bold">
+                            ${d.is_correct ? '✓ 正确' : '✗ 错误'}
+                        </span>
+                    </div>
+                    <span class="text-sm text-gray-500">${q.type} · ${d.difficulty}</span>
+                </div>
+                <p class="mb-3 text-gray-800">${q.question}</p>
+                <div class="mb-4">${optionsHtml}</div>
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="font-medium text-gray-700 mb-2">解析</div>
+                    <p class="text-gray-600 text-sm">${d.explanation}</p>
+                    <div class="mt-2 text-sm text-blue-600">
+                        <span class="font-medium">核心考点：</span>${d.key_point}
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+
+        // 完成学习轨迹记录
+        completeTrackingSession(result.score, result.total);
+    }
+
+    // ==========================================
+    // 学习轨迹记录功能
+    // ==========================================
+
+    async function startTrackingSession(paperTitle) {
+        try {
+            const response = await fetch('/api/tracking/session/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_type: 'exam',
+                    title: paperTitle || '整卷考试',
+                    uploaded_content: uploadedContent
+                })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                trackingSessionId = data.session_id;
+                console.log('[Tracking] 会话开始:', trackingSessionId);
+            }
+        } catch (error) {
+            console.error('[Tracking] 开始会话失败:', error);
+        }
+    }
+
+    async function recordQuestionAnswer(questionIndex) {
+        if (!trackingSessionId) return;
+        const q = questions[questionIndex];
+        const answer = userAnswers[questionIndex] || '';
+        try {
+            await fetch('/api/tracking/session/' + trackingSessionId + '/question', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    question_index: questionIndex,
+                    question_type: q.type,
+                    difficulty: q.difficulty,
+                    question_text: q.question,
+                    options: q.options,
+                    correct_answer: q.correct_answer,
+                    user_answer: answer,
+                    is_correct: answer === q.correct_answer,
+                    confidence: '',
+                    explanation: q.explanation,
+                    key_point: q.key_point
+                })
+            });
+        } catch (error) {
+            console.error('[Tracking] 记录题目失败:', error);
+        }
+    }
+
+    async function completeTrackingSession(score, totalQuestions) {
+        if (!trackingSessionId) return;
+        try {
+            await fetch('/api/tracking/session/' + trackingSessionId + '/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    score: score,
+                    total_questions: totalQuestions
+                })
+            });
+            console.log('[Tracking] 会话完成');
+        } catch (error) {
+            console.error('[Tracking] 完成会话失败:', error);
+        }
+    }
+
+    function endStudySession() {
+        const score = document.getElementById('scoreDisplay').textContent;
+        const accuracy = document.getElementById('accuracy').textContent;
+        const correct = document.getElementById('correctCount').textContent;
+        const wrong = document.getElementById('wrongCount').textContent;
+        alert('本次学习已结束！\n\n得分：' + score + ' 分\n正确率：' + accuracy + '\n正确：' + correct + ' 题 / 错误：' + wrong + ' 题\n\n数据已记录到学习轨迹，继续加油！');
+        window.location.href = '/';
+    }
+
+    // 键盘快捷键
+    document.addEventListener('keydown', function(e) {
+        const examArea = document.getElementById('examArea');
+        if (!examArea || examArea.classList.contains('hidden')) return;
+
+        const key = e.key;
+
+        // 数字键 1-5 选择选项 A-E
+        if (key >= '1' && key <= '5') {
+            const options = ['A', 'B', 'C', 'D', 'E'];
+            const opt = options[parseInt(key) - 1];
+            if (opt) {
+                selectOption(currentQuestion, opt);
+            }
+            e.preventDefault();
+            return;
+        }
+
+        // 上下箭头切换题目
+        if (key === 'ArrowDown' || key === 'Tab') {
+            e.preventDefault();
+            if (currentQuestion < numQuestions - 1) {
+                currentQuestion++;
+                scrollToQuestion(currentQuestion);
+            }
+        }
+        if (key === 'ArrowUp') {
+            e.preventDefault();
+            if (currentQuestion > 0) {
+                currentQuestion--;
+                scrollToQuestion(currentQuestion);
+            }
+        }
+
+        // Enter 提交或下一题
+        if (key === 'Enter') {
+            const currentAnswer = userAnswers[currentQuestion];
+            if (currentAnswer) {
+                // 当前题已作答，跳到下一题或提交
+                if (currentQuestion < numQuestions - 1) {
+                    currentQuestion++;
+                    scrollToQuestion(currentQuestion);
+                } else {
+                    // 最后一题，检查是否全部答完
+                    const answered = Object.keys(userAnswers).filter(k => userAnswers[k]).length;
+                    if (answered >= numQuestions) submitExam();
+                }
+            }
+            e.preventDefault();
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,264 @@
+"""
+创建上传历史页面模板
+"""
+
+history_html = '''{% extends "base.html" %}
+
+{% block title %}学习历史 - True Learning System{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <span>学习历史</span>
+    </div>
+    
+    <h1 class="text-2xl font-bold">📚 学习历史</h1>
+    <p class="text-gray-500">查看你的学习轨迹和上传记录</p>
+</div>
+
+<!-- 统计卡片 -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8" id="statsSection">
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-gray-500 text-sm">总上传次数</div>
+        <div class="text-3xl font-bold text-blue-600" id="totalUploads">-</div>
+    </div>
+    
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-gray-500 text-sm">本周学习</div>
+        <div class="text-3xl font-bold text-green-600" id="weeklyUploads">-</div>
+    </div>
+    
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-gray-500 text-sm">连续学习</div>
+        <div class="text-3xl font-bold text-purple-600" id="streakDays">-</div>
+        <div class="text-xs text-gray-400">天</div>
+    </div>
+    
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-gray-500 text-sm">覆盖科目</div>
+        <div class="text-3xl font-bold text-orange-600" id="bookCount">-</div>
+        <div class="text-xs text-gray-400">个</div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- 左侧：时间线日历 -->
+    <div class="lg:col-span-1">
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="font-semibold mb-4">📅 学习日历</h3>
+            <div id="calendarView" class="space-y-2">
+                <div class="text-center text-gray-400 py-4">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧：上传记录列表 -->
+    <div class="lg:col-span-2">
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b flex justify-between items-center">
+                <h3 class="font-semibold">📝 上传记录</h3>
+                <select id="daysFilter" onchange="loadHistory()" class="text-sm border rounded px-2 py-1">
+                    <option value="7">最近7天</option>
+                    <option value="30" selected>最近30天</option>
+                    <option value="90">最近90天</option>
+                </select>
+            </div>
+            
+            <div id="uploadList" class="divide-y">
+                <div class="px-6 py-8 text-center text-gray-400">
+                    加载中...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 页面加载时获取数据
+    document.addEventListener('DOMContentLoaded', function() {
+        loadStats();
+        loadHistory();
+        loadCalendar();
+    });
+
+    // 加载统计数据
+    async function loadStats() {
+        try {
+            const response = await fetch('/api/history/stats');
+            const data = await response.json();
+            
+            document.getElementById('totalUploads').textContent = data.total_uploads;
+            document.getElementById('weeklyUploads').textContent = data.weekly_uploads;
+            document.getElementById('bookCount').textContent = Object.keys(data.book_distribution).length;
+            
+            // 计算连续学习天数
+            const streak = calculateStreak(data.timeline || []);
+            document.getElementById('streakDays').textContent = streak;
+            
+        } catch (error) {
+            console.error('加载统计失败:', error);
+        }
+    }
+
+    // 加载历史记录
+    async function loadHistory() {
+        const days = document.getElementById('daysFilter').value;
+        const listContainer = document.getElementById('uploadList');
+        
+        listContainer.innerHTML = '<div class="px-6 py-8 text-center text-gray-400">加载中...</div>';
+        
+        try {
+            const response = await fetch(`/api/history/uploads?days=${days}`);
+            const data = await response.json();
+            
+            if (data.uploads.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="px-6 py-8 text-center text-gray-400">
+                        <div class="text-4xl mb-2">📝</div>
+                        <p>暂无上传记录</p>
+                        <a href="/upload" class="text-blue-500 hover:underline mt-2 inline-block">去上传内容</a>
+                    </div>
+                `;
+                return;
+            }
+            
+            listContainer.innerHTML = '';
+            
+            // 按日期分组
+            const grouped = groupByDate(data.uploads);
+            
+            for (const [date, uploads] of Object.entries(grouped)) {
+                const dateSection = document.createElement('div');
+                dateSection.className = 'px-6 py-3 bg-gray-50 text-sm font-medium text-gray-600';
+                dateSection.textContent = formatDate(date);
+                listContainer.appendChild(dateSection);
+                
+                uploads.forEach(upload => {
+                    const item = document.createElement('div');
+                    item.className = 'px-6 py-4 hover:bg-gray-50 transition';
+                    item.innerHTML = `
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="flex items-center">
+                                    <span class="font-medium">${upload.book}</span>
+                                    <span class="mx-2 text-gray-300">|</span>
+                                    <span class="text-gray-600">${upload.chapter_title}</span>
+                                </div>
+                                <div class="text-sm text-gray-500 mt-1">
+                                    ${upload.main_topic || upload.summary || ''}
+                                </div>
+                                <div class="flex items-center mt-2 space-x-4 text-xs text-gray-400">
+                                    <span>📚 ${upload.concept_count} 个知识点</span>
+                                    <span>🕐 ${formatTime(upload.date)}</span>
+                                </div>
+                            </div>
+                            <a href="/chapter/${upload.chapter_id}" 
+                               class="ml-4 px-3 py-1 bg-blue-100 text-blue-600 rounded text-sm hover:bg-blue-200 transition">
+                                查看
+                            </a>
+                        </div>
+                    `;
+                    listContainer.appendChild(item);
+                });
+            }
+            
+        } catch (error) {
+            console.error('加载历史失败:', error);
+            listContainer.innerHTML = '<div class="px-6 py-8 text-center text-red-400">加载失败，请重试</div>';
+        }
+    }
+
+    // 加载日历视图
+    async function loadCalendar() {
+        try {
+            const response = await fetch('/api/history/timeline?days=30');
+            const data = await response.json();
+            
+            const container = document.getElementById('calendarView');
+            container.innerHTML = '';
+            
+            // 最近14天
+            const recentDays = data.timeline.slice(-14).reverse();
+            
+            recentDays.forEach(day => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center p-2 rounded ' + (day.has_study ? 'bg-green-50' : 'bg-gray-50');
+                
+                const date = new Date(day.date);
+                const weekday = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()];
+                
+                div.innerHTML = `
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm ${day.has_study ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'}">
+                        ${day.has_study ? '✓' : weekday}
+                    </div>
+                    <div class="ml-3">
+                        <div class="text-sm ${day.has_study ? 'text-gray-800' : 'text-gray-400'}">${formatDateShort(day.date)}</div>
+                        <div class="text-xs ${day.has_study ? 'text-green-600' : 'text-gray-400'}">
+                            ${day.has_study ? '已学习' : '未学习'}
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(div);
+            });
+            
+        } catch (error) {
+            console.error('加载日历失败:', error);
+        }
+    }
+
+    // 辅助函数
+    function groupByDate(uploads) {
+        const grouped = {};
+        uploads.forEach(upload => {
+            const date = upload.date.split('T')[0];
+            if (!grouped[date]) grouped[date] = [];
+            grouped[date].push(upload);
+        });
+        return grouped;
+    }
+
+    function formatDate(dateStr) {
+        const date = new Date(dateStr);
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        if (date.toDateString() === today.toDateString()) return '今天';
+        if (date.toDateString() === yesterday.toDateString()) return '昨天';
+        
+        return `${date.getMonth() + 1}月${date.getDate()}日`;
+    }
+
+    function formatDateShort(dateStr) {
+        const date = new Date(dateStr);
+        return `${date.getMonth() + 1}/${date.getDate()}`;
+    }
+
+    function formatTime(dateStr) {
+        return dateStr.split('T')[1]?.substring(0, 5) || '';
+    }
+
+    function calculateStreak(timeline) {
+        let streak = 0;
+        for (let i = timeline.length - 1; i >= 0; i--) {
+            if (timeline[i].has_study) {
+                streak++;
+            } else if (streak > 0) {
+                break;
+            }
+        }
+        return streak;
+    }
+</script>
+{% endblock %}
+'''
+
+with open('templates/history.html', 'w', encoding='utf-8') as f:
+    f.write(history_html)
+
+print('✅ history.html 模板已创建')

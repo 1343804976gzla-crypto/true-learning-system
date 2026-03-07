@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}{{ chapter.chapter_title }} - True Learning System{% endblock %}
+
+{% block content %}
+<!-- 章节头部 -->
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <span>{{ chapter.book }}</span>
+    </div>
+    
+    <h1 class="text-2xl font-bold">{{ chapter.chapter_title }}</h1>
+    <p class="text-gray-500">第 {{ chapter.chapter_number }} 章 | {{ chapter.edition or '版本未知' }}</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- 左侧：章节信息 -->
+    <div class="lg:col-span-2">
+        <!-- 章节摘要 -->
+        {% if chapter.content_summary %}
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-3">📝 章节摘要</h2>
+            <p class="text-gray-600">{{ chapter.content_summary }}</p>
+        </div>
+        {% endif %}
+        
+        <!-- 知识点列表 -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b">
+                <h2 class="text-lg font-semibold">📚 知识点 ({{ concepts|length }})</h2>
+            </div>
+            
+            <div class="divide-y">
+                {% for concept in concepts %}
+                <div class="px-6 py-4 hover:bg-gray-50 transition">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <div class="font-medium text-lg">{{ concept.name }}</div>
+                            <!-- 掌握度进度条 -->
+                            <div class="mt-2">
+                                <div class="flex items-center text-sm">
+                                    <span class="text-gray-500 w-16">记忆:</span>
+                                    <div class="flex-1 mx-2 bg-gray-200 rounded-full h-2">
+                                        <div class="bg-blue-500 h-2 rounded-full" style="width: {{ concept.retention * 100 }}%"></div>
+                                    </div>
+                                    <span class="text-sm text-gray-600 w-12">{{ "%.0f"|format(concept.retention * 100) }}%</span>
+                                </div>
+                                
+                                <div class="flex items-center text-sm mt-1">
+                                    <span class="text-gray-500 w-16">理解:</span>
+                                    <div class="flex-1 mx-2 bg-gray-200 rounded-full h-2">
+                                        <div class="bg-green-500 h-2 rounded-full" style="width: {{ concept.understanding * 100 }}%"></div>
+                                    </div>
+                                    <span class="text-sm text-gray-600 w-12">{{ "%.0f"|format(concept.understanding * 100) }}%</span>
+                                </div>
+                            </div>
+                            
+                            {% if concept.next_review and concept.next_review <= today %}
+                            <div class="mt-2 text-orange-500 text-sm">
+                                ⚠️ 需要复习 (计划: {{ concept.next_review }})
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="ml-4 flex flex-col space-y-2">
+                            <a href="/quiz/{{ concept.concept_id }}" 
+                               class="bg-blue-500 text-white px-4 py-2 rounded text-center text-sm hover:bg-blue-600 transition">
+                                测试
+                            </a>
+                            <a href="/feynman/{{ concept.concept_id }}"
+                               class="bg-purple-500 text-white px-4 py-2 rounded text-center text-sm hover:bg-purple-600 transition">
+                                费曼
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧：统计和操作 -->
+    <div>
+        <!-- 章节统计 -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 class="font-semibold mb-4">📊 章节统计</h3>
+            
+            {% set avg_retention = concepts|map(attribute='retention')|sum / concepts|length if concepts else 0 %}
+            
+            <div class="text-center">
+                <div class="text-4xl font-bold text-blue-600">{{ "%.0f"|format(avg_retention * 100) }}%</div>
+                <div class="text-gray-500 text-sm">平均掌握度</div>
+            </div>
+            
+            <div class="mt-4 pt-4 border-t">
+                <div class="flex justify-between text-sm">
+                    <span>已掌握:</span>
+                    <span class="font-medium">{{ concepts|selectattr('retention', 'ge', 0.8)|list|length }}</span>
+                </div>
+                <div class="flex justify-between text-sm mt-2">
+                    <span>学习中:</span>
+                    <span class="font-medium">{{ concepts|selectattr('retention', 'ge', 0.5)|selectattr('retention', 'lt', 0.8)|list|length }}</span>
+                </div>
+                <div class="flex justify-between text-sm mt-2">
+                    <span>薄弱:</span>
+                    <span class="font-medium text-red-500">{{ concepts|selectattr('retention', 'lt', 0.5)|list|length }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 快速操作 -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="font-semibold mb-4">⚡ 快速操作</h3>
+            
+            <div class="space-y-3">
+                <a href="/graph" class="block p-3 bg-purple-50 rounded hover:bg-purple-100 transition">
+                    <div class="font-medium">🕸️ 查看知识图谱</div>
+                </a>
+                
+                <a href="/upload" class="block p-3 bg-blue-50 rounded hover:bg-blue-100 transition">
+                    <div class="font-medium">📤 上传新内容</div>
+                </a>
+
+                <a href="/quiz/batch/{{ chapter.id }}" class="block p-3 bg-green-50 rounded hover:bg-green-100 transition">
+                    <div class="font-medium">📝 整卷测验</div>
+                    <div class="text-xs text-gray-500">一次性生成5/10/15/20题</div>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,721 @@
+﻿{% extends "base.html" %}
+
+{% block title %}缁嗚妭寮哄寲缁冧範{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">浠〃鐩?/a>
+        <span class="mx-2">/</span>
+        <a href="/quiz/batch/0" class="hover:text-blue-500">鏁村嵎娴嬭瘯</a>
+        <span class="mx-2">/</span>
+        <span>缁嗚妭寮哄寲</span>
+    </div>
+
+    <h1 class="text-2xl font-bold">馃幆 缁嗚妭寮哄寲缁冧範</h1>
+    <p class="text-gray-500">鍩轰簬鏁村嵎娴嬭瘯缁撴灉锛岄拡瀵硅杽寮辩煡璇嗙偣杩涜寮哄寲</p>
+</div>
+
+<!-- 鏃犳暟鎹彁绀?-->
+<div id="noData" class="hidden bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+    <p class="text-yellow-700">璇峰厛瀹屾垚鏁村嵎娴嬭瘯鍐嶆潵杩欓噷缁冧範锝?/p>
+    <div class="mt-2">
+        <a href="/quiz/batch/0" class="text-blue-600 hover:underline">鍘昏繘琛屾暣鍗锋祴璇?/a>
+        <button onclick="location.reload()" class="ml-4 text-blue-600 hover:underline">鍒锋柊椤甸潰閲嶈瘯</button>
+    </div>
+</div>
+
+<!-- 缁冧範鍐呭 -->
+<div id="practiceArea" class="hidden space-y-6">
+    <!-- 鐭ヨ瘑鐐归€夋嫨 -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="font-bold text-lg mb-4">馃摎 閫夋嫨瑕佺粌涔犵殑鐭ヨ瘑鐐癸紙鐐瑰嚮寮€濮嬬粌涔狅級</h3>
+        <div id="knowledgeList" class="space-y-3"></div>
+    </div>
+
+    <!-- 绛旈鍖哄煙 -->
+    <div id="questionArea" class="hidden space-y-6">
+        <!-- 杩涘害鏉?-->
+        <div class="bg-white rounded-lg shadow p-4">
+            <div class="flex justify-between items-center mb-2">
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm text-gray-500">缁冧範杩涘害</span>
+                    <span class="text-xs text-gray-400">| 蹇嵎閿? 1-5閫夐€夐」 | Q纭畾 W妯＄硦 E涓嶄細 | 鈫戔啌鍒囨崲</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="knowledgeTitle" class="text-blue-600 font-medium"></span>
+                    <span id="questionProgress" class="text-sm font-bold text-blue-600">1/5</span>
+                </div>
+            </div>
+            <div class="bg-gray-200 rounded-full h-3">
+                <div id="practiceProgressBar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- 棰樼洰瀹瑰櫒 -->
+        <div id="questionsContainer"></div>
+
+        <!-- 搴曢儴鎿嶄綔鏍?-->
+        <div class="bg-white rounded-lg shadow p-4 sticky bottom-4">
+            <div class="flex justify-between items-center">
+                <div class="text-sm text-gray-500">
+                    宸茬瓟: <span id="answeredCount" class="font-bold text-blue-600">0</span>/<span id="totalPractice">5</span>
+                </div>
+                <div class="flex space-x-4">
+                    <button id="prevQuestion" type="button" class="text-gray-500 hover:text-gray-700 px-4">鈫?涓婁竴棰?/button>
+                    <button id="submitPracticeBtn" type="button" disabled class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 disabled:bg-gray-300">鎻愪氦缁冧範</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 缁冧範缁撴灉 -->
+    <div id="resultArea" class="hidden space-y-6">
+        <div class="bg-white rounded-lg shadow p-6 text-center">
+            <div class="text-6xl mb-4" id="practiceEmoji">馃帀</div>
+            <div class="text-5xl font-bold text-blue-600 mb-2" id="practiceScore">0</div>
+            <div class="text-gray-500">鍒?/div>
+            <div class="mt-4 flex justify-center space-x-6">
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-green-600" id="practiceCorrect">0</div>
+                    <div class="text-sm text-gray-500">姝ｇ‘</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-red-600" id="practiceWrong">0</div>
+                    <div class="text-sm text-gray-500">閿欒</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 绛旀瑙ｆ瀽 -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b">
+                <h3 class="font-bold text-lg">馃摉 绛旀涓庤В鏋?/h3>
+            </div>
+            <div id="practiceDetails" class="divide-y"></div>
+        </div>
+
+        <div class="flex justify-center space-x-4">
+            <a href="/quiz/batch/0" class="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600">鍐嶅仛涓€濂楁暣鍗?/a>
+            <button type="button" onclick="backToList()" class="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600">缁х画缁冧範鍏朵粬鐭ヨ瘑鐐?/button>
+            <button type="button" onclick="endStudySession()" class="bg-emerald-600 text-white px-6 py-3 rounded-lg hover:bg-emerald-700 font-bold">鉁?缁撴潫瀛︿範</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 璇诲彇鏁村嵎娴嬭瘯鐨勬暟鎹?    console.log('寮€濮嬭鍙栨暟鎹?..');
+    let examData = null;
+
+    // 浠嶶RL鍙傛暟鑾峰彇exam_id
+    const urlParams = new URLSearchParams(window.location.search);
+    const examId = urlParams.get('exam_id');
+    const score = urlParams.get('score') || '';
+
+    console.log('examId:', examId);
+    console.log('score:', score);
+
+    function revealMaskedExplanation(revealId, triggerBtn) {
+        const explanationEl = document.getElementById(revealId);
+        if (explanationEl) explanationEl.classList.remove('hidden');
+        if (triggerBtn) triggerBtn.classList.add('hidden');
+    }
+    // 閫氳繃API鑾峰彇璇曞嵎鏁版嵁
+    async function loadExamData() {
+        if (!examId) {
+            console.log('娌℃湁examId锛屾棤娉曞姞杞芥暟鎹?);
+            return null;
+        }
+
+        try {
+            const response = await fetch('/api/quiz/batch/detail/' + examId);
+            if (!response.ok) {
+                throw new Error('璇曞嵎鏁版嵁鍔犺浇澶辫触');
+            }
+            const data = await response.json();
+            console.log('API杩斿洖鏁版嵁:', data);
+            return data;
+        } catch(e) {
+            console.error('鍔犺浇璇曞嵎鏁版嵁澶辫触:', e);
+            return null;
+        }
+    }
+
+    // 鍚屾鍔犺浇鏁版嵁
+    (async function() {
+        examData = await loadExamData();
+        if (examData) {
+            examData.score = score;
+            initPractice();
+        } else {
+            document.getElementById('noData').classList.remove('hidden');
+        }
+    })();
+
+    function initPractice() {
+        if (!examData) {
+            document.getElementById('noData').classList.remove('hidden');
+            return;
+        }
+
+        document.getElementById('practiceArea').classList.remove('hidden');
+
+        const questions = examData.questions || [];
+        const uploadedContent = examData.uploadedContent || '';
+        const knowledgePoints = examData.knowledge_points || [];
+
+        console.log('===== 璋冭瘯淇℃伅 =====');
+        console.log('questions鏁伴噺:', questions.length);
+        console.log('knowledgePoints:', knowledgePoints);
+
+        // 浠庨鐩腑鎻愬彇鐭ヨ瘑鐐?        const knowledgeMap = {};
+        console.log('澶勭悊棰樼洰鏁版嵁:', questions);
+
+        // 棣栧厛锛氬鏋滄湁椤跺眰knowledgePoints锛岀洿鎺ヤ娇鐢?        if (knowledgePoints.length > 0) {
+            console.log('浣跨敤椤跺眰knowledgePoints');
+            knowledgePoints.forEach(function(kp, i) {
+                const q = questions[i] || {};
+                knowledgeMap[kp] = {
+                    type: q.type || 'A1',
+                    difficulty: q.difficulty || '鍩虹',
+                    question: q.question || '',
+                    options: q.options || {},
+                    correct_answer: q.correct_answer || 'A',
+                    explanation: q.explanation || '',
+                    key_point: kp
+                };
+            });
+        }
+
+        // 鐒跺悗锛氫粠姣忛亾棰樹腑鎻愬彇鐭ヨ瘑鐐癸紙鍚堝苟鎴栬鐩栵級
+        questions.forEach(function(q, i) {
+            const keyPoint = q.key_point || ('鑰冪偣' + (i + 1));
+            console.log('绗? + (i+1) + '棰樿€冪偣:', keyPoint);
+
+            // 鏇存柊鐭ヨ瘑鐐瑰搴旂殑棰樼洰淇℃伅
+            knowledgeMap[keyPoint] = {
+                type: q.type,
+                difficulty: q.difficulty,
+                question: q.question,
+                options: q.options,
+                correct_answer: q.correct_answer,
+                explanation: q.explanation,
+                key_point: q.key_point
+            };
+        });
+
+        // 鏄剧ず鐭ヨ瘑鐐瑰垪琛?- 浣跨敤浜嬩欢濮旀墭
+        console.log('knowledgeMap:', knowledgeMap);
+        console.log('鐭ヨ瘑鐐规暟閲?', Object.keys(knowledgeMap).length);
+
+        const knowledgeList = document.getElementById('knowledgeList');
+        knowledgeList.innerHTML = '';
+
+        Object.keys(knowledgeMap).forEach(function(key) {
+            const k = knowledgeMap[key];
+            const statusClass = k.difficulty === '鍩虹' ? 'text-green-600' : (k.difficulty === '鎻愰珮' ? 'text-yellow-600' : 'text-red-600');
+
+            const div = document.createElement('div');
+            div.className = 'flex items-center justify-between p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-blue-50 cursor-pointer transition';
+            div.dataset.key = key;
+            div.innerHTML = '<div><span class="font-bold text-lg knowledge-key">' + key + '</span><span class="ml-2 ' + statusClass + '">' + k.difficulty + '</span></div>' +
+                '<span class="bg-blue-500 text-white px-4 py-2 rounded-lg">寮€濮嬬粌涔?鈫?/span>';
+
+            div.addEventListener('click', function() {
+                startPractice(this.dataset.key);
+            });
+
+            knowledgeList.appendChild(div);
+        });
+
+        // 缁冧範鐘舵€?        let currentKnowledge = null;
+        let practiceQuestions = [];  // 5閬撳彉寮忛
+        let currentPracticeIndex = 0;
+        let practiceAnswers = {};
+        let practiceConfidence = {};
+        let isPracticeMode = false;
+        let detailTrackingSessionId = null;  // 缁嗚妭缁冧範杩借釜浼氳瘽ID
+
+        function buildMaskedExplanationHtml(explanation, isCorrect, confidence, revealId) {
+            const text = explanation || '暂无解析';
+            if (!explanation || (isCorrect && confidence === 'sure')) {
+                return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div><p class="text-gray-600 text-sm">' + text + '</p></div>';
+            }
+            return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div>' +
+                '<button type="button" onclick="revealMaskedExplanation(\'' + revealId + '\', this)" class="w-full text-left bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 rounded-lg text-sm hover:bg-amber-100 transition">这题做错了，先自己想一下，点击查看解析</button>' +
+                '<p id="' + revealId + '" class="text-gray-600 text-sm mt-3 hidden">' + text + '</p></div>';
+        }
+        // 寮€濮嬬粌涔犳煇涓煡璇嗙偣
+        window.startPractice = async function(key) {
+            currentKnowledge = key;
+            currentPracticeIndex = 0;
+            practiceAnswers = {};
+            practiceConfidence = {};
+            isPracticeMode = true;
+
+            document.getElementById('knowledgeList').parentElement.classList.add('hidden');
+            document.getElementById('questionArea').classList.remove('hidden');
+            document.getElementById('knowledgeTitle').textContent = key;
+            
+            // 寮€濮嬪涔犺建杩硅褰?            await startDetailTrackingSession(key);
+
+            // 鐢熸垚5閬撳彉寮忛
+            await generateVariationQuestions(key);
+        };
+        
+        // 寮€濮嬬粏鑺傜粌涔犺拷韪細璇?        async function startDetailTrackingSession(knowledgePoint) {
+            try {
+                const response = await fetch('/api/tracking/session/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_type: 'detail_practice',
+                        chapter_id: examData.chapter_id,
+                        title: `缁嗚妭缁冧範: ${knowledgePoint}`,
+                        knowledge_point: knowledgePoint
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    detailTrackingSessionId = data.session_id;
+                    console.log('[Tracking] 缁嗚妭缁冧範浼氳瘽寮€濮?', detailTrackingSessionId);
+                }
+            } catch (error) {
+                console.error('[Tracking] 寮€濮嬬粏鑺傜粌涔犱細璇濆け璐?', error);
+            }
+        }
+        
+        // 璁板綍缁嗚妭缁冧範绛旈
+        async function recordDetailQuestionAnswer(questionIndex) {
+            if (!detailTrackingSessionId) return;
+            
+            const q = practiceQuestions[questionIndex];
+            const answer = practiceAnswers[questionIndex] || '';
+            const confidence = practiceConfidence[questionIndex] || '';
+            
+            try {
+                await fetch('/api/tracking/session/' + detailTrackingSessionId + '/question', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question_index: questionIndex,
+                        question_type: q.type,
+                        difficulty: q.difficulty,
+                        question_text: q.question,
+                        options: q.options,
+                        correct_answer: q.correct_answer,
+                        user_answer: answer,
+                        is_correct: answer === q.correct_answer,
+                        confidence: confidence,
+                        explanation: q.explanation,
+                        key_point: currentKnowledge
+                    })
+                });
+            } catch (error) {
+                console.error('[Tracking] 璁板綍缁嗚妭缁冧範棰樼洰澶辫触:', error);
+            }
+        }
+        
+        // 瀹屾垚缁嗚妭缁冧範浼氳瘽
+        async function completeDetailTrackingSession(score, totalQuestions) {
+            if (!detailTrackingSessionId) return;
+            
+            try {
+                await fetch('/api/tracking/session/' + detailTrackingSessionId + '/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        score: score,
+                        total_questions: totalQuestions
+                    })
+                });
+                console.log('[Tracking] 缁嗚妭缁冧範浼氳瘽瀹屾垚');
+            } catch (error) {
+                console.error('[Tracking] 瀹屾垚缁嗚妭缁冧範浼氳瘽澶辫触:', error);
+            }
+        }
+
+        // 鐢熸垚鍙樺紡棰?        async function generateVariationQuestions(keyPoint) {
+            console.log('寮€濮嬬敓鎴愬彉寮忛, keyPoint:', keyPoint);
+            const k = knowledgeMap[keyPoint];
+            console.log('鐭ヨ瘑鐐规暟鎹?', k);
+            if (!k) {
+                alert('鐭ヨ瘑鐐规暟鎹笉瀛樺湪');
+                return;
+            }
+
+            // 鏄剧ず鍔犺浇鐘舵€?            const container = document.getElementById('questionsContainer');
+            container.innerHTML = '<div class="text-center p-8"><div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div><div class="text-lg">DeepSeek姝ｅ湪鐢熸垚鍙樺紡棰?..</div><div class="text-sm text-gray-400 mt-2">鍩轰簬鍚屼竴鐭ヨ瘑鐐癸紝鐢熸垚5閬撲笉鍚岃搴︾殑鍙樺紡棰?/div></div>';
+            document.getElementById('questionArea').classList.remove('hidden');
+
+            try {
+                // 璋冪敤API鐢熸垚鍙樺紡棰?                const response = await fetch('/api/quiz/batch/generate-variations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        key_point: keyPoint,
+                        base_question: k,
+                        uploaded_content: '', // 鍙互浠巈xamData鑾峰彇
+                        num_variations: 5
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('鐢熸垚鍙樺紡棰樺け璐?);
+                }
+
+                const data = await response.json();
+                practiceQuestions = data.variations || [];
+                
+                console.log('鐢熸垚浜?, practiceQuestions.length, '閬撳彉寮忛');
+                console.log('鍙樺紡棰樻暟鎹?', practiceQuestions);
+                
+            } catch (error) {
+                console.error('鐢熸垚鍙樺紡棰樺け璐?', error);
+                // 浣跨敤澶囩敤鏂规锛氱畝鍗曞彉寮?                practiceQuestions = [];
+                for (let i = 0; i < 5; i++) {
+                    practiceQuestions.push({
+                        id: i + 1,
+                        type: k.type || 'A1',
+                        difficulty: k.difficulty || '鍩虹',
+                        variation_type: ['姒傚康鍙樺紡', '鐥呬緥鍙樺紡', '鏈哄埗鍙樺紡', '閴村埆鍙樺紡', '搴旂敤鍙樺紡'][i],
+                        question: i === 0 ? k.question : `銆愬彉寮?{i}銆?{k.question}`,
+                        options: {...k.options},
+                        correct_answer: k.correct_answer,
+                        explanation: k.explanation
+                    });
+                }
+            }
+
+            document.getElementById('totalPractice').textContent = practiceQuestions.length;
+            displayPracticeQuestion();
+        }
+
+        function displayPracticeQuestion() {
+            const q = practiceQuestions[currentPracticeIndex];
+            if (!q) return;
+
+            const container = document.getElementById('questionsContainer');
+            const isMultiple = q.type === 'X';
+            const inputType = isMultiple ? 'checkbox' : 'radio';
+            
+            // 鏄剧ず鍙樺紡绫诲瀷鏍囩
+            const variationBadge = q.variation_type ? 
+                '<span class="bg-purple-100 text-purple-700 px-2 py-1 rounded text-sm ml-2">' + q.variation_type + '</span>' : '';
+
+            let optionsHtml = '';
+            ['A', 'B', 'C', 'D', 'E'].forEach(function(opt) {
+                optionsHtml += '<label class="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:border-blue-500 transition option-label" data-opt="' + opt + '">' +
+                    '<input type="' + inputType + '" name="practiceOpt" value="' + opt + '" class="mt-1 mr-3" onchange="selectPracticeOption(\'' + opt + '\')">' +
+                    '<span class="font-bold mr-2">' + opt + '.</span><span>' + (q.options[opt] || '閫夐」' + opt) + '</span></label>';
+            });
+
+            container.innerHTML = '<div class="bg-white rounded-lg shadow p-6">' +
+                '<div class="flex items-center justify-between mb-4">' +
+                '<div class="flex items-center space-x-2">' +
+                '<span class="bg-blue-100 text-blue-800 px-3 py-1 rounded text-sm font-bold">绗? + (currentPracticeIndex + 1) + '棰?/span>' +
+                '<span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-sm">' + (q.type || 'A1') + '</span>' +
+                '<span class="text-purple-600 text-sm font-medium">鍙樺紡棰?/span>' + variationBadge + '</div>' +
+                '<span id="status-' + currentPracticeIndex + '" class="text-gray-300 text-xl">鈼?/span></div>' +
+                '<div class="mb-4"><p class="text-lg font-medium leading-relaxed">' + q.question + '</p></div>' +
+                '<div class="space-y-2 mb-4">' + optionsHtml + '</div>' +
+                '<div class="pt-4 border-t border-gray-100">' +
+                '<div class="flex items-center justify-between">' +
+                '<span class="text-sm text-gray-500">鑷垜璇勪及锛?/span>' +
+                '<div class="flex space-x-2">' +
+                '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'sure\')" id="practice-btn-sure-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-green-500 text-green-600 hover:bg-green-500 hover:text-white transition">鉁?纭畾</button>' +
+                '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'unsure\')" id="practice-btn-unsure-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white transition">? 妯＄硦</button>' +
+                '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'no\')" id="practice-btn-no-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white transition">鉁?涓嶄細</button>' +
+                '</div></div><div id="practice-confidence-display-' + currentPracticeIndex + '" class="mt-2 text-sm text-center hidden"></div></div></div>';
+
+            // 鎭㈠涔嬪墠绛旀
+            if (practiceAnswers[currentPracticeIndex]) {
+                const savedAns = practiceAnswers[currentPracticeIndex];
+                if (isMultiple) {
+                    savedAns.split('').forEach(function(opt) {
+                        const input = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
+                        if (input) {
+                            input.checked = true;
+                            input.closest('label').classList.add('border-blue-500', 'bg-blue-50');
+                        }
+                    });
+                } else {
+                    const input = document.querySelector('input[name="practiceOpt"][value="' + savedAns + '"]');
+                    if (input) {
+                        input.checked = true;
+                        input.closest('label').classList.add('border-blue-500', 'bg-blue-50');
+                    }
+                }
+            }
+
+            // 鏇存柊杩涘害
+            document.getElementById('questionProgress').textContent = (currentPracticeIndex + 1) + '/' + practiceQuestions.length;
+            const progress = ((currentPracticeIndex + 1) / practiceQuestions.length) * 100;
+            document.getElementById('practiceProgressBar').style.width = progress + '%';
+
+            // 鏇存柊鎸夐挳鐘舵€?            document.getElementById('prevQuestion').style.visibility = currentPracticeIndex > 0 ? 'visible' : 'hidden';
+            const answered = Object.keys(practiceAnswers).length;
+            document.getElementById('answeredCount').textContent = answered;
+            document.getElementById('submitPracticeBtn').disabled = answered < practiceQuestions.length;
+            document.getElementById('submitPracticeBtn').textContent = currentPracticeIndex < practiceQuestions.length - 1 ? '涓嬩竴棰?鈫? : '鎻愪氦缁冧範';
+        }
+
+        // 鑷俊搴﹁缃?        window.setPracticeConfidence = function(idx, level) {
+            practiceConfidence[idx] = level;
+
+            const btnSure = document.getElementById('practice-btn-sure-' + idx);
+            const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
+            const btnNo = document.getElementById('practice-btn-no-' + idx);
+            const display = document.getElementById('practice-confidence-display-' + idx);
+
+            btnSure.classList.remove('bg-green-500', 'text-white');
+            btnUnsure.classList.remove('bg-yellow-500', 'text-white');
+            btnNo.classList.remove('bg-red-500', 'text-white');
+
+            if (level === 'sure') {
+                btnSure.classList.add('bg-green-500', 'text-white');
+                display.textContent = '鉁?鎴戠‘瀹氳繖閬撻浼氬仛';
+                display.className = 'mt-2 text-sm text-center text-green-600 font-medium';
+            } else if (level === 'unsure') {
+                btnUnsure.classList.add('bg-yellow-500', 'text-white');
+                display.textContent = '? 杩欓亾棰樻湁鐐规ā绯?;
+                display.className = 'mt-2 text-sm text-center text-yellow-600 font-medium';
+            } else if (level === 'no') {
+                btnNo.classList.add('bg-red-500', 'text-white');
+                display.textContent = '鉁?杩欓亾棰樺畬鍏ㄤ笉浼?;
+                display.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+            }
+            display.classList.remove('hidden');
+        };
+
+        // 閫夋嫨閫夐」
+        window.selectPracticeOption = function(opt) {
+            const q = practiceQuestions[currentPracticeIndex];
+            const isMultiple = (q.type || 'A1') === 'X';
+
+            if (isMultiple) {
+                const checkboxes = document.querySelectorAll('input[name="practiceOpt"]');
+                const selected = [];
+                checkboxes.forEach(function(cb) {
+                    if (cb.checked) {
+                        selected.push(cb.value);
+                        cb.closest('label').classList.add('border-blue-500', 'bg-blue-50');
+                    } else {
+                        cb.closest('label').classList.remove('border-blue-500', 'bg-blue-50');
+                    }
+                });
+                practiceAnswers[currentPracticeIndex] = selected.sort().join('');
+            } else {
+                practiceAnswers[currentPracticeIndex] = opt;
+                document.querySelectorAll('[data-opt]').forEach(function(label) {
+                    if (label.dataset.opt === opt) {
+                        label.classList.add('border-blue-500', 'bg-blue-50');
+                    } else {
+                        label.classList.remove('border-blue-500', 'bg-blue-50');
+                    }
+                });
+            }
+
+            // 鏇存柊鐘舵€?            const statusEl = document.getElementById('status-' + currentPracticeIndex);
+            if (statusEl) {
+                statusEl.textContent = '鉁?;
+                statusEl.className = 'text-green-500 text-xl font-bold';
+            }
+
+            // 鏇存柊杩涘害
+            const answered = Object.keys(practiceAnswers).length;
+            document.getElementById('answeredCount').textContent = answered;
+            document.getElementById('submitPracticeBtn').disabled = answered < practiceQuestions.length;
+            
+            // 璁板綍绛旈鍒板涔犺建杩?            recordDetailQuestionAnswer(currentPracticeIndex);
+        };
+
+        // 涓婁竴棰?        document.getElementById('prevQuestion').addEventListener('click', function() {
+            if (currentPracticeIndex > 0) {
+                currentPracticeIndex--;
+                displayPracticeQuestion();
+            }
+        });
+
+        // 涓嬩竴棰?鎻愪氦
+        document.getElementById('submitPracticeBtn').addEventListener('click', function() {
+            console.log('鐐瑰嚮浜嗘彁浜ゆ寜閽?);
+            console.log('currentPracticeIndex:', currentPracticeIndex);
+            console.log('practiceQuestions.length:', practiceQuestions.length);
+
+            // 妫€鏌ュ綋鍓嶉鏄惁宸茬瓟
+            if (!practiceAnswers[currentPracticeIndex]) {
+                alert('璇峰厛瀹屾垚褰撳墠棰樼洰');
+                return;
+            }
+
+            if (currentPracticeIndex < practiceQuestions.length - 1) {
+                // 涓嬩竴棰?                currentPracticeIndex++;
+                displayPracticeQuestion();
+            } else {
+                // 鎻愪氦
+                submitPractice();
+            }
+        });
+
+        // 閿洏蹇嵎閿?        document.addEventListener('keydown', function(e) {
+            const questionArea = document.getElementById('questionArea');
+            if (!questionArea || questionArea.classList.contains('hidden')) return;
+            if (!isPracticeMode) return;
+
+            const key = e.key;
+
+            // 鏁板瓧閿?1-5 閫夋嫨閫夐」
+            if (key >= '1' && key <= '5') {
+                const optIndex = parseInt(key) - 1;
+                const options = ['A', 'B', 'C', 'D', 'E'];
+                const opt = options[optIndex];
+
+                const input = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
+                if (input) {
+                    input.checked = true;
+                    selectPracticeOption(opt);
+                }
+                e.preventDefault();
+                return;
+            }
+
+            const keyLower = key.toLowerCase();
+
+            // 鑷俊搴﹀揩鎹烽敭
+            if (keyLower === 'q') { setPracticeConfidence(currentPracticeIndex, 'sure'); e.preventDefault(); }
+            if (keyLower === 'w') { setPracticeConfidence(currentPracticeIndex, 'unsure'); e.preventDefault(); }
+            if (keyLower === 'e') { setPracticeConfidence(currentPracticeIndex, 'no'); e.preventDefault(); }
+
+            // 涓婁笅绠ご鍒囨崲棰樼洰
+            if (key === 'ArrowDown') {
+                e.preventDefault();
+                if (currentPracticeIndex < practiceQuestions.length - 1) {
+                    currentPracticeIndex++;
+                    displayPracticeQuestion();
+                }
+            }
+            if (key === 'ArrowUp') {
+                e.preventDefault();
+                if (currentPracticeIndex > 0) {
+                    currentPracticeIndex--;
+                    displayPracticeQuestion();
+                }
+            }
+
+            // Enter 涓嬩竴棰?            if (key === 'Enter') {
+                const answered = Object.keys(practiceAnswers).length;
+                if (answered >= practiceQuestions.length) {
+                    if (currentPracticeIndex < practiceQuestions.length - 1) {
+                        currentPracticeIndex++;
+                        displayPracticeQuestion();
+                    } else {
+                        submitPractice();
+                    }
+                }
+                e.preventDefault();
+            }
+        });
+
+        function submitPractice() {
+            // 璁＄畻鎴愮哗
+            let correctCount = 0;
+            const details = [];
+
+            practiceQuestions.forEach(function(q, i) {
+                const userAns = practiceAnswers[i] || '';
+                const correctAns = q.correct_answer || '';
+                const isMultiple = (q.type || 'A1') === 'X';
+
+                let isCorrect = false;
+                if (isMultiple) {
+                    isCorrect = (userAns.split('').sort().join('') === correctAns.split('').sort().join(''));
+                } else {
+                    isCorrect = (userAns.toUpperCase() === correctAns.toUpperCase());
+                }
+
+                if (isCorrect) correctCount++;
+
+                details.push({
+                    question: q.question,
+                    options: q.options,
+                    user_answer: userAns,
+                    correct_answer: correctAns,
+                    is_correct: isCorrect,
+                    explanation: q.explanation,
+                    confidence: practiceConfidence[i]
+                });
+            });
+
+            const total = practiceQuestions.length;
+            const score = Math.round(correctCount / total * 100);
+
+            // 鏄剧ず缁撴灉
+            document.getElementById('questionArea').classList.add('hidden');
+            document.getElementById('resultArea').classList.remove('hidden');
+
+            document.getElementById('practiceScore').textContent = score;
+            document.getElementById('practiceCorrect').textContent = correctCount;
+            document.getElementById('practiceWrong').textContent = total - correctCount;
+            document.getElementById('practiceEmoji').textContent = score >= 80 ? '馃帀' : score >= 60 ? '馃憤' : '馃挭';
+            
+            // 瀹屾垚瀛︿範杞ㄨ抗璁板綍
+            completeDetailTrackingSession(score, total);
+
+            // 鏄剧ず璇︾粏瑙ｆ瀽
+            const container = document.getElementById('practiceDetails');
+            container.innerHTML = '';
+
+            details.forEach(function(d, i) {
+                const userAnswer = d.user_answer || '';
+                const correctAnswer = d.correct_answer || '';
+
+                let optionsHtml = '';
+                ['A', 'B', 'C', 'D', 'E'].forEach(function(opt) {
+                    const isSelected = userAnswer.includes(opt);
+                    const isCorrectOpt = correctAnswer.includes(opt);
+                    let cls = 'p-2 rounded mb-1 ';
+                    if (isCorrectOpt) cls += 'bg-green-100 text-green-800 border border-green-300';
+                    else if (isSelected && !isCorrectOpt) cls += 'bg-red-100 text-red-800 border border-red-300';
+                    else cls += 'text-gray-600';
+
+                    optionsHtml += '<div class="' + cls + '"><span class="font-bold">' + opt + '.</span> ' + (d.options[opt] || '閫夐」' + opt) +
+                        (isCorrectOpt ? ' 鉁? : '') +
+                        (isSelected && !isCorrectOpt ? ' 鉂?(浣犵殑绛旀)' : '') + '</div>';
+                });
+
+                const div = document.createElement('div');
+                div.className = 'p-6';
+                const explanationId = 'detailExplanation-' + i;
+                div.innerHTML = '<div class="flex items-center justify-between mb-3"><div class="flex items-center space-x-2"><span class="font-bold">绗? + (i + 1) + '棰?/span><span class="' + (d.is_correct ? 'text-green-600' : 'text-red-600') + ' font-bold">' + (d.is_correct ? '鉁?姝ｇ‘' : '鉁?閿欒') + '</span></div></div>' +
+                    '<p class="mb-3 text-gray-800">' + d.question + '</p>' +
+                    '<div class="mb-4">' + optionsHtml + '</div>' +
+                    buildMaskedExplanationHtml(d.explanation, d.is_correct, d.confidence, explanationId);
+                container.appendChild(div);
+            });
+        }
+
+        window.backToList = function() {
+            document.getElementById('resultArea').classList.add('hidden');
+            document.getElementById('questionArea').classList.add('hidden');
+            document.getElementById('knowledgeList').parentElement.classList.remove('hidden');
+            isPracticeMode = false;
+        };
+
+        window.endStudySession = function() {
+            const score = document.getElementById('practiceScore').textContent;
+            const correct = document.getElementById('practiceCorrect').textContent;
+            const wrong = document.getElementById('practiceWrong').textContent;
+            const total = parseInt(correct) + parseInt(wrong);
+            const accuracy = total > 0 ? Math.round(parseInt(correct) / total * 100) + '%' : '0%';
+            alert('鏈瀛︿範宸茬粨鏉燂紒\n\n寰楀垎锛? + score + ' 鍒哱n姝ｇ‘鐜囷細' + accuracy + '\n姝ｇ‘锛? + correct + ' 棰?/ 閿欒锛? + wrong + ' 棰榎n\n鏁版嵁宸茶褰曞埌瀛︿範杞ㄨ抗锛岀户缁姞娌癸紒');
+            window.location.href = '/';
+        };
+    }
+</script>
+{% endblock %}
+
+

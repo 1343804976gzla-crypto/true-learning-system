@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ code }} - {{ message }}{% endblock %}
+
+{% block content %}
+<div class="min-h-[60vh] flex items-center justify-center">
+    <div class="text-center">
+        <!-- 错误图标 -->
+        <div class="text-8xl mb-4">
+            {% if code == 404 %}
+            🔍
+            {% elif code == 500 %}
+            🔧
+            {% elif code == 403 %}
+            🚫
+            {% else %}
+            ⚠️
+            {% endif %}
+        </div>
+        
+        <!-- 错误代码 -->
+        <h1 class="text-6xl font-bold text-gray-300 mb-4">{{ code }}</h1>
+        
+        <!-- 错误信息 -->
+        <h2 class="text-2xl font-semibold mb-4">{{ message }}</h2>
+        
+        <p class="text-gray-500 mb-8 max-w-md mx-auto">
+            {% if code == 404 %}
+            抱歉，您访问的页面不存在。请检查URL是否正确，或返回首页。
+            {% elif code == 500 %}
+            服务器遇到了问题，请稍后重试。如果问题持续存在，请联系管理员。
+            {% elif code == 403 %}
+            您没有权限访问此页面。请先完成前置章节的学习。
+            {% else %}
+            发生未知错误，请稍后重试。
+            {% endif %}
+        </p>
+        
+        <!-- 操作按钮 -->
+        <div class="space-x-4">
+            <a href="/" class="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition">
+                返回首页
+            </a>
+            
+            <button onclick="history.back()" class="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-300 transition">
+                返回上一页
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}

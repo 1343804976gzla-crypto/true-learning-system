@@ -1,0 +1,394 @@
+{% extends "base.html" %}
+
+{% block title %}10题练习 - True Learning System{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <!-- 头部 -->
+    <div class="mb-6">
+        <div class="flex items-center text-sm text-gray-500 mb-2">
+            <a href="/" class="hover:text-blue-500">仪表盘</a>
+            <span class="mx-2">/</span>
+            <a href="/chapter/{{ chapter_id }}" class="hover:text-blue-500">章节</a>
+            <span class="mx-2">/</span>
+            <span>10题练习</span>
+        </div>
+        <h1 class="text-2xl font-bold">📝 10题练习</h1>
+        <p class="text-gray-500">{{ chapter_title }}</p>
+    </div>
+
+    <!-- 加载状态 -->
+    <div id="loadingState" class="bg-white rounded-lg shadow p-12 text-center">
+        <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
+        <h3 class="text-lg font-medium mb-2">正在生成题目...</h3>
+        <p class="text-gray-500 mb-4">AI正在根据知识点生成高质量题目</p>
+        <div class="max-w-md mx-auto">
+            <div class="bg-gray-200 rounded-full h-2">
+                <div id="progressBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <p id="progressText" class="text-sm text-gray-500 mt-2">0/10 题</p>
+        </div>
+        
+        <p class="text-xs text-gray-400 mt-6">预计需要 10-30 秒</p>
+        
+        <button onclick="cancelQuiz()" class="mt-4 text-gray-500 hover:text-gray-700">
+            取消
+        </button>
+    </div>
+
+    <!-- 题目内容 (初始隐藏) -->
+    <div id="quizContent" class="hidden">
+        <!-- 进度条 -->
+        <div class="bg-white rounded-lg shadow p-4 mb-4">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-500">题目 <span id="currentQuestion">1</span> / 10</span>
+                <span class="text-sm text-gray-500" id="timer">00:00</span>
+            </div>
+            <div class="bg-gray-200 rounded-full h-2">
+                <div id="quizProgress" class="bg-blue-500 h-2 rounded-full transition-all" style="width: 10%"></div>
+            </div>
+        </div>
+
+        <!-- 题目卡片 -->
+        <div id="questionCard" class="bg-white rounded-lg shadow p-6 mb-4">
+            <h3 id="questionText" class="text-lg font-medium mb-6"></h3>
+            
+            <div id="optionsContainer" class="space-y-3">
+                <!-- 选项动态生成 -->
+            </div>
+
+            <!-- 信心度选择 -->
+            <div class="mt-6 pt-6 border-t">
+                <p class="text-sm text-gray-500 mb-3">你对这道题的把握程度？</p>
+                <div class="flex space-x-4">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="radio" name="confidence" value="sure" class="mr-2">
+                        <span class="text-green-600">✓ 确定会</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="radio" name="confidence" value="unsure" class="mr-2" checked>
+                        <span class="text-yellow-600">? 有点模糊</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="radio" name="confidence" value="dont_know" class="mr-2">
+                        <span class="text-red-600">✗ 完全不会</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- 导航按钮 -->
+        <div class="flex justify-between">
+            <button onclick="prevQuestion()" id="prevBtn" class="px-6 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50">
+                上一题
+            </button>
+            
+            <button onclick="nextQuestion()" id="nextBtn" class="px-6 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                下一题
+            </button>
+        </div>
+    </div>
+
+    <!-- 结果页面 (初始隐藏) -->
+    <div id="resultPage" class="hidden">
+        <div class="bg-white rounded-lg shadow p-8 text-center">
+            <div id="scoreDisplay" class="text-5xl font-bold mb-4"></div>
+            <p id="resultMessage" class="text-gray-600 mb-6"></p>
+            
+            <div class="flex justify-center space-x-4">
+                <a href="/wrong-answers?chapter={{ chapter_id }}" class="px-6 py-2 bg-red-500 text-white rounded hover:bg-red-600">
+                    查看错题
+                </a>
+                <a href="/chapter/{{ chapter_id }}" class="px-6 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                    返回章节
+                </a>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let sessionId = null;
+    let questions = [];
+    let currentIndex = 0;
+    let answers = [];
+    let startTime = null;
+    let timerInterval = null;
+    
+    const chapterId = '{{ chapter_id }}';
+    const mode = '{{ mode }}' || 'practice';
+
+    // 页面加载时开始获取题目
+    document.addEventListener('DOMContentLoaded', async function() {
+        await loadQuestions();
+    });
+
+    // 加载题目
+    async function loadQuestions() {
+        try {
+            // 使用 AbortController 设置60秒超时
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
+            
+            const response = await fetch(`/api/quiz/start/${chapterId}?mode=${mode}`, {
+                method: 'POST',
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            sessionId = data.session_id;
+            questions = data.questions || [];
+            
+            if (questions.length === 0) {
+                throw new Error('没有获取到题目');
+            }
+            
+            // 初始化答案数组
+            answers = questions.map(() => ({
+                question_index: 0,
+                user_answer: '',
+                time_spent: 0,
+                confidence: 'unsure'
+            }));
+            
+            // 隐藏加载，显示题目
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('quizContent').classList.remove('hidden');
+            
+            startTime = Date.now();
+            startTimer();
+            showQuestion(0);
+            
+        } catch (error) {
+            console.error('加载题目失败:', error);
+            
+            let errorMsg = '生成题目失败，请重试';
+            if (error.name === 'AbortError') {
+                errorMsg = '请求超时，请检查网络后重试';
+            }
+            
+            document.getElementById('loadingState').innerHTML = `
+                <div class="text-red-500 mb-4">❌ ${errorMsg}</div>
+                <button onclick="location.reload()" class="px-4 py-2 bg-blue-500 text-white rounded">
+                    重新加载
+                </button>
+                <a href="/chapter/${chapterId}" class="ml-2 px-4 py-2 bg-gray-200 rounded">
+                    返回章节
+                </a>
+            `;
+        }
+    }
+
+    // 更新进度条动画
+    function updateProgressBar(percent) {
+        document.getElementById('progressBar').style.width = percent + '%';
+        document.getElementById('progressText').textContent = 
+            Math.floor(percent / 10) + '/10 题';
+    }
+
+    // 模拟进度条
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        progress += Math.random() * 15;
+        if (progress > 90) progress = 90;
+        updateProgressBar(progress);
+    }, 2000);
+
+    // 显示指定题目
+    function showQuestion(index) {
+        currentIndex = index;
+        const question = questions[index];
+        
+        document.getElementById('currentQuestion').textContent = index + 1;
+        document.getElementById('quizProgress').style.width = ((index + 1) / 10 * 100) + '%';
+        
+        document.getElementById('questionText').textContent = 
+            `${index + 1}. ${question.question}`;
+        
+        // 生成选项
+        const optionsContainer = document.getElementById('optionsContainer');
+        optionsContainer.innerHTML = '';
+        
+        const options = question.options || {};
+        Object.entries(options).forEach(([key, value]) => {
+            const div = document.createElement('div');
+            div.className = 'flex items-center p-3 border rounded hover:bg-gray-50 cursor-pointer';
+            div.onclick = () => selectOption(key);
+            
+            const isSelected = answers[index]?.user_answer === key;
+            
+            div.innerHTML = `
+                <input type="radio" name="option" value="${key}" 
+                       ${isSelected ? 'checked' : ''} class="mr-3">
+                <span class="font-medium mr-2">${key}.</span>
+                <span>${value}</span>
+            `;
+            
+            optionsContainer.appendChild(div);
+        });
+        
+        // 恢复之前的选择
+        if (answers[index]?.confidence) {
+            document.querySelector(`input[name="confidence"][value="${answers[index].confidence}"]`).checked = true;
+        }
+        
+        // 更新按钮状态
+        document.getElementById('prevBtn').disabled = index === 0;
+        document.getElementById('nextBtn').textContent = 
+            index === 9 ? '提交' : '下一题';
+    }
+
+    // 选择选项
+    function selectOption(value) {
+        const currentAnswer = answers[currentIndex].user_answer;
+
+        if (currentAnswer === value) {
+            // 已选中该选项，取消选择
+            answers[currentIndex].user_answer = '';
+            answers[currentIndex].question_index = currentIndex;
+
+            // 更新UI - 取消选中
+            document.querySelectorAll('#optionsContainer input').forEach(input => {
+                input.checked = false;
+            });
+        } else {
+            // 选中该选项
+            answers[currentIndex].user_answer = value;
+            answers[currentIndex].question_index = currentIndex;
+
+            // 更新UI
+            document.querySelectorAll('#optionsContainer input').forEach(input => {
+                input.checked = input.value === value;
+            });
+        }
+    }
+
+    // 上一题
+    function prevQuestion() {
+        if (currentIndex > 0) {
+            saveCurrentAnswer();
+            showQuestion(currentIndex - 1);
+        }
+    }
+
+    // 下一题/提交
+    function nextQuestion() {
+        saveCurrentAnswer();
+        
+        if (currentIndex < 9) {
+            showQuestion(currentIndex + 1);
+        } else {
+            submitQuiz();
+        }
+    }
+
+    // 保存当前答案
+    function saveCurrentAnswer() {
+        const selectedOption = document.querySelector('input[name="option"]:checked');
+        const confidence = document.querySelector('input[name="confidence"]:checked');
+        
+        answers[currentIndex] = {
+            question_index: currentIndex,
+            user_answer: selectedOption ? selectedOption.value : '',
+            time_spent: Math.floor((Date.now() - startTime) / 1000),
+            confidence: confidence ? confidence.value : 'unsure'
+        };
+    }
+
+    // 提交测验
+    async function submitQuiz() {
+        clearInterval(timerInterval);
+        
+        try {
+            const response = await fetch(`/api/quiz/submit/${sessionId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({answers: answers})
+            });
+            
+            const data = await response.json();
+            
+            // 显示结果
+            document.getElementById('quizContent').classList.add('hidden');
+            document.getElementById('resultPage').classList.remove('hidden');
+            
+            const score = data.score || 0;
+            document.getElementById('scoreDisplay').textContent = score + '分';
+            document.getElementById('scoreDisplay').className = 
+                'text-5xl font-bold mb-4 ' + (score >= 80 ? 'text-green-600' : score >= 60 ? 'text-yellow-600' : 'text-red-600');
+            
+            document.getElementById('resultMessage').textContent = 
+                `答对 ${data.correct_count || 0} 题，答错 ${data.wrong_count || 0} 题`;
+            
+        } catch (error) {
+            alert('提交失败: ' + error.message);
+        }
+    }
+
+    // 计时器
+    function startTimer() {
+        timerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const seconds = (elapsed % 60).toString().padStart(2, '0');
+            document.getElementById('timer').textContent = `${minutes}:${seconds}`;
+        }, 1000);
+    }
+
+    // 取消测验
+    function cancelQuiz() {
+        if (confirm('确定要取消吗？进度将不会保存。')) {
+            window.location.href = `/chapter/${chapterId}`;
+        }
+    }
+
+    // 键盘快捷键
+    document.addEventListener('keydown', function(e) {
+        const quizContent = document.getElementById('quizContent');
+        if (!quizContent || quizContent.classList.contains('hidden')) return;
+
+        const key = e.key;
+
+        // 数字键 1-4 选择选项 A-D
+        if (key >= '1' && key <= '4') {
+            const options = ['A', 'B', 'C', 'D'];
+            const opt = options[parseInt(key) - 1];
+            if (opt) {
+                selectOption(opt);
+                // 更新UI
+                document.querySelectorAll('#optionsContainer input').forEach(input => {
+                    input.checked = input.value === opt;
+                });
+            }
+            e.preventDefault();
+            return;
+        }
+
+        // 上下箭头切换题目
+        if (key === 'ArrowDown' || key === 'ArrowRight') {
+            e.preventDefault();
+            nextQuestion();
+        }
+        if (key === 'ArrowUp' || key === 'ArrowLeft') {
+            e.preventDefault();
+            prevQuestion();
+        }
+
+        // Enter 提交或下一题
+        if (key === 'Enter') {
+            e.preventDefault();
+            nextQuestion();
+        }
+    });
+</script>
+{% endblock %}
