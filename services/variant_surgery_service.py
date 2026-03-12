@@ -54,13 +54,24 @@ async def generate_variant(wa) -> dict:
 
 【输出格式 — 严格JSON】
 {{
-    "variant_question": "变式题题目文本",
-    "variant_options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
-    "variant_answer": "正确答案字母",
-    "variant_explanation": "详细解析：为什么对+为什么错+与原题的关联",
-    "transform_type": "使用了哪种变式策略",
-    "core_knowledge": "不变的核心考点（一句话）"
-}}"""
+    "variant_question": "变式题题目文本（必填，不能为空）",
+    "variant_options": {{
+        "A": "选项A内容（必填）",
+        "B": "选项B内容（必填）",
+        "C": "选项C内容（必填）",
+        "D": "选项D内容（必填）",
+        "E": "选项E内容（必填）"
+    }},
+    "variant_answer": "正确答案字母（必填，如 A 或 AB）",
+    "variant_explanation": "详细解析（必填，至少100字）：为什么对+为什么错+与原题的关联",
+    "transform_type": "使用了哪种变式策略（必填）",
+    "core_knowledge": "不变的核心考点（必填，一句话）"
+}}
+
+【关键要求】
+1. variant_options 必须包含 A/B/C/D/E 全部5个选项，每个选项内容不能为空
+2. variant_explanation 必须详细，至少100字，包含：正确选项原理+错误选项分析+与原题关联
+3. 所有字段都是必填项，不能为空字符串"""
 
     schema = {
         "variant_question": "变式题文本",
@@ -74,18 +85,29 @@ async def generate_variant(wa) -> dict:
     try:
         result = await ai.generate_json(prompt, schema, max_tokens=3000, temperature=0.4, use_heavy=True, timeout=300)
 
-        # 确保5个选项都存在
+        # 验证必填字段
+        if not result.get("variant_question") or not result.get("variant_question").strip():
+            raise ValueError("variant_question 为空")
+        if not result.get("variant_explanation") or len(result.get("variant_explanation", "").strip()) < 50:
+            raise ValueError(f"variant_explanation 太短或为空: {len(result.get('variant_explanation', ''))}")
+        if not result.get("variant_answer"):
+            raise ValueError("variant_answer 为空")
+
+        # 确保5个选项都存在且非空
         opts = result.get("variant_options", {})
+        missing_opts = []
         for k in ["A", "B", "C", "D", "E"]:
-            if k not in opts or not opts[k]:
-                opts[k] = f"（选项{k}缺失）"
+            if k not in opts or not opts.get(k) or not opts[k].strip():
+                missing_opts.append(k)
+
+        if missing_opts:
+            raise ValueError(f"选项缺失或为空: {', '.join(missing_opts)}")
+
         result["variant_options"] = opts
 
-        # 规范化 variant_answer：只保留 A-E 字母（AI 可能返回 "B. 选项内容" 等格式）
-        import re
-        raw_ans = (result.get("variant_answer") or "").strip().upper()
-        match = re.search(r"[A-E]", raw_ans)
-        result["variant_answer"] = match.group(0) if match else raw_ans
+        # 规范化 variant_answer：提取 A-E 字母，支持多选（AI 可能返回 "B. 选项内容" 等格式）
+        from utils.answer import normalize_answer
+        result["variant_answer"] = normalize_answer(result.get("variant_answer") or "")
 
         # 加时间戳
         result["generated_at"] = datetime.now().isoformat()

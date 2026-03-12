@@ -18,6 +18,7 @@
             <a href="/dashboard/stats" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 text-sm inline-flex items-center gap-1">
                 📊 数据看板
             </a>
+            <button onclick="recognizeChapters(this)" class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 text-sm">🔍 识别章节</button>
             <button onclick="openImportModal()" class="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600 text-sm">导入外部错题</button>
 
             <!-- 题目数量选择器 -->
@@ -466,9 +467,12 @@ var selectedConfidence = 'unsure';
 var treeCollapsed = {};          // 折叠状态缓存：{sectionId: true/false}
 var timelineTreeData = null;     // 时间视图原始数据缓存（用于前端过滤）
 var currentTimeFilter = 'all';   // 当前时间筛选模式
-var landmineRecallText = '';     // 地雷盲测回忆文本
-var landmineDetail = null;       // 地雷盲测题目详情缓存
 var currentQuestionDetail = null; // 当前题目详情缓存（用于反思面板显示原题）
+var currentRecallText = '';      // Phase 0 回忆文本
+var currentSkipRecall = false;   // 是否跳过了回忆
+var currentVariantData = null;   // 当前变式题数据
+var currentIsVariant = false;    // 当前是否使用变式题
+var batchVariantCache = {};      // 批量模式变式预加载缓存
 var importPreviewItems = [];     // 外部导入解析预览
 var importMeta = null;           // 外部导入解析元数据
 
@@ -498,6 +502,47 @@ async function syncAndReload() {
         btn.disabled = false;
     }
 }
+
+async function recognizeChapters(buttonEl) {
+    if (!confirm('开始为未分类错题识别章节？\n\n这可能需要几分钟时间，每批处理20题。')) {
+        return;
+    }
+
+    const btn = buttonEl || document.querySelector('button[onclick^="recognizeChapters"]');
+    const originalText = btn.textContent;
+    btn.textContent = '🔍 识别中...';
+    btn.disabled = true;
+
+    try {
+        const response = await fetch('/api/wrong-answers/recognize-chapters?batch_size=20&process_all=true', {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert(`章节识别完成！\n\n` +
+                  `本轮处理: ${result.total} 题\n` +
+                  `成功修复: ${result.recognized} 题\n` +
+                  `其中直接规范化: ${result.normalized || 0} 题\n` +
+                  `失败: ${result.failed} 题\n` +
+                  `剩余待处理: ${result.remaining || 0} 题\n\n` +
+                  `${result.message}`);
+
+            await loadStats();
+            await loadList();
+        } else {
+            alert('识别失败：' + (result.detail || '未知错误'));
+        }
+    } catch (error) {
+        console.error('recognize error', error);
+        alert('识别失败：' + error.message);
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
 
 async function loadStats() {
     try {
@@ -1036,142 +1081,277 @@ function renderCard(item) {
     '</div>';
 }
 
-// ========== Surgery Modal ==========
-var variantData = null;  // 缓存变式题数
+// ========== Surgery Modal (Unified 4-Phase) ==========
+var variantData = null;
+
+// 答案规范化（前端版，与后端 utils/answer.py 逻辑一致）
+function normalizeAnswerJS(raw) {
+    var letters = (raw || '').toUpperCase().match(/[A-E]/g);
+    if (!letters) return '';
+    return letters.filter(function(v, i, a) { return a.indexOf(v) === i; }).sort().join('');
+}
+
+// 通用字数计数器（合并原 updateRationaleCount + updateLandmineRecallCount）
+function updateTextCount(inputId, countId, buttonId, minChars, enabledText, disabledText) {
+    var text = document.getElementById(inputId).value;
+    var len = text.length;
+    var countEl = document.getElementById(countId);
+    var btn = document.getElementById(buttonId);
+    countEl.textContent = len + '/' + minChars + ' 字' + (len < minChars ? '（最少' + minChars + '字）' : ' ✓');
+    countEl.className = len >= minChars ? 'text-xs text-green-500' : 'text-xs text-gray-400';
+    if (len >= minChars) {
+        btn.disabled = false;
+        btn.className = 'flex-1 bg-red-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-red-600 cursor-pointer';
+        btn.textContent = enabledText;
+    } else {
+        btn.disabled = true;
+        btn.className = 'flex-1 bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed';
+        btn.textContent = disabledText;
+    }
+}
 
 async function openSurgery(id) {
     currentSurgeryId = id;
     batchQueue = [id];
     batchIndex = 0;
     variantData = null;
+    currentVariantData = null;
+    currentIsVariant = false;
+    currentRecallText = '';
+    currentSkipRecall = false;
     document.getElementById('surgeryModal').classList.remove('hidden');
     document.getElementById('surgeryProgress').textContent = '';
-
-    // 先获取详情判断 severity
-    try {
-        var detail = await safeFetch('/api/wrong-answers/' + id, {}, '请求失败');
-        if (detail.severity_tag === 'critical') {
-            await renderVariantPhase1(id, detail);
-        } else if (detail.severity_tag === 'landmine') {
-            renderLandminePhase1(id, detail);
-        } else {
-            await renderPhase1(id);
-        }
-    } catch(e) {
-        await renderPhase1(id);
-    }
+    renderPhase0_Recall(id);
 }
 
 async function openBatchSurgery() {
     try {
         var data = await safeFetch('/api/wrong-answers/retry-batch/next?count=5', {}, '请求失败');
         if (!data.items || data.items.length === 0) {
-            alert('\u6682\u65e0\u5f85\u91cd\u505a\u7684\u9519\u9898');
+            alert('暂无待重做的错题');
             return;
         }
         batchQueue = data.items.map(function(i) { return i.id; });
         batchIndex = 0;
         currentSurgeryId = batchQueue[0];
+        batchVariantCache = {};
         document.getElementById('surgeryModal').classList.remove('hidden');
         updateBatchProgress();
-        await renderPhase1(batchQueue[0]);
-    } catch(e) { alert('\u52a0\u8f7d\u5931\u8d25'); }
+        // 预加载前两道题的变式
+        prefetchBatchVariant(batchQueue[0]);
+        if (batchQueue.length > 1) prefetchBatchVariant(batchQueue[1]);
+        renderPhase0_Recall(batchQueue[0]);
+    } catch(e) { alert('加载失败'); }
 }
 
 function updateBatchProgress() {
     if (batchQueue.length > 1) {
-        document.getElementById('surgeryProgress').textContent = '\u7b2c ' + (batchIndex + 1) + ' / ' + batchQueue.length + ' \u9898';
+        document.getElementById('surgeryProgress').textContent = '第 ' + (batchIndex + 1) + ' / ' + batchQueue.length + ' 题';
     }
 }
 
-async function renderPhase1(id) {
+async function prefetchBatchVariant(wrongId) {
+    if (batchVariantCache[wrongId]) return;
+    try {
+        var v = await safeFetch('/api/wrong-answers/' + wrongId + '/variant/generate', { method: 'POST' }, '');
+        if (v && v.variant_question) batchVariantCache[wrongId] = v;
+    } catch(e) { /* 静默失败，答题时降级为原题 */ }
+}
+
+// ========== Phase 0: 回忆 ==========
+async function renderPhase0_Recall(id) {
     var content = document.getElementById('surgeryContent');
-    content.innerHTML = '<div class="text-center text-gray-400 py-8">\u52a0\u8f7d\u9898\u76ee...</div>';
+    content.innerHTML = '<div class="text-center text-gray-400 py-8">加载题目...</div>';
     surgeryStartTime = Date.now();
     selectedAnswer = '';
     selectedAnswers = [];
     selectedConfidence = 'unsure';
+    currentRecallText = '';
+    currentSkipRecall = false;
+    currentVariantData = null;
+    currentIsVariant = false;
+    variantData = null;
 
     try {
         var data = await safeFetch('/api/wrong-answers/' + id, {}, '请求失败');
         currentSurgeryId = id;
         currentQuestionType = data.question_type || 'A1';
-        currentQuestionDetail = data; // 缓存原题数据，用于反思面板显示
+        currentQuestionDetail = data;
+
+        document.getElementById('surgeryTitle').innerHTML = '🔬 手术台 <span class="text-sm font-normal text-gray-400">(Phase 0: 回忆)</span>';
 
         var badge = severityBadge(data.severity_tag);
         var html = '<div class="mb-4">' + badge +
-            '<span class="text-xs text-gray-400 ml-2">[' + (data.question_type || 'A1') + '] [' + (data.difficulty || '\u57fa\u7840') + '] \u9519' + data.error_count + '\u6b21</span>' +
-            (data.key_point ? '<span class="text-xs text-blue-500 ml-2">\ud83d\udccc ' + data.key_point + '</span>' : '') +
+            '<span class="text-xs text-gray-400 ml-2">[' + (data.question_type || 'A1') + '] [' + (data.difficulty || '基础') + '] 错' + data.error_count + '次</span>' +
             '</div>';
 
-        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + data.question_text + '</div></div>';
-
-        // 多选题提示
-        var isMultiple = currentQuestionType === 'X';
-        if (isMultiple) {
-            html += '<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 text-sm text-blue-700">' +
-                '💡 这是多选题，可以选择多个选项（点击选项可切换选中状态）' +
+        // 知识点标签（突出显示）
+        if (data.key_point) {
+            html += '<div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">' +
+                '<div class="text-sm text-blue-700 font-bold mb-1">📌 知识点</div>' +
+                '<div class="text-base font-bold text-blue-800">' + escapeHtml(data.key_point) + '</div>' +
                 '</div>';
         }
 
-        // Options (no correct answer shown)
-        html += '<div class="space-y-2 mb-6">';
-        if (data.options) {
-            for (var opt in data.options) {
-                html += '<label class="block p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition option-label" data-opt="' + opt + '" onclick="selectOption(this,\'' + opt + '\')">' +
-                    '<span class="font-bold mr-2">' + opt + '.</span>' + data.options[opt] +
-                '</label>';
-            }
-        }
-        html += '</div>';
+        // 题目文本（仅题干，不含选项）
+        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + escapeHtml(data.question_text) + '</div></div>';
 
-        // Confidence
-        html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">\u4f60\u7684\u628a\u63e1\uff1a</div>' +
-            '<div class="flex space-x-2">' +
-                '<button onclick="setConfidence(\'sure\')" id="conf-sure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">Q 确定</button>' +
-                '<button onclick="setConfidence(\'unsure\')" id="conf-unsure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-yellow-50">W 模糊</button>' +
-                '<button onclick="setConfidence(\'no\')" id="conf-no" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-red-50">E 不会</button>' +
+        // 回忆文本框
+        html += '<div class="mb-4">' +
+            '<label class="block text-sm font-bold text-gray-700 mb-2">请凭记忆写出答案要点</label>' +
+            '<div class="text-xs text-gray-400 mb-2">关键词即可：正确答案是什么？为什么？涉及什么机制？</div>' +
+            '<textarea id="recallInput" oninput="updateTextCount(\'recallInput\',\'recallCount\',\'startAnswerBtn\',10,\'→ 开始答题\',\'至少10字才能继续\')" rows="4" ' +
+            'class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300" ' +
+            'placeholder="例如：答案应该是B，因为该病的特征性表现是...机制是..."></textarea>' +
+            '<div class="flex justify-between mt-1">' +
+            '<span id="recallCount" class="text-xs text-gray-400">0/10 字（最少10字）</span>' +
             '</div></div>';
 
-        // Submit
-        html += '<button onclick="submitRetry()" id="submitRetryBtn" disabled class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">\u8bf7\u5148\u9009\u62e9\u7b54\u6848</button>';
+        // 操作按钮
+        html += '<div class="flex space-x-3">' +
+            '<button onclick="startPhase1FromRecall(false)" id="startAnswerBtn" disabled class="flex-1 bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">至少10字才能继续</button>' +
+            '<button onclick="startPhase1FromRecall(true)" class="px-6 py-3 border-2 border-gray-300 text-gray-500 rounded-lg font-bold hover:bg-gray-50">跳过回忆 →</button>' +
+            '</div>';
 
         content.innerHTML = html;
     } catch(e) {
-        content.innerHTML = '<div class="text-center text-red-400 py-8">\u52a0\u8f7d\u5931\u8d25</div>';
+        content.innerHTML = '<div class="text-center text-red-400 py-8">加载失败</div>';
     }
+}
+
+function startPhase1FromRecall(skip) {
+    if (skip) {
+        currentRecallText = '';
+        currentSkipRecall = true;
+    } else {
+        var recallEl = document.getElementById('recallInput');
+        currentRecallText = recallEl ? recallEl.value : '';
+        currentSkipRecall = false;
+    }
+    renderPhase1_Answer(currentSurgeryId);
+}
+
+// ========== Phase 1: 答题 ==========
+async function renderPhase1_Answer(id) {
+    var content = document.getElementById('surgeryContent');
+    content.innerHTML = '<div class="text-center text-gray-400 py-8">🧬 正在加载变式题...</div>';
+    selectedAnswer = '';
+    selectedAnswers = [];
+    selectedConfidence = 'unsure';
+
+    document.getElementById('surgeryTitle').innerHTML = '🔬 手术台 <span class="text-sm font-normal text-gray-400">(Phase 1: 答题)</span>';
+
+    var detail = currentQuestionDetail;
+
+    // 尝试加载变式题（优先从批量缓存取）
+    try {
+        if (batchVariantCache[id]) {
+            variantData = batchVariantCache[id];
+        } else {
+            variantData = await safeFetch('/api/wrong-answers/' + id + '/variant/generate', { method: 'POST' }, '');
+        }
+        if (variantData && variantData.variant_question) {
+            currentIsVariant = true;
+            currentVariantData = variantData;
+            variantData.original_question_text = detail ? detail.question_text : '';
+            variantData.original_options = detail ? detail.options : {};
+        } else {
+            throw new Error('no variant');
+        }
+    } catch(e) {
+        // 变式失败，降级原题
+        currentIsVariant = false;
+        currentVariantData = null;
+        variantData = null;
+    }
+
+    // 预加载批量下一题变式
+    if (batchQueue.length > 1) {
+        var nextPrefetchIdx = batchIndex + 2;
+        if (nextPrefetchIdx < batchQueue.length) {
+            prefetchBatchVariant(batchQueue[nextPrefetchIdx]);
+        }
+    }
+
+    var badge = severityBadge(detail.severity_tag);
+    var html = '<div class="mb-3">' + badge;
+    if (currentIsVariant) {
+        html += '<span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold ml-2">🧬 ' + (variantData.transform_type || '变式题') + '</span>';
+    }
+    html += '<span class="text-xs text-gray-400 ml-2">[' + (detail.question_type || 'A1') + '] [' + (detail.difficulty || '基础') + '] 错' + detail.error_count + '次</span>' +
+        '</div>';
+
+    if (detail.key_point) {
+        html += '<span class="text-xs text-blue-500 mb-2 inline-block">📌 ' + escapeHtml(detail.key_point) + '</span>';
+    }
+
+    // 变式提示
+    if (currentIsVariant) {
+        html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm text-yellow-800">' +
+            '⚠️ 这是 AI 生成的<b>变式题</b>，不是原题！考察的知识点相同，但场景/选项已改变。' +
+            (variantData.core_knowledge ? '<br>核心考点：<b>' + escapeHtml(variantData.core_knowledge) + '</b>' : '') +
+            '</div>';
+    }
+
+    // 题目文本
+    var questionText = currentIsVariant ? variantData.variant_question : detail.question_text;
+    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + questionText + '</div></div>';
+
+    // 多选题提示
+    var isMultiple = currentQuestionType === 'X';
+    if (isMultiple) {
+        html += '<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 text-sm text-blue-700">' +
+            '💡 这是多选题，可以选择多个选项（点击选项可切换选中状态）</div>';
+    }
+
+    // 选项
+    var options = currentIsVariant ? variantData.variant_options : detail.options;
+    html += '<div class="space-y-2 mb-6">';
+    if (options) {
+        for (var opt in options) {
+            html += '<label class="block p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition option-label" data-opt="' + opt + '" onclick="selectOption(this,\'' + opt + '\')">' +
+                '<span class="font-bold mr-2">' + opt + '.</span>' + options[opt] +
+            '</label>';
+        }
+    }
+    html += '</div>';
+
+    // 自信度
+    html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">你的把握：</div>' +
+        '<div class="flex space-x-2">' +
+            '<button onclick="setConfidence(\'sure\')" id="conf-sure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">Q 确定</button>' +
+            '<button onclick="setConfidence(\'unsure\')" id="conf-unsure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-yellow-50">W 模糊</button>' +
+            '<button onclick="setConfidence(\'no\')" id="conf-no" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-red-50">E 不会</button>' +
+        '</div></div>';
+
+    // 提交按钮
+    html += '<button onclick="submitPhase1()" id="submitRetryBtn" disabled class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">请先选择答案</button>';
+
+    content.innerHTML = html;
 }
 
 function selectOption(el, opt) {
     var isMultiple = currentQuestionType === 'X';
 
     if (isMultiple) {
-        // 多选题逻辑：切换选中状态
         var idx = selectedAnswers.indexOf(opt);
         if (idx > -1) {
-            // 已选中，取消选中
             selectedAnswers.splice(idx, 1);
             el.classList.remove('bg-blue-100', 'border-blue-500');
         } else {
-            // 未选中，添加选中
             selectedAnswers.push(opt);
             el.classList.add('bg-blue-100', 'border-blue-500');
         }
-        // 按字母顺序排序
         selectedAnswers.sort();
         selectedAnswer = selectedAnswers.join('');
     } else {
-        // 单选题逻辑：如果已选中则取消，否则选中
         if (selectedAnswer === opt) {
-            // 已选中该选项，取消选择
             selectedAnswer = '';
             selectedAnswers = [];
             el.classList.remove('bg-blue-100', 'border-blue-500');
-            // 取消radio选中
             var radio = el.querySelector('input[type="radio"]');
             if (radio) radio.checked = false;
         } else {
-            // 选中该选项
             selectedAnswer = opt;
             selectedAnswers = [opt];
             document.querySelectorAll('.option-label').forEach(function(label) {
@@ -1181,23 +1361,21 @@ function selectOption(el, opt) {
         }
     }
 
-    // 更新提交按钮状态
-    var btn = document.getElementById('submitRetryBtn') || document.getElementById('variantNextBtn');
+    var btn = document.getElementById('submitRetryBtn');
     if (btn) {
         if (selectedAnswer) {
             btn.disabled = false;
             btn.className = 'w-full bg-red-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-red-600 cursor-pointer';
-            btn.textContent = btn.id === 'variantNextBtn' ? '\u2192 \u9501\u5b9a\u7b54\u6848\uff0c\u8fdb\u5165\u81ea\u8bc1' : '\u63d0\u4ea4\u7b54\u6848';
+            btn.textContent = '提交答案';
         } else {
             btn.disabled = true;
             btn.className = 'w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed';
-            btn.textContent = '\u8bf7\u5148\u9009\u62e9\u7b54\u6848';
+            btn.textContent = '请先选择答案';
         }
     }
 }
 
 function setConfidence(conf) {
-    // 如果已选中相同等级，则取消选择
     if (selectedConfidence === conf) {
         selectedConfidence = '';
         document.querySelectorAll('.conf-btn').forEach(function(btn) {
@@ -1205,7 +1383,6 @@ function setConfidence(conf) {
         });
         return;
     }
-
     selectedConfidence = conf;
     document.querySelectorAll('.conf-btn').forEach(function(btn) {
         btn.classList.remove('bg-green-100', 'bg-yellow-100', 'bg-red-100', 'border-green-500', 'border-yellow-500', 'border-red-500');
@@ -1215,13 +1392,148 @@ function setConfidence(conf) {
     if (colors[conf]) colors[conf].forEach(function(c) { el.classList.add(c); });
 }
 
-// ========== Submit & Phase 2 ==========
-async function submitRetry() {
+// ========== Phase 1 Submit ==========
+async function submitPhase1() {
     if (!selectedAnswer || !currentSurgeryId) return;
     var btn = document.getElementById('submitRetryBtn');
     btn.disabled = true;
-    btn.textContent = '\u5224\u5b9a\u4e2d...';
+    btn.textContent = '判定中...';
 
+    var elapsed = Math.round((Date.now() - surgeryStartTime) / 1000);
+    var detail = currentQuestionDetail;
+
+    // 前端判断是否触发 Phase 2（自证）
+    var correctRaw = currentIsVariant && currentVariantData ? (currentVariantData.variant_answer || '') : (detail.correct_answer || '');
+    var isCorrect = normalizeAnswerJS(selectedAnswer) === normalizeAnswerJS(correctRaw);
+
+    var triggerPhase2 = (
+        currentIsVariant &&
+        isCorrect &&
+        (
+            detail.severity_tag === 'critical' || detail.severity_tag === 'stubborn' ||
+            selectedConfidence === 'unsure' || selectedConfidence === 'no' ||
+            (detail.sm2_repetitions || 0) < 2
+        )
+    );
+
+    if (triggerPhase2) {
+        // 不提交后端，进入 Phase 2 自证
+        renderPhase2_Rationale();
+    } else {
+        // 直接提交后端（submit_retry + SM-2）
+        try {
+            var result = await safeFetch('/api/wrong-answers/' + currentSurgeryId + '/retry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_answer: selectedAnswer,
+                    confidence: selectedConfidence,
+                    time_spent_seconds: elapsed,
+                    recall_text: currentRecallText,
+                    is_variant: currentIsVariant,
+                    skip_recall: currentSkipRecall
+                })
+            }, '请求失败');
+            renderPhase3_Result(result, null, currentRecallText);
+        } catch(e) {
+            btn.textContent = '提交失败，请重试';
+            btn.disabled = false;
+        }
+    }
+}
+
+// ========== Phase 2: 自证 ==========
+function renderPhase2_Rationale() {
+    var content = document.getElementById('surgeryContent');
+    var confLabels = { sure: 'Q 确定', unsure: 'W 模糊', no: 'E 不会' };
+
+    document.getElementById('surgeryTitle').innerHTML = '🔬 手术台 <span class="text-sm font-normal text-blue-500">(Phase 2: 逻辑自证)</span>';
+
+    var html = '<div class="mb-4">' +
+        '<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">' +
+            '<div class="text-sm text-blue-700 font-bold mb-2">🔒 Phase 2: 逻辑自证</div>' +
+            '<div class="text-sm text-blue-600">你的选择已锁定，现在请解释你的推理过程。</div>' +
+        '</div>' +
+    '</div>';
+
+    // 显示原题回看（不含答案）
+    if (variantData && variantData.original_question_text) {
+        html += '<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">' +
+            '<div class="text-sm text-indigo-700 font-bold mb-2">📌 原题回看（仅供自述，不含答案）</div>' +
+            '<div class="text-sm text-gray-700 leading-relaxed mb-3">' + escapeHtml(variantData.original_question_text) + '</div>';
+        var optionsHtml = '';
+        var origOpts = variantData.original_options || {};
+        for (var opt in origOpts) {
+            if (!origOpts[opt]) continue;
+            optionsHtml += '<div class="text-sm text-gray-700"><span class="font-bold mr-1">' + escapeHtml(opt) + '.</span>' +
+                escapeHtml(origOpts[opt]) + '</div>';
+        }
+        if (optionsHtml) {
+            html += '<div class="space-y-1">' + optionsHtml + '</div>';
+        }
+        html += '</div>';
+    }
+
+    // 锁定答案显示
+    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
+        '<div class="p-3 bg-gray-50 rounded-lg border">' +
+            '<div class="text-xs text-gray-500 mb-1">已锁定答案</div>' +
+            '<div class="text-2xl font-bold text-blue-600">' + selectedAnswer + '</div>' +
+        '</div>' +
+        '<div class="p-3 bg-gray-50 rounded-lg border">' +
+            '<div class="text-xs text-gray-500 mb-1">自信度</div>' +
+            '<div class="text-lg font-bold">' + (confLabels[selectedConfidence] || selectedConfidence) + '</div>' +
+        '</div>' +
+    '</div>';
+
+    // 推理文本框
+    html += '<div class="mb-4">' +
+        '<label class="block text-sm font-bold text-gray-700 mb-2">请写出你的推理过程 <span class="text-red-500">*</span></label>' +
+        '<div class="text-xs text-gray-400 mb-2">为什么选这个答案？涉及哪个知识点？排除其他选项的理由是什么？</div>' +
+        '<textarea id="rationaleInput" oninput="updateTextCount(\'rationaleInput\',\'rationaleCount\',\'rationaleSubmitBtn\',30,\'🔬 提交审判\',\'至少30字才能提交\')" rows="6" class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300" placeholder="例如：我选A是因为...这个知识点的核心是...排除B是因为..."></textarea>' +
+        '<div class="flex justify-between mt-1">' +
+            '<span id="rationaleCount" class="text-xs text-gray-400">0/30 字（最少30字）</span>' +
+            '<span class="text-xs text-gray-400">写得越详细，AI评分越高</span>' +
+        '</div>' +
+    '</div>';
+
+    // 按钮区：提交 + 跳过
+    html += '<div class="flex space-x-3">' +
+        '<button onclick="submitRationale()" id="rationaleSubmitBtn" disabled class="flex-1 bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">至少30字才能提交</button>' +
+        '<button onclick="skipRationale()" class="px-6 py-3 border-2 border-gray-300 text-gray-500 rounded-lg font-bold hover:bg-gray-50">跳过（降档）</button>' +
+        '</div>';
+
+    content.innerHTML = html;
+}
+
+async function submitRationale() {
+    var rationale = document.getElementById('rationaleInput').value;
+    if (rationale.length < 30 || !currentSurgeryId) return;
+
+    var btn = document.getElementById('rationaleSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = '🧠 AI审判中...';
+
+    var elapsed = Math.round((Date.now() - surgeryStartTime) / 1000);
+    try {
+        var result = await safeFetch('/api/wrong-answers/' + currentSurgeryId + '/variant/judge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_answer: selectedAnswer,
+                confidence: selectedConfidence,
+                rationale_text: rationale,
+                time_spent_seconds: elapsed
+            })
+        }, '请求失败');
+        renderPhase3_Result(null, result, currentRecallText);
+    } catch(e) {
+        btn.textContent = '提交失败，请重试';
+        btn.disabled = false;
+    }
+}
+
+async function skipRationale() {
     var elapsed = Math.round((Date.now() - surgeryStartTime) / 1000);
     try {
         var result = await safeFetch('/api/wrong-answers/' + currentSurgeryId + '/retry', {
@@ -1230,103 +1542,182 @@ async function submitRetry() {
             body: JSON.stringify({
                 user_answer: selectedAnswer,
                 confidence: selectedConfidence,
-                time_spent_seconds: elapsed
+                time_spent_seconds: elapsed,
+                recall_text: currentRecallText,
+                is_variant: currentIsVariant,
+                skip_recall: currentSkipRecall,
+                skipped_rationale: true
             })
         }, '请求失败');
-        renderPhase2(result);
-    } catch(e) {
-        btn.textContent = '\u63d0\u4ea4\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5';
-        btn.disabled = false;
-    }
+        renderPhase3_Result(result, null, currentRecallText);
+    } catch(e) { alert('提交失败'); }
 }
 
-function renderPhase2(result) {
+// ========== Phase 3: 结果 ==========
+function renderPhase3_Result(retryResult, rationaleResult, recallText) {
     var content = document.getElementById('surgeryContent');
-    var isCorrect = result.is_correct;
     var confLabels = { sure: 'Q 确定', unsure: 'W 模糊', no: 'E 不会' };
 
+    // 统一取值：retryResult 来自 submit_retry，rationaleResult 来自 judge_variant_answer
+    var result = rationaleResult || retryResult;
+    var isCorrect = result.is_correct;
+    var correctAnswer = rationaleResult ? result.variant_answer : (result.variant_answer || result.correct_answer);
+    var verdict = rationaleResult ? result.verdict : null;
+    var autoArchived = result.auto_archived || false;
+    var canArchive = result.can_archive || false;
+
+    document.getElementById('surgeryTitle').innerHTML = '🔬 手术台 <span class="text-sm font-normal text-gray-400">(Phase 3: 结果)</span>';
+
+    // 顶部结果图标
     var html = '<div class="text-center mb-6">';
-    if (isCorrect) {
-        html += '<div class="text-6xl mb-2">\u2705</div><div class="text-2xl font-bold text-green-600">\u56de\u7b54\u6b63\u786e\uff01</div>';
+    if (verdict === 'logic_closed') {
+        html += '<div class="text-6xl mb-2">✅</div><div class="text-2xl font-bold text-green-600">逻辑闭环！</div>' +
+            '<div class="text-sm text-green-500">答案正确 + 推理完整，真正掌握了这个知识点</div>';
+    } else if (verdict === 'lucky_guess') {
+        html += '<div class="text-6xl mb-2">🍀</div><div class="text-2xl font-bold text-yellow-600">蒙对了！</div>' +
+            '<div class="text-sm text-yellow-500">答案正确但推理有漏洞，已降级为「隐形地雷」</div>';
+    } else if (verdict === 'failed') {
+        html += '<div class="text-6xl mb-2">❌</div><div class="text-2xl font-bold text-red-600">变式也没过</div>' +
+            '<div class="text-sm text-red-500">错误次数+1，这个知识点需要重点攻克</div>';
+    } else if (isCorrect) {
+        html += '<div class="text-6xl mb-2">✅</div><div class="text-2xl font-bold text-green-600">回答正确！</div>';
     } else {
-        html += '<div class="text-6xl mb-2">\u274c</div><div class="text-2xl font-bold text-red-600">\u56de\u7b54\u9519\u8bef</div>';
+        html += '<div class="text-6xl mb-2">❌</div><div class="text-2xl font-bold text-red-600">回答错误</div>';
     }
     html += '</div>';
 
-    // Comparison
+    // 答案对比
     html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
         '<div class="p-4 rounded-lg ' + (isCorrect ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200') + '">' +
-            '<div class="text-xs text-gray-500 mb-1">\u8fd9\u6b21\u9009\u62e9</div>' +
+            '<div class="text-xs text-gray-500 mb-1">这次选择</div>' +
             '<div class="text-xl font-bold ' + (isCorrect ? 'text-green-600' : 'text-red-600') + '">' + selectedAnswer + ' (' + (confLabels[selectedConfidence] || selectedConfidence) + ')</div>' +
         '</div>' +
         '<div class="p-4 rounded-lg bg-green-50 border border-green-200">' +
-            '<div class="text-xs text-gray-500 mb-1">\u6b63\u786e\u7b54\u6848</div>' +
-            '<div class="text-xl font-bold text-green-600">' + result.correct_answer + '</div>' +
+            '<div class="text-xs text-gray-500 mb-1">正确答案</div>' +
+            '<div class="text-xl font-bold text-green-600">' + correctAnswer + '</div>' +
         '</div>' +
     '</div>';
 
-    // Previous attempts
-    if (result.previous_attempts && result.previous_attempts.length > 1) {
-        html += '<div class="bg-gray-50 rounded-lg p-3 mb-4"><div class="text-xs text-gray-500 mb-2">\u5386\u53f2\u91cd\u505a\u8bb0\u5f55</div>';
-        result.previous_attempts.slice(0, 5).forEach(function(a, i) {
-            var icon = a.is_correct ? '\u2705' : '\u274c';
-            html += '<div class="text-sm">' + icon + ' \u7b2c' + (i + 1) + '\u6b21: \u9009' + a.user_answer + ' (' + (confLabels[a.confidence] || '') + ')</div>';
-        });
+    // SM-2 状态
+    if (result.sm2_repetitions !== undefined) {
+        var reps = result.sm2_repetitions || 0;
+        var interval = result.sm2_interval || 0;
+        var ef = result.sm2_ef || 2.5;
+        var nextReview = result.next_review_date || '';
+        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4">' +
+            '<div class="text-sm font-bold text-gray-700 mb-2">📊 SM-2 间隔重复</div>' +
+            '<div class="grid grid-cols-4 gap-2 text-center text-sm">' +
+                '<div><div class="text-gray-400">连续正确</div><div class="font-bold text-lg">' + reps + '/3</div></div>' +
+                '<div><div class="text-gray-400">间隔天数</div><div class="font-bold text-lg">' + interval + '</div></div>' +
+                '<div><div class="text-gray-400">EF</div><div class="font-bold text-lg">' + ef + '</div></div>' +
+                '<div><div class="text-gray-400">下次复习</div><div class="font-bold text-lg">' + (nextReview || '-') + '</div></div>' +
+            '</div>';
+        if (autoArchived) {
+            html += '<div class="mt-2 text-center text-green-600 font-bold">🎉 连续正确3次，已自动归档！</div>';
+        }
         html += '</div>';
     }
 
-    // Original question display for reflection
+    // AI推理评分（仅 Phase 2 结果有）
+    if (rationaleResult) {
+        var score = rationaleResult.reasoning_score || 0;
+        var scoreColor = score >= 70 ? 'bg-green-500' : (score >= 40 ? 'bg-yellow-500' : 'bg-red-500');
+        var scoreTextColor = score >= 70 ? 'text-green-600' : (score >= 40 ? 'text-yellow-600' : 'text-red-600');
+        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4">' +
+            '<div class="flex justify-between items-center mb-2">' +
+                '<span class="text-sm font-bold text-gray-700">🧠 推理评分</span>' +
+                '<span class="text-2xl font-bold ' + scoreTextColor + '">' + score + '<span class="text-sm text-gray-400">/100</span></span>' +
+            '</div>' +
+            '<div class="w-full bg-gray-200 rounded-full h-3">' +
+                '<div class="' + scoreColor + ' h-3 rounded-full transition-all" style="width:' + score + '%"></div>' +
+            '</div>' +
+        '</div>';
+
+        if (rationaleResult.diagnosis) {
+            html += '<div class="bg-blue-50 rounded-lg p-4 mb-4">' +
+                '<div class="text-sm font-bold text-blue-700 mb-1">🔬 AI诊断</div>' +
+                '<div class="text-sm text-gray-700 leading-relaxed">' + rationaleResult.diagnosis + '</div>' +
+            '</div>';
+        }
+
+        if (rationaleResult.weak_links && rationaleResult.weak_links.length > 0) {
+            html += '<div class="mb-4"><div class="text-sm font-bold text-gray-700 mb-2">薄弱环节</div><div class="flex flex-wrap gap-2">';
+            rationaleResult.weak_links.forEach(function(w) {
+                html += '<span class="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-medium">' + escapeHtml(w) + '</span>';
+            });
+            html += '</div></div>';
+        }
+    }
+
+    // 回忆对比
+    if (recallText) {
+        var explanationForCompare = result.explanation || (rationaleResult ? rationaleResult.variant_explanation : '') || '无解析';
+        html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">' +
+            '<div class="text-sm font-bold text-yellow-700 mb-2">📝 回忆 vs 解析</div>' +
+            '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' +
+            '<div class="bg-white rounded p-3 border">' +
+            '<div class="text-xs text-gray-400 mb-1">你写的</div>' +
+            '<div class="text-sm text-gray-700">' + escapeHtml(recallText) + '</div></div>' +
+            '<div class="bg-white rounded p-3 border">' +
+            '<div class="text-xs text-gray-400 mb-1">正确解析</div>' +
+            '<div class="text-sm text-gray-700">' + explanationForCompare + '</div></div>' +
+            '</div>' +
+            '<div class="text-xs text-gray-400 mt-2">对比回忆和解析，找出理解偏差</div></div>';
+    }
+
+    // 原题回顾
     if (currentQuestionDetail) {
         html += '<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">' +
-            '<div class="text-sm text-indigo-700 font-bold mb-2">\ud83d\udccc \u539f\u9898\u56de\u987e</div>' +
+            '<div class="text-sm text-indigo-700 font-bold mb-2">📌 原题回顾</div>' +
             '<div class="text-sm text-gray-700 leading-relaxed mb-3">' + escapeHtml(currentQuestionDetail.question_text) + '</div>';
-
-        var hasOption = false;
-        var optionsHtml = '';
+        var optHtml = '';
         if (currentQuestionDetail.options) {
-            for (var opt in currentQuestionDetail.options) {
-                if (!currentQuestionDetail.options[opt]) continue;
-                hasOption = true;
-                var isCorrect = (result.correct_answer || '').indexOf(opt) >= 0;
-                var isUserChoice = (selectedAnswer || '').indexOf(opt) >= 0;
-                var optClass = isCorrect ? 'text-green-700 font-bold' : (isUserChoice ? 'text-red-600' : 'text-gray-700');
-                var optIcon = isCorrect ? ' \u2705' : (isUserChoice ? ' \u274c' : '');
-                optionsHtml += '<div class="text-sm ' + optClass + '"><span class="font-bold mr-1">' + escapeHtml(opt) + '.</span>' +
-                    escapeHtml(currentQuestionDetail.options[opt]) + optIcon + '</div>';
+            for (var oKey in currentQuestionDetail.options) {
+                if (!currentQuestionDetail.options[oKey]) continue;
+                var isCorr = (correctAnswer || '').indexOf(oKey) >= 0;
+                var isUser = (selectedAnswer || '').indexOf(oKey) >= 0;
+                var oClass = isCorr ? 'text-green-700 font-bold' : (isUser ? 'text-red-600' : 'text-gray-700');
+                var oIcon = isCorr ? ' ✅' : (isUser && !isCorr ? ' ❌' : '');
+                optHtml += '<div class="text-sm ' + oClass + '"><span class="font-bold mr-1">' + escapeHtml(oKey) + '.</span>' +
+                    escapeHtml(currentQuestionDetail.options[oKey]) + oIcon + '</div>';
             }
         }
-        if (hasOption) {
-            html += '<div class="space-y-1 bg-white rounded p-2">' + optionsHtml + '</div>';
-        }
+        if (optHtml) html += '<div class="space-y-1 bg-white rounded p-2">' + optHtml + '</div>';
         html += '</div>';
     }
 
-    // Explanation (micro-friction for wrong/unsure/no)
-    if (result.explanation) {
+    // 解析（含反思门）
+    var explanation = rationaleResult ? (rationaleResult.variant_explanation || result.explanation) : result.explanation;
+    if (explanation && !recallText) {
+        // 没有回忆对比区时，单独显示解析
         html += buildExplanationSection(
-            result.explanation,
-            '\ud83d\udcd6 \u89e3\u6790',
+            explanation,
+            '📖 解析',
             isCorrect,
             selectedConfidence,
-            'retry'
+            'phase3'
         );
     }
 
-    // Action buttons
+    // 操作按钮
     html += '<div class="flex space-x-3">';
-    if (result.can_archive) {
-        html += '<button onclick="archiveAndNext()" class="flex-1 bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600">\u2705 \u6807\u8bb0\u5df2\u638c\u63e1</button>';
+    if (rationaleResult) {
+        html += '<button onclick="copyRescueReport()" class="px-4 py-3 bg-purple-500 text-white rounded-lg font-bold hover:bg-purple-600">📋 求助报告</button>';
+    }
+    if (canArchive && !autoArchived) {
+        html += '<button onclick="archiveAndNext()" class="flex-1 bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600">✅ 标记已掌握</button>';
     }
     if (batchQueue.length > 1 && batchIndex < batchQueue.length - 1) {
-        html += '<button onclick="nextQuestion()" class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600">\u2192 \u4e0b\u4e00\u9898</button>';
+        html += '<button onclick="nextQuestion()" class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600">→ 下一题</button>';
     } else {
-        html += '<button onclick="closeSurgery()" class="flex-1 bg-gray-500 text-white py-3 rounded-lg font-bold hover:bg-gray-600">\u5173\u95ed</button>';
+        html += '<button onclick="closeSurgery()" class="flex-1 bg-gray-500 text-white py-3 rounded-lg font-bold hover:bg-gray-600">关闭</button>';
     }
     html += '</div>';
 
     content.innerHTML = html;
 }
 
+// ========== Surgery Navigation ==========
 async function archiveAndNext() {
     if (!currentSurgeryId) return;
     await safeFetch('/api/wrong-answers/' + currentSurgeryId + '/archive', { method: 'POST' }, '操作失败');
@@ -1342,7 +1733,7 @@ function nextQuestion() {
     if (batchIndex < batchQueue.length) {
         currentSurgeryId = batchQueue[batchIndex];
         updateBatchProgress();
-        renderPhase1(batchQueue[batchIndex]);
+        renderPhase0_Recall(batchQueue[batchIndex]);
     } else {
         closeSurgery();
     }
@@ -1354,276 +1745,16 @@ function closeSurgery() {
     selectedAnswer = '';
     selectedConfidence = 'unsure';
     variantData = null;
-    landmineRecallText = '';
-    landmineDetail = null;
-    currentQuestionDetail = null; // 清理题目缓存
+    currentVariantData = null;
+    currentIsVariant = false;
+    currentRecallText = '';
+    currentSkipRecall = false;
+    currentQuestionDetail = null;
     batchQueue = [];
     batchIndex = 0;
+    batchVariantCache = {};
     loadStats();
     loadList();
-}
-
-// ========== Variant Surgery (3-Phase) ==========
-
-async function renderVariantPhase1(id, detail) {
-    var content = document.getElementById('surgeryContent');
-    content.innerHTML = '<div class="text-center text-gray-400 py-8">\ud83e\uddec \u6b63\u5728\u751f\u6210\u53d8\u5f0f\u9898...</div>';
-    surgeryStartTime = Date.now();
-    selectedAnswer = '';
-    selectedAnswers = [];
-    currentQuestionType = detail && detail.question_type ? detail.question_type : 'A1';
-    selectedConfidence = 'unsure';
-    document.getElementById('surgeryTitle').innerHTML = '\ud83e\uddec \u53d8\u5f0f\u624b\u672f\u53f0 <span class="text-sm font-normal text-red-400">(\u81f4\u547d\u76f2\u533a)</span>';
-
-    try {
-        variantData = await safeFetch('/api/wrong-answers/' + id + '/variant/generate', { method: 'POST' }, '变式生成失败');
-        // Keep original question context for Phase 2 rationale
-        variantData.original_question_text = detail && detail.question_text ? detail.question_text : '';
-        variantData.original_options = detail && detail.options ? detail.options : {};
-
-        var badge = severityBadge('critical');
-        var html = '<div class="mb-3">' + badge +
-            '<span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold ml-2">\ud83e\uddec ' + (variantData.transform_type || '\u53d8\u5f0f\u9898') + '</span>' +
-            '</div>';
-
-        html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm text-yellow-800">' +
-            '\u26a0\ufe0f \u8fd9\u662f AI \u751f\u6210\u7684<b>\u53d8\u5f0f\u9898</b>\uff0c\u4e0d\u662f\u539f\u9898\uff01\u8003\u5bdf\u7684\u77e5\u8bc6\u70b9\u76f8\u540c\uff0c\u4f46\u573a\u666f/\u9009\u9879\u5df2\u6539\u53d8\u3002' +
-            (variantData.core_knowledge ? '<br>\u6838\u5fc3\u8003\u70b9\uff1a<b>' + variantData.core_knowledge + '</b>' : '') +
-            '</div>';
-
-        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + variantData.variant_question + '</div></div>';
-
-        // 多选题提示
-        var isMultiple = currentQuestionType === 'X';
-        if (isMultiple) {
-            html += '<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 text-sm text-blue-700">' +
-                '💡 这是多选题，可以选择多个选项（点击选项可切换选中状态）' +
-                '</div>';
-        }
-
-        // Options
-        html += '<div class="space-y-2 mb-6">';
-        if (variantData.variant_options) {
-            for (var opt in variantData.variant_options) {
-                html += '<label class="block p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition option-label" data-opt="' + opt + '" onclick="selectOption(this,\'' + opt + '\')">' +
-                    '<span class="font-bold mr-2">' + opt + '.</span>' + variantData.variant_options[opt] +
-                '</label>';
-            }
-        }
-        html += '</div>';
-
-        // Confidence
-        html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">\u4f60\u7684\u628a\u63e1\uff1a</div>' +
-            '<div class="flex space-x-2">' +
-                '<button onclick="setConfidence(\'sure\')" id="conf-sure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">Q 确定</button>' +
-                '<button onclick="setConfidence(\'unsure\')" id="conf-unsure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-yellow-50">W 模糊</button>' +
-                '<button onclick="setConfidence(\'no\')" id="conf-no" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-red-50">E 不会</button>' +
-            '</div></div>';
-
-        // Next button (goes to Phase 2, not submit)
-        html += '<button onclick="renderVariantPhase2()" id="variantNextBtn" disabled class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">\u8bf7\u5148\u9009\u62e9\u7b54\u6848</button>';
-
-        content.innerHTML = html;
-    } catch(e) {
-        content.innerHTML = '<div class="text-center py-8 text-red-400">\u53d8\u5f0f\u751f\u6210\u5931\u8d25<br><button onclick="renderPhase1(' + id + ')" class="text-blue-500 underline mt-2">\u56de\u9000\u5230\u666e\u901a\u91cd\u505a</button></div>';
-    }
-}
-
-function renderVariantPhase2() {
-    if (!selectedAnswer) return;
-    var content = document.getElementById('surgeryContent');
-    var originalQuestionText = variantData && variantData.original_question_text ? variantData.original_question_text : '';
-    var originalOptions = variantData && variantData.original_options ? variantData.original_options : {};
-
-    var html = '<div class="mb-4">' +
-        '<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">' +
-            '<div class="text-sm text-blue-700 font-bold mb-2">\ud83d\udd12 Phase 2: \u903b\u8f91\u81ea\u8bc1</div>' +
-            '<div class="text-sm text-blue-600">\u4f60\u7684\u9009\u62e9\u5df2\u9501\u5b9a\uff0c\u73b0\u5728\u8bf7\u89e3\u91ca\u4f60\u7684\u63a8\u7406\u8fc7\u7a0b\u3002</div>' +
-        '</div>' +
-    '</div>';
-
-    if (originalQuestionText) {
-        html += '<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">' +
-            '<div class="text-sm text-indigo-700 font-bold mb-2">\ud83d\udccc \u539f\u9898\u56de\u770b\uff08\u4ec5\u4f9b\u81ea\u8ff0\uff0c\u4e0d\u542b\u7b54\u6848\uff09</div>' +
-            '<div class="text-sm text-gray-700 leading-relaxed mb-3">' + escapeHtml(originalQuestionText) + '</div>';
-
-        var hasOption = false;
-        var optionsHtml = '';
-        for (var opt in originalOptions) {
-            if (!originalOptions[opt]) continue;
-            hasOption = true;
-            optionsHtml += '<div class="text-sm text-gray-700"><span class="font-bold mr-1">' + escapeHtml(opt) + '.</span>' +
-                escapeHtml(originalOptions[opt]) + '</div>';
-        }
-        if (hasOption) {
-            html += '<div class="space-y-1">' + optionsHtml + '</div>';
-        }
-        html += '</div>';
-    }
-
-    // Show locked answer
-    var confLabels = { sure: 'Q 确定', unsure: 'W 模糊', no: 'E 不会' };
-    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
-        '<div class="p-3 bg-gray-50 rounded-lg border">' +
-            '<div class="text-xs text-gray-500 mb-1">\u5df2\u9501\u5b9a\u7b54\u6848</div>' +
-            '<div class="text-2xl font-bold text-blue-600">' + selectedAnswer + '</div>' +
-        '</div>' +
-        '<div class="p-3 bg-gray-50 rounded-lg border">' +
-            '<div class="text-xs text-gray-500 mb-1">\u81ea\u4fe1\u5ea6</div>' +
-            '<div class="text-lg font-bold">' + (confLabels[selectedConfidence] || selectedConfidence) + '</div>' +
-        '</div>' +
-    '</div>';
-
-    // Rationale textarea
-    html += '<div class="mb-4">' +
-        '<label class="block text-sm font-bold text-gray-700 mb-2">\u8bf7\u5199\u51fa\u4f60\u7684\u63a8\u7406\u8fc7\u7a0b <span class="text-red-500">*</span></label>' +
-        '<div class="text-xs text-gray-400 mb-2">\u4e3a\u4ec0\u4e48\u9009\u8fd9\u4e2a\u7b54\u6848\uff1f\u6d89\u53ca\u54ea\u4e2a\u77e5\u8bc6\u70b9\uff1f\u6392\u9664\u5176\u4ed6\u9009\u9879\u7684\u7406\u7531\u662f\u4ec0\u4e48\uff1f</div>' +
-        '<textarea id="rationaleInput" oninput="updateRationaleCount()" rows="6" class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300" placeholder="\u4f8b\u5982\uff1a\u6211\u9009A\u662f\u56e0\u4e3a...\u8fd9\u4e2a\u77e5\u8bc6\u70b9\u7684\u6838\u5fc3\u662f...\u6392\u9664B\u662f\u56e0\u4e3a..."></textarea>' +
-        '<div class="flex justify-between mt-1">' +
-            '<span id="rationaleCount" class="text-xs text-gray-400">0/30 \u5b57\uff08\u6700\u5c1130\u5b57\uff09</span>' +
-            '<span class="text-xs text-gray-400">\u5199\u5f97\u8d8a\u8be6\u7ec6\uff0cAI\u8bc4\u5206\u8d8a\u9ad8</span>' +
-        '</div>' +
-    '</div>';
-
-    // Submit button
-    html += '<button onclick="submitVariantJudge()" id="variantSubmitBtn" disabled class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">\u81f3\u5c1130\u5b57\u624d\u80fd\u63d0\u4ea4</button>';
-
-    content.innerHTML = html;
-}
-
-function updateRationaleCount() {
-    var text = document.getElementById('rationaleInput').value;
-    var len = text.length;
-    var countEl = document.getElementById('rationaleCount');
-    var btn = document.getElementById('variantSubmitBtn');
-    countEl.textContent = len + '/30 \u5b57' + (len < 30 ? '\uff08\u6700\u5c1130\u5b57\uff09' : ' \u2713');
-    countEl.className = len >= 30 ? 'text-xs text-green-500' : 'text-xs text-gray-400';
-    if (len >= 30) {
-        btn.disabled = false;
-        btn.className = 'w-full bg-red-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-red-600 cursor-pointer';
-        btn.textContent = '\ud83d\udd2c \u63d0\u4ea4\u5ba1\u5224';
-    } else {
-        btn.disabled = true;
-        btn.className = 'w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed';
-        btn.textContent = '\u81f3\u5c1130\u5b57\u624d\u80fd\u63d0\u4ea4';
-    }
-}
-
-async function submitVariantJudge() {
-    var rationale = document.getElementById('rationaleInput').value;
-    if (rationale.length < 30 || !currentSurgeryId) return;
-
-    var btn = document.getElementById('variantSubmitBtn');
-    btn.disabled = true;
-    btn.textContent = '\ud83e\udde0 AI\u5ba1\u5224\u4e2d...';
-
-    var elapsed = Math.round((Date.now() - surgeryStartTime) / 1000);
-    try {
-        var result = await safeFetch('/api/wrong-answers/' + currentSurgeryId + '/variant/judge', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                user_answer: selectedAnswer,
-                confidence: selectedConfidence,
-                rationale_text: rationale,
-                time_spent_seconds: elapsed
-            })
-        }, '请求失败');
-        renderVariantPhase3(result);
-    } catch(e) {
-        btn.textContent = '\u63d0\u4ea4\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5';
-        btn.disabled = false;
-    }
-}
-
-function renderVariantPhase3(result) {
-    var content = document.getElementById('surgeryContent');
-    var verdict = result.verdict;
-    var score = result.reasoning_score || 0;
-
-    // Header based on verdict
-    var html = '<div class="text-center mb-6">';
-    if (verdict === 'logic_closed') {
-        html += '<div class="text-6xl mb-2">\u2705</div>' +
-            '<div class="text-2xl font-bold text-green-600">\u903b\u8f91\u95ed\u73af\uff01</div>' +
-            '<div class="text-sm text-green-500">\u7b54\u6848\u6b63\u786e + \u63a8\u7406\u5b8c\u6574\uff0c\u771f\u6b63\u638c\u63e1\u4e86\u8fd9\u4e2a\u77e5\u8bc6\u70b9</div>';
-    } else if (verdict === 'lucky_guess') {
-        html += '<div class="text-6xl mb-2">\ud83c\udf40</div>' +
-            '<div class="text-2xl font-bold text-yellow-600">\u8499\u5bf9\u4e86\uff01</div>' +
-            '<div class="text-sm text-yellow-500">\u7b54\u6848\u6b63\u786e\u4f46\u63a8\u7406\u6709\u6f0f\u6d1e\uff0c\u5df2\u964d\u7ea7\u4e3a\u300c\u9690\u5f62\u5730\u96f7\u300d</div>';
-    } else {
-        html += '<div class="text-6xl mb-2">\u274c</div>' +
-            '<div class="text-2xl font-bold text-red-600">\u53d8\u5f0f\u4e5f\u6ca1\u8fc7</div>' +
-            '<div class="text-sm text-red-500">\u9519\u8bef\u6b21\u6570+1\uff0c\u8fd9\u4e2a\u77e5\u8bc6\u70b9\u9700\u8981\u91cd\u70b9\u653b\u514b</div>';
-    }
-    html += '</div>';
-
-    // Answer comparison
-    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
-        '<div class="p-4 rounded-lg ' + (result.is_correct ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200') + '">' +
-            '<div class="text-xs text-gray-500 mb-1">\u4f60\u7684\u7b54\u6848</div>' +
-            '<div class="text-xl font-bold ' + (result.is_correct ? 'text-green-600' : 'text-red-600') + '">' + selectedAnswer + '</div>' +
-        '</div>' +
-        '<div class="p-4 rounded-lg bg-green-50 border border-green-200">' +
-            '<div class="text-xs text-gray-500 mb-1">\u6b63\u786e\u7b54\u6848</div>' +
-            '<div class="text-xl font-bold text-green-600">' + result.variant_answer + '</div>' +
-        '</div>' +
-    '</div>';
-
-    // Reasoning score bar
-    var scoreColor = score >= 70 ? 'bg-green-500' : (score >= 40 ? 'bg-yellow-500' : 'bg-red-500');
-    var scoreTextColor = score >= 70 ? 'text-green-600' : (score >= 40 ? 'text-yellow-600' : 'text-red-600');
-    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4">' +
-        '<div class="flex justify-between items-center mb-2">' +
-            '<span class="text-sm font-bold text-gray-700">\ud83e\udde0 \u63a8\u7406\u8bc4\u5206</span>' +
-            '<span class="text-2xl font-bold ' + scoreTextColor + '">' + score + '<span class="text-sm text-gray-400">/100</span></span>' +
-        '</div>' +
-        '<div class="w-full bg-gray-200 rounded-full h-3">' +
-            '<div class="' + scoreColor + ' h-3 rounded-full transition-all" style="width:' + score + '%"></div>' +
-        '</div>' +
-    '</div>';
-
-    // AI Diagnosis
-    if (result.diagnosis) {
-        html += '<div class="bg-blue-50 rounded-lg p-4 mb-4">' +
-            '<div class="text-sm font-bold text-blue-700 mb-1">\ud83d\udd2c AI\u8bca\u65ad</div>' +
-            '<div class="text-sm text-gray-700 leading-relaxed">' + result.diagnosis + '</div>' +
-        '</div>';
-    }
-
-    // Weak links
-    if (result.weak_links && result.weak_links.length > 0) {
-        html += '<div class="mb-4"><div class="text-sm font-bold text-gray-700 mb-2">\u8584\u5f31\u73af\u8282</div><div class="flex flex-wrap gap-2">';
-        result.weak_links.forEach(function(w) {
-            html += '<span class="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-medium">' + w + '</span>';
-        });
-        html += '</div></div>';
-    }
-
-    // Explanation
-    if (result.variant_explanation) {
-        html += '<div class="bg-gray-50 rounded-lg p-4 mb-4">' +
-            '<div class="text-sm font-bold text-gray-700 mb-1">\ud83d\udcd6 \u53d8\u5f0f\u9898\u89e3\u6790</div>' +
-            '<div class="text-sm text-gray-600 leading-relaxed">' + result.variant_explanation + '</div>' +
-        '</div>';
-    }
-
-    // Action buttons
-    html += '<div class="flex space-x-3">';
-    // Rescue report button (always show)
-    html += '<button onclick="copyRescueReport()" class="flex-1 bg-purple-500 text-white py-3 rounded-lg font-bold hover:bg-purple-600">\ud83d\udccb \u590d\u5236\u6c42\u52a9\u62a5\u544a</button>';
-
-    if (result.can_archive) {
-        html += '<button onclick="archiveAndNext()" class="flex-1 bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600">\u2705 \u6807\u8bb0\u5df2\u638c\u63e1</button>';
-    }
-    if (batchQueue.length > 1 && batchIndex < batchQueue.length - 1) {
-        html += '<button onclick="nextQuestion()" class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600">\u2192 \u4e0b\u4e00\u9898</button>';
-    } else {
-        html += '<button onclick="closeSurgery()" class="flex-1 bg-gray-500 text-white py-3 rounded-lg font-bold hover:bg-gray-600">\u5173\u95ed</button>';
-    }
-    html += '</div>';
-
-    content.innerHTML = html;
 }
 
 async function copyRescueReport() {
@@ -1631,9 +1762,9 @@ async function copyRescueReport() {
     try {
         var data = await safeFetch('/api/wrong-answers/' + currentSurgeryId + '/variant/rescue-report', { method: 'POST' }, '请求失败');
         await navigator.clipboard.writeText(data.content);
-        alert('\u2713 \u6c42\u52a9\u62a5\u544a\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\uff0c\u53ef\u7c98\u8d34\u7ed9AI\u8f85\u5bfc\u8001\u5e08');
+        alert('✓ 求助报告已复制到剪贴板，可粘贴给AI辅导老师');
     } catch(e) {
-        alert('\u590d\u5236\u5931\u8d25');
+        alert('复制失败');
     }
 }
 
@@ -1642,248 +1773,9 @@ async function exportMarkdown() {
     try {
         var data = await safeFetch('/api/wrong-answers/export?status=' + currentStatus, {}, '请求失败');
         navigator.clipboard.writeText(data.content).then(function() {
-            alert('\u2713 \u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\uff08' + data.total + '\u9053\u9519\u9898\uff09');
+            alert('✓ 已复制到剪贴板（' + data.total + '道错题）');
         });
-    } catch(e) { alert('\u5bfc\u51fa\u5931\u8d25'); }
-}
-
-// ========== Landmine Blind Recall (2-Phase) ==========
-
-function renderLandminePhase1(id, detail) {
-    landmineDetail = detail;
-    currentSurgeryId = id;
-    currentQuestionType = detail.question_type || 'A1';
-    surgeryStartTime = Date.now();
-    selectedAnswer = '';
-    selectedAnswers = [];
-    selectedConfidence = 'unsure';
-    landmineRecallText = '';
-
-    document.getElementById('surgeryTitle').innerHTML = '\ud83d\udca3 \u5730\u96f7\u6392\u9664 <span class="text-sm font-normal text-yellow-500">(\u76f2\u6d4b\u56de\u5fc6)</span>';
-
-    var content = document.getElementById('surgeryContent');
-    var badge = severityBadge('landmine');
-
-    var html = '<div class="mb-3">' + badge +
-        '<span class="text-xs text-gray-400 ml-2">[' + (detail.question_type || 'A1') +
-        '] [' + (detail.difficulty || '\u57fa\u7840') + '] \u9519' + detail.error_count + '\u6b21</span>' +
-        '</div>';
-
-    html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm text-yellow-800">' +
-        '\u26a0\ufe0f \u4f60\u4e0a\u6b21<b>\u7b54\u5bf9\u4e86\u4f46\u4e0d\u786e\u5b9a</b>\uff0c\u53ef\u80fd\u662f\u8499\u5bf9\u7684\u3002<br>' +
-        '\u73b0\u5728\u8bf7<b>\u4e0d\u770b\u9009\u9879</b>\uff0c\u51ed\u8bb0\u5fc6\u5199\u51fa\u7b54\u6848\u8981\u70b9\uff0c\u9a8c\u8bc1\u662f\u5426\u771f\u6b63\u7406\u89e3\u3002</div>';
-
-    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + detail.question_text + '</div></div>';
-
-    if (detail.key_point) {
-        html += '<div class="bg-blue-50 rounded-lg p-3 mb-4 text-sm">' +
-            '\ud83d\udca1 \u63d0\u793a\u77e5\u8bc6\u70b9\uff1a<b>' + detail.key_point + '</b></div>';
-    }
-
-    html += '<div class="mb-4">' +
-        '<label class="block text-sm font-bold text-gray-700 mb-2">' +
-        '\u8bf7\u51ed\u8bb0\u5fc6\u5199\u51fa\u7b54\u6848\u8981\u70b9 <span class="text-red-500">*</span></label>' +
-        '<div class="text-xs text-gray-400 mb-2">\u5173\u952e\u8bcd\u5373\u53ef\uff1a\u6b63\u786e\u7b54\u6848\u662f\u4ec0\u4e48\uff1f\u4e3a\u4ec0\u4e48\uff1f\u6d89\u53ca\u4ec0\u4e48\u673a\u5236\uff1f</div>' +
-        '<textarea id="landmineRecallInput" oninput="updateLandmineRecallCount()" rows="4" ' +
-        'class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-yellow-300 focus:border-yellow-300" ' +
-        'placeholder="\u4f8b\u5982\uff1a\u7b54\u6848\u5e94\u8be5\u662fB\uff0c\u56e0\u4e3a\u8be5\u75c5\u7684\u7279\u5f81\u6027\u8868\u73b0\u662f...\u673a\u5236\u662f..."></textarea>' +
-        '<div class="flex justify-between mt-1">' +
-        '<span id="landmineRecallCount" class="text-xs text-gray-400">0/10 \u5b57\uff08\u6700\u5c1110\u5b57\uff09</span>' +
-        '<span class="text-xs text-gray-400">\u5199\u5b8c\u540e\u53ef\u67e5\u770b\u9009\u9879\u9a8c\u8bc1</span></div></div>';
-
-    html += '<button onclick="renderLandminePhase2()" id="landmineRevealBtn" disabled ' +
-        'class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">' +
-        '\u81f3\u5c1110\u5b57\u624d\u80fd\u67e5\u770b\u9009\u9879</button>';
-
-    content.innerHTML = html;
-}
-
-function updateLandmineRecallCount() {
-    var text = document.getElementById('landmineRecallInput').value;
-    var len = text.length;
-    var countEl = document.getElementById('landmineRecallCount');
-    var btn = document.getElementById('landmineRevealBtn');
-
-    countEl.textContent = len + '/10 \u5b57' + (len < 10 ? '\uff08\u6700\u5c1110\u5b57\uff09' : ' \u2713');
-    countEl.className = len >= 10 ? 'text-xs text-green-500' : 'text-xs text-gray-400';
-
-    if (len >= 10) {
-        btn.disabled = false;
-        btn.className = 'w-full bg-yellow-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-yellow-600 cursor-pointer';
-        btn.textContent = '\ud83d\udc41 \u663e\u793a\u9009\u9879\uff0c\u8fdb\u5165\u9a8c\u8bc1';
-    } else {
-        btn.disabled = true;
-        btn.className = 'w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed';
-        btn.textContent = '\u81f3\u5c1110\u5b57\u624d\u80fd\u67e5\u770b\u9009\u9879';
-    }
-}
-
-function renderLandminePhase2() {
-    landmineRecallText = document.getElementById('landmineRecallInput').value;
-    var detail = landmineDetail;
-    var content = document.getElementById('surgeryContent');
-    selectedAnswer = '';
-    selectedAnswers = [];
-    selectedConfidence = 'unsure';
-
-    document.getElementById('surgeryTitle').innerHTML = '\ud83d\udca3 \u5730\u96f7\u6392\u9664 <span class="text-sm font-normal text-yellow-500">(\u9a8c\u8bc1\u9009\u62e9)</span>';
-
-    var html = '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">' +
-        '<div class="text-xs text-yellow-600 font-bold mb-1">\ud83d\udcdd \u4f60\u7684\u76f2\u6d4b\u56de\u5fc6</div>' +
-        '<div class="text-sm text-gray-700 italic">\u201c' + escapeHtml(landmineRecallText) + '\u201d</div></div>';
-
-    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + detail.question_text + '</div></div>';
-
-    // 多选题提示
-    var isMultiple = currentQuestionType === 'X';
-    if (isMultiple) {
-        html += '<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 text-sm text-blue-700">' +
-            '💡 这是多选题，可以选择多个选项（点击选项可切换选中状态）' +
-            '</div>';
-    }
-
-    html += '<div class="space-y-2 mb-6">';
-    if (detail.options) {
-        for (var opt in detail.options) {
-            html += '<label class="block p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition option-label" ' +
-                'data-opt="' + opt + '" onclick="selectOption(this,\'' + opt + '\')">' +
-                '<span class="font-bold mr-2">' + opt + '.</span>' + detail.options[opt] + '</label>';
-        }
-    }
-    html += '</div>';
-
-    html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">\u4f60\u7684\u628a\u63e1\uff1a</div>' +
-        '<div class="flex space-x-2">' +
-        '<button onclick="setConfidence(\'sure\')" id="conf-sure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">Q 确定</button>' +
-        '<button onclick="setConfidence(\'unsure\')" id="conf-unsure" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-yellow-50">W 模糊</button>' +
-        '<button onclick="setConfidence(\'no\')" id="conf-no" class="conf-btn px-4 py-2 rounded border text-sm hover:bg-red-50">E 不会</button>' +
-        '</div></div>';
-
-    html += '<button onclick="submitLandmineRetry()" id="submitRetryBtn" disabled ' +
-        'class="w-full bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">\u8bf7\u5148\u9009\u62e9\u7b54\u6848</button>';
-
-    content.innerHTML = html;
-}
-
-async function submitLandmineRetry() {
-    if (!selectedAnswer || !currentSurgeryId) return;
-    var btn = document.getElementById('submitRetryBtn');
-    btn.disabled = true;
-    btn.textContent = '\u5224\u5b9a\u4e2d...';
-
-    var elapsed = Math.round((Date.now() - surgeryStartTime) / 1000);
-    try {
-        var result = await safeFetch('/api/wrong-answers/' + currentSurgeryId + '/retry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                user_answer: selectedAnswer,
-                confidence: selectedConfidence,
-                time_spent_seconds: elapsed,
-                recall_text: landmineRecallText,
-                is_landmine_recall: true
-            })
-        }, '请求失败');
-        renderLandmineResult(result);
-    } catch(e) {
-        btn.textContent = '\u63d0\u4ea4\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5';
-        btn.disabled = false;
-    }
-}
-
-function renderLandmineResult(result) {
-    var content = document.getElementById('surgeryContent');
-    var isCorrect = result.is_correct;
-    var needReflectionBeforeExplanation = shouldGateExplanation(isCorrect, selectedConfidence);
-    var confLabels = { sure: 'Q 确定', unsure: 'W 模糊', no: 'E 不会' };
-
-    var html = '<div class="text-center mb-6">';
-    if (isCorrect && selectedConfidence === 'sure') {
-        html += '<div class="text-6xl mb-2">\ud83d\udca3\u2705</div>' +
-            '<div class="text-2xl font-bold text-green-600">\u5730\u96f7\u6392\u9664\uff01</div>' +
-            '<div class="text-sm text-green-500">\u7b54\u5bf9 + \u786e\u5b9a = \u771f\u6b63\u7406\u89e3\uff0c\u53ef\u4ee5\u5f52\u6863</div>';
-    } else if (isCorrect) {
-        html += '<div class="text-6xl mb-2">\ud83d\udca3\u26a0\ufe0f</div>' +
-            '<div class="text-2xl font-bold text-yellow-600">\u7b54\u5bf9\u4e86\uff0c\u4f46\u8fd8\u4e0d\u591f\u786e\u5b9a</div>' +
-            '<div class="text-sm text-yellow-500">\u5730\u96f7\u6807\u7b7e\u4fdd\u7559\uff0c\u4e0b\u6b21\u7ee7\u7eed\u76f2\u6d4b</div>';
-    } else {
-        html += '<div class="text-6xl mb-2">\ud83d\udca5</div>' +
-            '<div class="text-2xl font-bold text-red-600">\u5730\u96f7\u5f15\u7206\uff01</div>' +
-            '<div class="text-sm text-red-500">\u679c\u7136\u6ca1\u6709\u771f\u6b63\u638c\u63e1\uff0c\u9700\u8981\u91cd\u70b9\u590d\u4e60</div>';
-    }
-    html += '</div>';
-
-    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
-        '<div class="p-4 rounded-lg ' + (isCorrect ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200') + '">' +
-        '<div class="text-xs text-gray-500 mb-1">\u8fd9\u6b21\u9009\u62e9</div>' +
-        '<div class="text-xl font-bold ' + (isCorrect ? 'text-green-600' : 'text-red-600') + '">' +
-        selectedAnswer + ' (' + (confLabels[selectedConfidence] || '') + ')</div></div>' +
-        '<div class="p-4 rounded-lg bg-green-50 border border-green-200">' +
-        '<div class="text-xs text-gray-500 mb-1">\u6b63\u786e\u7b54\u6848</div>' +
-        '<div class="text-xl font-bold text-green-600">' + result.correct_answer + '</div></div></div>';
-
-    // Original question display
-    if (landmineDetail) {
-        html += '<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">' +
-            '<div class="text-sm text-indigo-700 font-bold mb-2">\ud83d\udccc \u539f\u9898\u56de\u987e</div>' +
-            '<div class="text-sm text-gray-700 leading-relaxed mb-3">' + escapeHtml(landmineDetail.question_text) + '</div>';
-
-        var hasOption = false;
-        var optionsHtml = '';
-        if (landmineDetail.options) {
-            for (var opt in landmineDetail.options) {
-                if (!landmineDetail.options[opt]) continue;
-                hasOption = true;
-                var isCorrectOpt = (result.correct_answer || '').indexOf(opt) >= 0;
-                var isUserChoice = (selectedAnswer || '').indexOf(opt) >= 0;
-                var optClass = isCorrectOpt ? 'text-green-700 font-bold' : (isUserChoice ? 'text-red-600' : 'text-gray-700');
-                var optIcon = isCorrectOpt ? ' \u2705' : (isUserChoice ? ' \u274c' : '');
-                optionsHtml += '<div class="text-sm ' + optClass + '"><span class="font-bold mr-1">' + escapeHtml(opt) + '.</span>' +
-                    escapeHtml(landmineDetail.options[opt]) + optIcon + '</div>';
-            }
-        }
-        if (hasOption) {
-            html += '<div class="space-y-1 bg-white rounded p-2">' + optionsHtml + '</div>';
-        }
-        html += '</div>';
-    }
-
-    html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">' +
-        '<div class="text-sm font-bold text-yellow-700 mb-2">\ud83d\udcdd \u76f2\u6d4b\u56de\u5fc6 vs \u6b63\u786e\u89e3\u6790</div>' +
-        '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' +
-        '<div class="bg-white rounded p-3 border">' +
-        '<div class="text-xs text-gray-400 mb-1">\u4f60\u5199\u7684</div>' +
-        '<div class="text-sm text-gray-700">' + escapeHtml(landmineRecallText) + '</div></div>' +
-        '<div class="bg-white rounded p-3 border">' +
-        '<div class="text-xs text-gray-400 mb-1">\u6b63\u786e\u89e3\u6790</div>' +
-        '<div class="text-sm text-gray-700">' +
-            ((needReflectionBeforeExplanation && result.explanation) ? '\u5b8c\u6210\u4e0b\u65b9\u53cd\u601d\u540e\u663e\u793a\u89e3\u6790' : (result.explanation || '\u65e0\u89e3\u6790')) +
-        '</div></div>' +
-        '</div>' +
-        '<div class="text-xs text-gray-400 mt-2">\u5bf9\u6bd4\u56de\u5fc6\u548c\u89e3\u6790\uff0c\u627e\u51fa\u7406\u89e3\u504f\u5dee</div></div>';
-
-    if (result.explanation) {
-        html += buildExplanationSection(
-            result.explanation,
-            '\ud83d\udcd6 \u5b8c\u6574\u89e3\u6790',
-            isCorrect,
-            selectedConfidence,
-            'landmine'
-        );
-    }
-
-    html += '<div class="flex space-x-3">';
-    if (result.can_archive) {
-        html += '<button onclick="archiveAndNext()" class="flex-1 bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600">\ud83d\udca3\u2705 \u5730\u96f7\u5df2\u6392\u9664</button>';
-    }
-    if (batchQueue.length > 1 && batchIndex < batchQueue.length - 1) {
-        html += '<button onclick="nextQuestion()" class="flex-1 bg-blue-500 text-white py-3 rounded-lg font-bold hover:bg-blue-600">\u2192 \u4e0b\u4e00\u9898</button>';
-    } else {
-        html += '<button onclick="closeSurgery()" class="flex-1 bg-gray-500 text-white py-3 rounded-lg font-bold hover:bg-gray-600">\u5173\u95ed</button>';
-    }
-    html += '</div>';
-
-    content.innerHTML = html;
+    } catch(e) { alert('导出失败'); }
 }
 
 // ========== Utilities ==========
@@ -2020,24 +1912,26 @@ document.getElementById('importModal').addEventListener('click', function(e) {
     if (e.target === this) closeImportModal();
 });
 
-// ========== Challenge Mode (靶向闯关) ==========
+// ========== Challenge Mode (靶向闯关 - 4阶段流程) ==========
 var challengeQueue = [];       // 闯关队列
 var challengeIdx = 0;          // 当前题目索引
 var challengeVariantCache = {};// 预加载变式题缓存 {wrongId: variantData}
-var challengeStartTime = 0;    // 当前题目开始时
-var challengeAnswer = '';      // 当前选择的答
+var challengeStartTime = 0;    // 当前题目开始时间
+var challengeAnswer = '';      // 当前选择的答案
 var challengeAnswers = [];     // 多选题答案数组
 var challengeQuestionType = 'A1'; // 当前题目类型
 var challengeConfidence = 'unsure';
 var challengeIsVariant = false;// 当前题目是否变式
 var challengeResults = [];     // 闯关结果记录
+var challengeRecallText = '';  // Phase 0 回忆文本
+var challengeSkipRecall = false; // 是否跳过了回忆
+var challengeDetail = null;    // 当前题目详情缓存（含 correct_answer、sm2_repetitions 等）
 
 async function startChallenge() {
     var content = document.getElementById('challengeContent');
     document.getElementById('challengeModal').classList.remove('hidden');
     content.innerHTML = '<div class="text-center py-8 text-gray-400">⏳ 加载闯关队列...</div>';
 
-    // 获取用户选择的题目数量
     var count = document.getElementById('challengeCountSelect').value || 40;
 
     try {
@@ -2055,28 +1949,23 @@ async function startChallenge() {
         challengeResults = [];
         challengeVariantCache = {};
 
-        // 显示配额池统计（如果有）
         if (data.pool_stats) {
             console.log('📊 配额池统计:', data.pool_stats);
-            console.log('  - Critical:', data.pool_stats.critical);
-            console.log('  - Core:', data.pool_stats.core, '(目标:', data.pool_stats.target_core + ')');
-            console.log('  - Review:', data.pool_stats.review, '(目标:', data.pool_stats.target_review + ')');
-            console.log('  - Shovel:', data.pool_stats.shovel, '(目标:', data.pool_stats.target_shovel + ')');
         }
 
-        // 预加载第1题变式
+        // 预加载前两题变式
         prefetchVariant(challengeQueue[0].id);
-        // 预加载第2题变式
         if (challengeQueue.length > 1) prefetchVariant(challengeQueue[1].id);
 
-        renderChallengeQuestion();
+        // 进入 Phase 0 而非直接渲染题目
+        renderChallengePhase0(challengeIdx);
     } catch(e) {
         content.innerHTML = '<div class="text-center py-8 text-red-400">加载失败: ' + e.message + '</div>';
     }
 }
 
 function prefetchVariant(wrongId) {
-    if (challengeVariantCache[wrongId]) return; // 已缓
+    if (challengeVariantCache[wrongId]) return;
     challengeVariantCache[wrongId] = 'loading';
     fetch('/api/challenge/variant?wrong_answer_id=' + wrongId, { method: 'POST' })
         .then(function(r) { return r.json(); })
@@ -2084,7 +1973,7 @@ function prefetchVariant(wrongId) {
             if (data.variant_question && !data.fallback) {
                 challengeVariantCache[wrongId] = data;
             } else {
-                challengeVariantCache[wrongId] = null; // 生成失败，用原题
+                challengeVariantCache[wrongId] = null;
             }
         })
         .catch(function() {
@@ -2092,16 +1981,96 @@ function prefetchVariant(wrongId) {
         });
 }
 
-function renderChallengeQuestion() {
-    var item = challengeQueue[challengeIdx];
+// ========== Challenge Phase 0: 回忆 ==========
+async function renderChallengePhase0(idx) {
+    var item = challengeQueue[idx];
     var content = document.getElementById('challengeContent');
+    content.innerHTML = '<div class="text-center text-gray-400 py-8">加载题目...</div>';
     challengeStartTime = Date.now();
     challengeAnswer = '';
     challengeAnswers = [];
-    challengeQuestionType = item.question_type || 'A1';
+    challengeConfidence = 'unsure';
+    challengeIsVariant = false;
+    challengeRecallText = '';
+    challengeSkipRecall = false;
+    challengeDetail = null;
+
+    document.getElementById('challengeProgress').textContent =
+        '第 ' + (idx + 1) + ' / ' + challengeQueue.length + ' 题';
+
+    // 获取题目详情（含 correct_answer 用于 Phase 2 触发判断）
+    try {
+        var detail = await safeFetch('/api/wrong-answers/' + item.id, {}, '请求失败');
+        challengeDetail = detail;
+        challengeQuestionType = detail.question_type || 'A1';
+    } catch(e) {
+        // 降级使用队列中的数据
+        challengeDetail = item;
+        challengeQuestionType = item.question_type || 'A1';
+    }
+
+    document.getElementById('challengeTitle').innerHTML = '🎯 闯关 <span class="text-sm font-normal text-gray-400">(Phase 0: 回忆)</span>';
+
+    var badge = severityBadge(item.severity_tag);
+    var html = '<div class="mb-4">' + badge +
+        '<span class="text-xs text-gray-400 ml-2">[' + (item.question_type || 'A1') + '] [' + (item.difficulty || '基础') + '] 错' + item.error_count + '次</span>' +
+        '</div>';
+
+    // 知识点标签（突出显示）
+    var keyPoint = (challengeDetail && challengeDetail.key_point) || item.key_point;
+    if (keyPoint) {
+        html += '<div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">' +
+            '<div class="text-sm text-blue-700 font-bold mb-1">📌 知识点</div>' +
+            '<div class="text-base font-bold text-blue-800">' + escapeHtml(keyPoint) + '</div>' +
+            '</div>';
+    }
+
+    // 题目文本（仅题干，不含选项）
+    var questionText = (challengeDetail && challengeDetail.question_text) || item.question_text;
+    html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + escapeHtml(questionText) + '</div></div>';
+
+    // 回忆文本框
+    html += '<div class="mb-4">' +
+        '<label class="block text-sm font-bold text-gray-700 mb-2">请凭记忆写出答案要点</label>' +
+        '<div class="text-xs text-gray-400 mb-2">关键词即可：正确答案是什么？为什么？涉及什么机制？</div>' +
+        '<textarea id="chRecallInput" oninput="updateTextCount(\'chRecallInput\',\'chRecallCount\',\'chStartAnswerBtn\',10,\'→ 开始答题\',\'至少10字才能继续\')" rows="4" ' +
+        'class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300" ' +
+        'placeholder="例如：答案应该是B，因为该病的特征性表现是...机制是..."></textarea>' +
+        '<div class="flex justify-between mt-1">' +
+        '<span id="chRecallCount" class="text-xs text-gray-400">0/10 字（最少10字）</span>' +
+        '</div></div>';
+
+    // 操作按钮
+    html += '<div class="flex space-x-3">' +
+        '<button onclick="startChallengePhase1(false)" id="chStartAnswerBtn" disabled class="flex-1 bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">至少10字才能继续</button>' +
+        '<button onclick="startChallengePhase1(true)" class="px-6 py-3 border-2 border-gray-300 text-gray-500 rounded-lg font-bold hover:bg-gray-50">跳过回忆 →</button>' +
+        '</div>';
+
+    content.innerHTML = html;
+}
+
+function startChallengePhase1(skip) {
+    if (skip) {
+        challengeRecallText = '';
+        challengeSkipRecall = true;
+    } else {
+        var recallEl = document.getElementById('chRecallInput');
+        challengeRecallText = recallEl ? recallEl.value : '';
+        challengeSkipRecall = false;
+    }
+    renderChallengeQuestion();
+}
+
+// ========== Challenge Phase 1: 答题 ==========
+function renderChallengeQuestion() {
+    var item = challengeQueue[challengeIdx];
+    var content = document.getElementById('challengeContent');
+    challengeAnswer = '';
+    challengeAnswers = [];
     challengeConfidence = 'unsure';
     challengeIsVariant = false;
 
+    document.getElementById('challengeTitle').innerHTML = '🎯 闯关 <span class="text-sm font-normal text-gray-400">(Phase 1: 答题)</span>';
     document.getElementById('challengeProgress').textContent =
         '第 ' + (challengeIdx + 1) + ' / ' + challengeQueue.length + ' 题';
 
@@ -2110,12 +2079,10 @@ function renderChallengeQuestion() {
     var questionText, options;
 
     if (variant && variant !== 'loading' && variant.variant_question) {
-        // 使用变式
         challengeIsVariant = true;
         questionText = variant.variant_question;
         options = variant.variant_options;
     } else {
-        // 用原题
         challengeIsVariant = false;
         questionText = item.question_text;
         options = item.options;
@@ -2135,6 +2102,14 @@ function renderChallengeQuestion() {
         html += '<span class="text-xs text-gray-400 ml-2">连对' + item.sm2_repetitions + '次 | 间隔' + item.sm2_interval + '天</span>';
     }
     html += '</div>';
+
+    // 变式提示
+    if (challengeIsVariant && variant) {
+        html += '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm text-yellow-800">' +
+            '⚠️ 这是 AI 生成的<b>变式题</b>，不是原题！考察的知识点相同，但场景/选项已改变。' +
+            (variant.core_knowledge ? '<br>核心考点：<b>' + escapeHtml(variant.core_knowledge) + '</b>' : '') +
+            '</div>';
+    }
 
     html += '<div class="bg-gray-50 rounded-lg p-4 mb-4"><div class="text-base leading-relaxed">' + questionText + '</div></div>';
 
@@ -2157,7 +2132,7 @@ function renderChallengeQuestion() {
     }
     html += '</div>';
 
-    // 自信
+    // 自信度
     html += '<div class="mb-4"><div class="text-sm text-gray-500 mb-2">你的把握</div>' +
         '<div class="flex space-x-2">' +
         '<button onclick="setChallengeConfidence(\'sure\')" id="ch-conf-sure" class="ch-conf-btn px-4 py-2 rounded border text-sm hover:bg-green-50">Q 确定</button>' +
@@ -2170,7 +2145,7 @@ function renderChallengeQuestion() {
 
     content.innerHTML = html;
 
-    // 预加载下一题变
+    // 预加载后续变式
     if (challengeIdx + 2 < challengeQueue.length) {
         prefetchVariant(challengeQueue[challengeIdx + 2].id);
     }
@@ -2180,24 +2155,18 @@ function selectChallengeOption(el, opt) {
     var isMultiple = challengeQuestionType === 'X';
 
     if (isMultiple) {
-        // 多选题逻辑：切换选中状态
         var idx = challengeAnswers.indexOf(opt);
         if (idx > -1) {
-            // 已选中，取消选中
             challengeAnswers.splice(idx, 1);
             el.classList.remove('bg-blue-100', 'border-blue-500');
         } else {
-            // 未选中，添加选中
             challengeAnswers.push(opt);
             el.classList.add('bg-blue-100', 'border-blue-500');
         }
-        // 按字母顺序排序
         challengeAnswers.sort();
         challengeAnswer = challengeAnswers.join('');
     } else {
-        // 单选题逻辑：如果已选中则取消，否则选中
         if (challengeAnswer === opt) {
-            // 已选中该选项，取消选择
             challengeAnswer = '';
             challengeAnswers = [];
             document.querySelectorAll('.ch-option-label').forEach(function(label) {
@@ -2205,7 +2174,6 @@ function selectChallengeOption(el, opt) {
             });
             el.classList.remove('bg-blue-100', 'border-blue-500');
         } else {
-            // 选中该选项
             challengeAnswer = opt;
             challengeAnswers = [opt];
             document.querySelectorAll('.ch-option-label').forEach(function(label) {
@@ -2215,7 +2183,6 @@ function selectChallengeOption(el, opt) {
         }
     }
 
-    // 更新提交按钮状态
     var btn = document.getElementById('chSubmitBtn');
     if (btn) {
         if (challengeAnswer) {
@@ -2231,7 +2198,6 @@ function selectChallengeOption(el, opt) {
 }
 
 function setChallengeConfidence(conf) {
-    // 如果已选中相同等级，则取消选择
     if (challengeConfidence === conf) {
         challengeConfidence = 'unsure';
         document.querySelectorAll('.ch-conf-btn').forEach(function(btn) {
@@ -2249,6 +2215,7 @@ function setChallengeConfidence(conf) {
     if (colors[conf]) colors[conf].forEach(function(c) { el.classList.add(c); });
 }
 
+// ========== Challenge Phase 1 Submit (含 Phase 2 触发判断) ==========
 async function submitChallengeAnswer() {
     if (!challengeAnswer) return;
     var item = challengeQueue[challengeIdx];
@@ -2257,6 +2224,170 @@ async function submitChallengeAnswer() {
     btn.textContent = '判定中...';
 
     var elapsed = Math.round((Date.now() - challengeStartTime) / 1000);
+
+    // 先向后端查询正确答案判定（不创建记录，仅获取 is_correct）
+    try {
+        var judgeResult = await safeFetch('/api/challenge/check-answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                wrong_answer_id: item.id,
+                user_answer: challengeAnswer,
+                is_variant: challengeIsVariant
+            })
+        }, '请求失败');
+
+        var isCorrect = judgeResult.is_correct;
+
+        var detail = challengeDetail || item;
+        var triggerPhase2 = (
+            challengeIsVariant &&
+            isCorrect &&
+            (
+                (detail.severity_tag || item.severity_tag) === 'critical' ||
+                (detail.severity_tag || item.severity_tag) === 'stubborn' ||
+                challengeConfidence === 'unsure' || challengeConfidence === 'no' ||
+                (detail.sm2_repetitions || item.sm2_repetitions || 0) < 2
+            )
+        );
+
+        if (triggerPhase2) {
+            renderChallengePhase2();
+        } else {
+            // 不走 Phase 2，直接 submit（完整 SM-2 + retry）
+            var result = await safeFetch('/api/challenge/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    wrong_answer_id: item.id,
+                    user_answer: challengeAnswer,
+                    confidence: challengeConfidence,
+                    time_spent_seconds: elapsed,
+                    is_variant: challengeIsVariant,
+                    recall_text: challengeRecallText,
+                    skip_recall: challengeSkipRecall
+                })
+            }, '请求失败');
+            result._user_answer = challengeAnswer;
+            result._confidence = challengeConfidence;
+            result._item = item;
+            challengeResults.push(result);
+            renderChallengeResult(result);
+        }
+    } catch(e) {
+        btn.textContent = '提交失败，请重试';
+        btn.disabled = false;
+    }
+}
+
+// ========== Challenge Phase 2: 自证 ==========
+function renderChallengePhase2() {
+    var content = document.getElementById('challengeContent');
+    var item = challengeQueue[challengeIdx];
+    var confLabels = { sure: 'Q 确定', unsure: 'W 模糊', no: 'E 不会' };
+
+    document.getElementById('challengeTitle').innerHTML = '🎯 闯关 <span class="text-sm font-normal text-blue-500">(Phase 2: 逻辑自证)</span>';
+
+    var html = '<div class="mb-4">' +
+        '<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">' +
+            '<div class="text-sm text-blue-700 font-bold mb-2">🔒 Phase 2: 逻辑自证</div>' +
+            '<div class="text-sm text-blue-600">你的选择已锁定，现在请解释你的推理过程。</div>' +
+        '</div>' +
+    '</div>';
+
+    // 显示原题回看（如果是变式题）
+    if (challengeIsVariant && item.question_text) {
+        html += '<div class="mb-4 bg-indigo-50 border border-indigo-200 rounded-lg p-4">' +
+            '<div class="text-sm text-indigo-700 font-bold mb-2">📌 原题回看（仅供自述，不含答案）</div>' +
+            '<div class="text-sm text-gray-700 leading-relaxed mb-3">' + escapeHtml(item.question_text) + '</div>';
+        if (item.options) {
+            html += '<div class="space-y-1">';
+            for (var opt in item.options) {
+                if (!item.options[opt]) continue;
+                html += '<div class="text-sm text-gray-700"><span class="font-bold mr-1">' + escapeHtml(opt) + '.</span>' +
+                    escapeHtml(item.options[opt]) + '</div>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    // 锁定答案显示
+    html += '<div class="grid grid-cols-2 gap-4 mb-4">' +
+        '<div class="p-3 bg-gray-50 rounded-lg border">' +
+            '<div class="text-xs text-gray-500 mb-1">已锁定答案</div>' +
+            '<div class="text-2xl font-bold text-blue-600">' + challengeAnswer + '</div>' +
+        '</div>' +
+        '<div class="p-3 bg-gray-50 rounded-lg border">' +
+            '<div class="text-xs text-gray-500 mb-1">自信度</div>' +
+            '<div class="text-lg font-bold">' + (confLabels[challengeConfidence] || '') + '</div>' +
+        '</div></div>';
+
+    // 推理文本框
+    html += '<div class="mb-4">' +
+        '<label class="block text-sm font-bold text-gray-700 mb-2">请写出你的推理过程</label>' +
+        '<div class="text-xs text-gray-400 mb-2">为什么选这个答案？涉及什么原理/机制？如何排除其他选项？</div>' +
+        '<textarea id="chRationaleInput" oninput="updateTextCount(\'chRationaleInput\',\'chRationaleCount\',\'chSubmitRationaleBtn\',30,\'提交自证\',\'至少30字才能提交\')" rows="5" ' +
+        'class="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300" ' +
+        'placeholder="例如：选D是因为该病的发病机制是...而A选项描述的是...所以排除..."></textarea>' +
+        '<div class="flex justify-between mt-1">' +
+        '<span id="chRationaleCount" class="text-xs text-gray-400">0/30 字（最少30字）</span>' +
+        '</div></div>';
+
+    // 按钮
+    html += '<div class="flex space-x-3">' +
+        '<button onclick="submitChallengeRationale()" id="chSubmitRationaleBtn" disabled class="flex-1 bg-gray-300 text-white py-3 rounded-lg font-bold text-lg cursor-not-allowed">至少30字才能提交</button>' +
+        '<button onclick="skipChallengeRationale()" class="px-6 py-3 border-2 border-gray-300 text-gray-500 rounded-lg font-bold hover:bg-gray-50">跳过自证 →</button>' +
+        '</div>';
+
+    content.innerHTML = html;
+}
+
+async function submitChallengeRationale() {
+    var rationaleEl = document.getElementById('chRationaleInput');
+    var rationale = rationaleEl ? rationaleEl.value : '';
+    if (rationale.length < 30) return;
+
+    var item = challengeQueue[challengeIdx];
+    var elapsed = Math.round((Date.now() - challengeStartTime) / 1000);
+    var btn = document.getElementById('chSubmitRationaleBtn');
+    btn.disabled = true;
+    btn.textContent = '评估中...';
+
+    // Phase 2 提交走 wrong-answers variant/judge 端点（获取 AI 评估 + SM-2）
+    try {
+        var result = await safeFetch('/api/wrong-answers/' + item.id + '/variant/judge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_answer: challengeAnswer,
+                confidence: challengeConfidence,
+                rationale_text: rationale,
+                time_spent_seconds: elapsed
+            })
+        }, '请求失败');
+        result._user_answer = challengeAnswer;
+        result._confidence = challengeConfidence;
+        result._item = item;
+        result._rationale = rationale;
+        // 正确答案：优先使用变式答案
+        result.correct_answer = result.variant_answer || (challengeDetail ? challengeDetail.correct_answer : '');
+        // 解析：优先使用变式解析（修复：空字符串不回退到原题解析）
+        result.explanation = result.variant_explanation || (challengeDetail ? challengeDetail.explanation : '');
+        result.key_point = (challengeDetail ? challengeDetail.key_point : '') || item.key_point;
+        challengeResults.push(result);
+        renderChallengeResult(result);
+    } catch(e) {
+        btn.textContent = '提交失败，请重试';
+        btn.disabled = false;
+    }
+}
+
+async function skipChallengeRationale() {
+    // 跳过自证 → 走 submit 端点，带 skipped_rationale 惩罚
+    var item = challengeQueue[challengeIdx];
+    var elapsed = Math.round((Date.now() - challengeStartTime) / 1000);
+
     try {
         var result = await safeFetch('/api/challenge/submit', {
             method: 'POST',
@@ -2266,7 +2397,10 @@ async function submitChallengeAnswer() {
                 user_answer: challengeAnswer,
                 confidence: challengeConfidence,
                 time_spent_seconds: elapsed,
-                is_variant: challengeIsVariant
+                is_variant: challengeIsVariant,
+                recall_text: challengeRecallText,
+                skip_recall: challengeSkipRecall,
+                skipped_rationale: true
             })
         }, '请求失败');
         result._user_answer = challengeAnswer;
@@ -2275,15 +2409,17 @@ async function submitChallengeAnswer() {
         challengeResults.push(result);
         renderChallengeResult(result);
     } catch(e) {
-        btn.textContent = '提交失败，请重试';
-        btn.disabled = false;
+        alert('提交失败: ' + e.message);
     }
 }
 
+// ========== Challenge Phase 3: 结果 ==========
 function renderChallengeResult(result) {
     var content = document.getElementById('challengeContent');
     var isCorrect = result.is_correct;
     var confLabels = { sure: 'Q 确定', unsure: 'W 模糊', no: 'E 不会' };
+
+    document.getElementById('challengeTitle').innerHTML = '🎯 闯关 <span class="text-sm font-normal text-gray-400">(Phase 3: 结果)</span>';
 
     var html = '<div class="text-center mb-6">';
     if (isCorrect) {
@@ -2302,7 +2438,31 @@ function renderChallengeResult(result) {
         '<div class="text-xs text-gray-500 mb-1">正确答案</div>' +
         '<div class="text-xl font-bold text-green-600">' + result.correct_answer + '</div></div></div>';
 
-    // 题目回顾（反思区）
+    // 回忆对比（如果有回忆文本）
+    if (challengeRecallText) {
+        html += '<div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">' +
+            '<div class="text-sm text-amber-700 font-bold mb-2">📝 你的回忆 vs 解析</div>' +
+            '<div class="bg-white rounded p-3 mb-2 text-sm text-gray-700 leading-relaxed">' + escapeHtml(challengeRecallText) + '</div>' +
+            '<div class="text-xs text-amber-600">对比下方解析，检查你的记忆是否准确</div>' +
+            '</div>';
+    }
+
+    // AI 评估（如果有 Phase 2 自证结果）
+    if (result.verdict) {
+        var verdictColors = { logic_closed: 'green', lucky_guess: 'yellow', failed: 'red' };
+        var verdictLabels = { logic_closed: '✅ 逻辑闭环', lucky_guess: '⚠️ 疑似蒙对', failed: '❌ 推理不足' };
+        var vc = verdictColors[result.verdict] || 'gray';
+        html += '<div class="bg-' + vc + '-50 border border-' + vc + '-200 rounded-lg p-4 mb-4">' +
+            '<div class="text-sm font-bold text-' + vc + '-700 mb-2">' + (verdictLabels[result.verdict] || result.verdict) + '</div>';
+        if (result.diagnosis) html += '<div class="text-sm text-gray-700 mb-2">' + escapeHtml(result.diagnosis) + '</div>';
+        if (result.reasoning_score !== undefined) html += '<div class="text-xs text-gray-500">推理得分: ' + result.reasoning_score + '/100</div>';
+        if (result.weak_links && result.weak_links.length > 0) {
+            html += '<div class="mt-2 text-xs text-red-600">薄弱环节: ' + result.weak_links.map(function(w) { return escapeHtml(w); }).join(', ') + '</div>';
+        }
+        html += '</div>';
+    }
+
+    // 题目回顾
     var reviewItem = result._item;
     var reviewVariant = challengeVariantCache[reviewItem.id];
     var reviewIsVariant = reviewVariant && reviewVariant !== 'loading' && reviewVariant.variant_question;
@@ -2343,7 +2503,6 @@ function renderChallengeResult(result) {
     if (result.next_review_date) sm2Html += '<span>下次 <b>' + result.next_review_date + '</b></span>';
     sm2Html += '</div></div>';
 
-    // 进度（repetitions / 3）
     var reps = Math.min(result.sm2_repetitions || 0, 3);
     var pct = Math.round(reps / 3 * 100);
     var barColor = pct >= 100 ? 'bg-green-500' : (pct >= 66 ? 'bg-yellow-500' : 'bg-orange-500');
@@ -2370,11 +2529,11 @@ function renderChallengeResult(result) {
     // 按钮
     html += '<div class="flex space-x-3">';
     if (challengeIdx < challengeQueue.length - 1) {
-        html += '<button onclick="nextChallengeQuestion()" class="flex-1 bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600">→下一</button>';
+        html += '<button onclick="nextChallengeQuestion()" class="flex-1 bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600">→下一题</button>';
     } else {
         html += '<button onclick="renderChallengeSummary()" class="flex-1 bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600"> 查看总结</button>';
     }
-    html += '<button onclick="closeChallenge()" class="flex-1 bg-gray-400 text-white py-3 rounded-lg font-bold hover:bg-gray-500">退</button>';
+    html += '<button onclick="closeChallenge()" class="flex-1 bg-gray-400 text-white py-3 rounded-lg font-bold hover:bg-gray-500">退出</button>';
     html += '</div>';
 
     content.innerHTML = html;
@@ -2383,7 +2542,7 @@ function renderChallengeResult(result) {
 function nextChallengeQuestion() {
     challengeIdx++;
     if (challengeIdx < challengeQueue.length) {
-        renderChallengeQuestion();
+        renderChallengePhase0(challengeIdx);
     } else {
         renderChallengeSummary();
     }
@@ -2392,6 +2551,7 @@ function nextChallengeQuestion() {
 function renderChallengeSummary() {
     var content = document.getElementById('challengeContent');
     document.getElementById('challengeProgress').textContent = '闯关完成';
+    document.getElementById('challengeTitle').innerHTML = '🎯 闯关完成';
 
     var total = challengeResults.length;
     var correct = challengeResults.filter(function(r) { return r.is_correct; }).length;
@@ -2405,21 +2565,21 @@ function renderChallengeSummary() {
     } else if (accuracy >= 60) {
         html += '<div class="text-5xl mb-2"></div><div class="text-2xl font-bold text-yellow-600">继续加油</div>';
     } else {
-        html += '<div class="text-5xl mb-2"></div><div class="text-2xl font-bold text-red-600">需要加强复</div>';
+        html += '<div class="text-5xl mb-2"></div><div class="text-2xl font-bold text-red-600">需要加强复习</div>';
     }
     html += '</div>';
 
     // 统计卡片
     html += '<div class="grid grid-cols-4 gap-3 mb-6">' +
-        '<div class="bg-blue-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-blue-600">' + total + '</div><div class="text-xs text-gray-500">总题</div></div>' +
+        '<div class="bg-blue-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-blue-600">' + total + '</div><div class="text-xs text-gray-500">总题数</div></div>' +
         '<div class="bg-green-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-green-600">' + correct + '</div><div class="text-xs text-gray-500">正确</div></div>' +
         '<div class="bg-red-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-red-600">' + wrong + '</div><div class="text-xs text-gray-500">错误</div></div>' +
-        '<div class="bg-purple-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-purple-600">' + archived + '</div><div class="text-xs text-gray-500">已掌</div></div>' +
+        '<div class="bg-purple-50 rounded-lg p-3 text-center"><div class="text-2xl font-bold text-purple-600">' + archived + '</div><div class="text-xs text-gray-500">已掌握</div></div>' +
     '</div>';
 
     // 正确率条
     var barColor = accuracy >= 80 ? 'bg-green-500' : (accuracy >= 60 ? 'bg-yellow-500' : 'bg-red-500');
-    html += '<div class="mb-6"><div class="flex justify-between text-sm mb-1"><span>正确</span><span class="font-bold">' + accuracy + '%</span></div>' +
+    html += '<div class="mb-6"><div class="flex justify-between text-sm mb-1"><span>正确率</span><span class="font-bold">' + accuracy + '%</span></div>' +
         '<div class="w-full bg-gray-200 rounded-full h-3"><div class="' + barColor + ' h-3 rounded-full" style="width:' + accuracy + '%"></div></div></div>';
 
     // 逐题回顾
@@ -2429,8 +2589,9 @@ function renderChallengeSummary() {
         var kp = r.key_point || '未标注';
         var archiveTag = r.auto_archived ? ' <span class="text-green-500 text-xs">🎉已掌握</span>' : '';
         var nextTag = r.next_review_date ? ' <span class="text-gray-400 text-xs">下次:' + r.next_review_date + '</span>' : '';
+        var verdictTag = r.verdict ? ' <span class="text-xs text-purple-500">[' + r.verdict + ']</span>' : '';
         html += '<div class="flex items-center justify-between bg-gray-50 rounded p-2 text-sm">' +
-            '<span>' + icon + ' ' + (i + 1) + '. ' + kp + archiveTag + '</span>' +
+            '<span>' + icon + ' ' + (i + 1) + '. ' + kp + archiveTag + verdictTag + '</span>' +
             '<span class="text-xs text-gray-400">连对' + (r.sm2_repetitions || 0) + '/3 | 间隔' + (r.sm2_interval || 0) + '天' + nextTag + '</span></div>';
     });
     html += '</div></div>';
@@ -2448,9 +2609,13 @@ function closeChallenge() {
     challengeResults = [];
     challengeAnswer = '';
     challengeConfidence = 'unsure';
+    challengeRecallText = '';
+    challengeSkipRecall = false;
+    challengeDetail = null;
     loadStats();
     loadList();
 }
+
 
 // ========== Keyboard Shortcuts ==========
 function isModalVisible(modalId) {
@@ -2545,7 +2710,7 @@ document.addEventListener('keydown', function(e) {
         if (!handled && e.key === 'Enter') {
             var submitBtn = document.getElementById('submitRetryBtn');
             if (submitBtn && !submitBtn.disabled) {
-                submitRetry();
+                submitPhase1();
                 handled = true;
             }
         }

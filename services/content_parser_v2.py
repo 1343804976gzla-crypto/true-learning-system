@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Tuple
 
+from utils.answer import normalize_answer as _norm_answer
+
 from services.content_parser import ContentParser as LegacyContentParser
 
 
@@ -314,11 +316,9 @@ Text:
             if len(options) < 2:
                 continue
 
-            ans_raw = str(q.get("correct_answer") or "").upper()
-            match = re.search(r"[A-E]", ans_raw)
-            if not match:
+            answer = _norm_answer(q.get("correct_answer") or "")
+            if not answer:
                 continue
-            answer = match.group(0)
 
             unique_key = (q_no, q_text)
             if unique_key in seen:

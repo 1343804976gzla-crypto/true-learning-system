@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from models import get_db, WrongAnswer, QuizSession, ConceptMastery, Chapter, TestRecord
 from schemas import QuizResponse, QuizSubmitRequest, QuizResultResponse
+from utils.answer import answers_match
 
 router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 
@@ -148,12 +149,7 @@ async def submit_quiz(
         if not question:
             continue
         
-        user_ans = (answer.user_answer or "").strip().upper()
-        correct_ans = (question.get("correct_answer") or "").strip().upper()
-        if question.get("type") == "X":
-            is_correct = sorted(user_ans) == sorted(correct_ans)
-        else:
-            is_correct = user_ans == correct_ans
+        is_correct = answers_match(answer.user_answer, question.get("correct_answer") or "")
         if is_correct:
             correct_count += 1
         

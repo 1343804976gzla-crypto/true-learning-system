@@ -19,19 +19,6 @@ from services.pre_generated_quiz import (
 
 router = APIRouter(prefix="/api/quiz-fast", tags=["quiz-fast"])
 
-_VARIATION_ANGLES = [
-    "definition-boundary",
-    "core-mechanism",
-    "clinical-differential",
-    "diagnostic-traps",
-    "treatment-principles",
-    "common-misconception",
-    "condition-variation",
-    "cross-topic-link",
-    "case-application",
-    "reverse-inference",
-]
-
 
 def _normalize_name(name: str) -> str:
     return "".join((name or "").strip().lower().split())
@@ -48,7 +35,12 @@ def _concept_rank(concept: ConceptMastery) -> int:
 
 
 def _build_concept_slots(concepts: List[ConceptMastery], target: int = 10) -> List[SimpleNamespace]:
-    """Build exactly `target` concept slots with diversity hints when concepts are scarce."""
+    """Build concept slots, capping at available unique concepts to avoid duplicates.
+
+    When unique concepts < target, we generate fewer slots rather than cycling
+    the same concept name through modulo — AI can't reliably produce distinct
+    questions when it receives the same concept_name multiple times.
+    """
     best_by_name = {}
     for concept in concepts:
         name = (concept.name or "").strip()
@@ -64,24 +56,22 @@ def _build_concept_slots(concepts: List[ConceptMastery], target: int = 10) -> Li
         return []
 
     random.shuffle(selected)
+
+    # Cap at available unique concepts — no modulo cycling
+    actual_count = min(target, len(selected))
     slots: List[SimpleNamespace] = []
 
-    for i in range(target):
-        base = selected[i % len(selected)]
-        desc = ""
-        if len(selected) < target:
-            angle = _VARIATION_ANGLES[i % len(_VARIATION_ANGLES)]
-            desc = (
-                f"Create a question from angle={angle}. "
-                "It must be substantially different from sibling questions of the same concept."
-            )
+    for i in range(actual_count):
         slots.append(
             SimpleNamespace(
-                concept_id=base.concept_id,
-                name=base.name,
-                description=desc,
+                concept_id=selected[i].concept_id,
+                name=selected[i].name,
+                description="",
             )
         )
+
+    if actual_count < target:
+        print(f"[_build_concept_slots] 知识点不足: {len(selected)}/{target}，生成 {actual_count} 题（不循环复用）")
 
     return slots
 

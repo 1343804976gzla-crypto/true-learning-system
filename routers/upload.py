@@ -29,8 +29,28 @@ async def upload_content(
     content_length = len(data.content)
     
     print(f"[Upload] 开始处理上传，内容长度: {content_length} 字符")
-    
+
     try:
+        # 0. 内容质量检查
+        if not data.content or not data.content.strip():
+            raise HTTPException(status_code=400, detail="上传内容不能为空")
+
+        # 检查是否为乱码(大量问号或特殊字符)
+        question_mark_ratio = data.content.count('?') / max(len(data.content), 1)
+        if question_mark_ratio > 0.5:
+            raise HTTPException(
+                status_code=400,
+                detail="上传内容疑似乱码,请检查文本编码或重新复制内容"
+            )
+
+        # 检查是否有足够的中文字符
+        chinese_chars = sum(1 for c in data.content if '\u4e00' <= c <= '\u9fff')
+        if chinese_chars < 10:
+            raise HTTPException(
+                status_code=400,
+                detail="上传内容中中文字符过少,请确认内容是否正确"
+            )
+
         # 1. 解析日期
         upload_date = date.today()
         if data.date:
@@ -38,7 +58,7 @@ async def upload_content(
                 upload_date = date.fromisoformat(data.date)
             except ValueError:
                 pass
-        
+
         print(f"[Upload] 日期: {upload_date}")
         
         # 2. AI识别内容（使用知识库匹配）

@@ -404,7 +404,24 @@ async def list_chapters_grouped(db: Session = Depends(get_db)):
     """按学科分组的章节列表（供大纲确认弹窗用）"""
     chapters = db.query(Chapter).order_by(Chapter.book, Chapter.chapter_number).all()
     grouped = {}
+
+    def _is_selectable_chapter(chapter: Chapter) -> bool:
+        chapter_id = (chapter.id or "").strip()
+        chapter_title = (chapter.chapter_title or "").strip()
+        chapter_number = (chapter.chapter_number or "").strip()
+        book = (chapter.book or "").strip()
+        return not (
+            chapter_id in {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0", "uncategorized_ch0"}
+            or chapter_id.endswith("_ch0")
+            or chapter_number == "0"
+            or book in {"未分类", "unknown"}
+            or chapter_title.startswith("自动补齐章节")
+            or chapter_title in {"待人工归类", "未知章节"}
+        )
+
     for c in chapters:
+        if not _is_selectable_chapter(c):
+            continue
         if c.book not in grouped:
             grouped[c.book] = []
         grouped[c.book].append({

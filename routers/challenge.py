@@ -6,7 +6,6 @@
 - GET  /api/challenge/stats    闯关统计
 """
 
-import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, case, or_
@@ -16,81 +15,10 @@ from pydantic import BaseModel
 
 from models import get_db
 from learning_tracking_models import WrongAnswerV2, WrongAnswerRetry
-
-
-def _extract_answer_letters(raw: str) -> str:
-    """从原始答案字符串中提取纯 A-E 字母（去除句号、选项文本等噪声），按字母排序以兼容多选题。"""
-    return "".join(sorted(set(re.findall(r"[A-E]", (raw or "").strip().upper()))))
+from utils.answer import normalize_answer
+from utils.sm2 import sm2_update, quality_from_result
 
 router = APIRouter(prefix="/api/challenge", tags=["challenge"])
-
-
-# ========== SM-2 Algorithm ==========
-
-def sm2_update(wa: WrongAnswerV2, quality: int):
-    """
-    SM-2 间隔重复算法更新。
-    quality: 0-5 评分
-      5 = 答对+确定
-      4 = 答对+模糊
-      3 = 答对+不确定
-      1 = 答错+模糊
-      0 = 答错+确定（盲区）
-    """
-    ef = wa.sm2_ef or 2.5
-    reps = wa.sm2_repetitions or 0
-    interval = wa.sm2_interval or 0
-
-    if quality >= 3:
-        # 答对：延长间隔
-        reps += 1
-        if reps == 1:
-            interval = 1
-        elif reps == 2:
-            interval = 3
-        elif reps == 3:
-            interval = 7
-        else:
-            interval = min(int(interval * ef), 60)  # 最长60天
-        # 更新 EF
-        ef = ef + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
-    else:
-        # 答错：重置
-        reps = 0
-        interval = 1
-        # EF 下降
-        ef = ef - 0.2
-
-    # EF 下限 1.3
-    ef = max(1.3, ef)
-
-    wa.sm2_ef = round(ef, 2)
-    wa.sm2_repetitions = reps
-    wa.sm2_interval = interval
-    wa.next_review_date = date.today() + timedelta(days=interval)
-
-    # 连续正确 3 次 → mastered
-    if reps >= 3:
-        wa.mastery_status = "archived"
-        wa.archived_at = datetime.now()
-
-
-def quality_from_result(is_correct: bool, confidence: str) -> int:
-    """根据答题结果和自信度计算 SM-2 quality 评分"""
-    if is_correct:
-        if confidence == "sure":
-            return 5
-        elif confidence == "unsure":
-            return 4
-        else:
-            return 3
-    else:
-        if confidence == "sure":
-            return 0  # 盲区
-        elif confidence == "unsure":
-            return 1
-        else:
-            return 1
 
 
 # ========== Pydantic Models ==========
@@ -101,6 +29,15 @@ class ChallengeSubmit(BaseModel):
     confidence: str = "unsure"
     time_spent_seconds: int = 0
     is_variant: bool = False  # 是否做的变式题
+    recall_text: str = ""           # 回忆阶段文本
+    skip_recall: bool = False       # 是否跳过了回忆
+    skipped_rationale: bool = False # 是否跳过了自证
+
+
+class CheckAnswerRequest(BaseModel):
+    wrong_answer_id: int
+    user_answer: str
+    is_variant: bool = False
 
 
 # ========== GET /queue ==========
@@ -328,8 +265,8 @@ async def generate_challenge_variant(
             gen_time = datetime.fromisoformat(wa.variant_data["generated_at"])
             if (datetime.now() - gen_time).total_seconds() < 86400:
                 return {
-                    "variant_question": wa.variant_data["variant_question"],
-                    "variant_options": wa.variant_data["variant_options"],
+                    "variant_question": wa.variant_data.get("variant_question", ""),
+                    "variant_options": wa.variant_data.get("variant_options", {}),
                     "transform_type": wa.variant_data.get("transform_type", ""),
                     "core_knowledge": wa.variant_data.get("core_knowledge", ""),
                     "cached": True,
@@ -346,8 +283,8 @@ async def generate_challenge_variant(
         db.commit()
 
         return {
-            "variant_question": variant["variant_question"],
-            "variant_options": variant["variant_options"],
+            "variant_question": variant.get("variant_question", ""),
+            "variant_options": variant.get("variant_options", {}),
             "transform_type": variant.get("transform_type", ""),
             "core_knowledge": variant.get("core_knowledge", ""),
             "cached": False,
@@ -359,6 +296,28 @@ async def generate_challenge_variant(
             "error": str(e),
             "fallback": True,
         }
+
+
+# ========== POST /check-answer (无副作用，仅判定对错) ==========
+
+@router.post("/check-answer")
+async def check_challenge_answer(body: CheckAnswerRequest, db: Session = Depends(get_db)):
+    """
+    纯判定接口：仅返回 is_correct，不创建 retry 记录，不更新 SM-2。
+    用于 Phase 1 前端决定是否触发 Phase 2（自证），避免前端缺少 variant_answer 导致误判。
+    """
+    wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == body.wrong_answer_id).first()
+    if not wa:
+        raise HTTPException(status_code=404, detail="错题不存在")
+
+    if body.is_variant and wa.variant_data:
+        correct = normalize_answer(wa.variant_data.get("variant_answer") or "")
+    else:
+        correct = normalize_answer(wa.correct_answer or "")
+
+    is_correct = normalize_answer(body.user_answer) == correct
+
+    return {"is_correct": is_correct}
 
 
 # ========== POST /submit ==========
@@ -379,12 +338,11 @@ async def submit_challenge(body: ChallengeSubmit, db: Session = Depends(get_db))
 
     # 判定对错（提取纯字母，防止 AI 返回 "B. 选项内容" 等格式导致误判）
     if body.is_variant and wa.variant_data:
-        correct = _extract_answer_letters(wa.variant_data.get("variant_answer") or "")
+        correct = normalize_answer(wa.variant_data.get("variant_answer") or "")
     else:
-        correct = _extract_answer_letters(wa.correct_answer or "")
+        correct = normalize_answer(wa.correct_answer or "")
 
-    user_ans = _extract_answer_letters(body.user_answer)
-    is_correct = user_ans == correct
+    is_correct = normalize_answer(body.user_answer) == correct
 
     # 创建 retry 记录
     retry = WrongAnswerRetry(
@@ -395,6 +353,7 @@ async def submit_challenge(body: ChallengeSubmit, db: Session = Depends(get_db))
         time_spent_seconds=body.time_spent_seconds,
         retried_at=datetime.now(),
         is_variant=body.is_variant,
+        rationale_text=body.recall_text or None,
     )
     db.add(retry)
 
@@ -418,10 +377,16 @@ async def submit_challenge(body: ChallengeSubmit, db: Session = Depends(get_db))
         if body.confidence == "sure" and wa.severity_tag == "landmine":
             wa.severity_tag = "normal"
 
-    # SM-2 更新
+    # SM-2 更新（含跳过回忆/跳过自证的降档惩罚）
     quality = quality_from_result(is_correct, body.confidence)
+    if body.skip_recall:
+        quality = max(0, quality - 1)
+    if body.skipped_rationale:
+        quality = max(0, quality - 1)
     sm2_update(wa, quality)
     auto_archived = wa.mastery_status == "archived"
+
+    can_archive = (is_correct and body.confidence == "sure") and not auto_archived
 
     wa.updated_at = datetime.now()
     db.commit()
@@ -441,21 +406,98 @@ async def submit_challenge(body: ChallengeSubmit, db: Session = Depends(get_db))
         "sm2_repetitions": wa.sm2_repetitions,
         "next_review_date": wa.next_review_date.isoformat() if wa.next_review_date else None,
         "auto_archived": auto_archived,
+        "can_archive": can_archive,
         # 解析
         "explanation": wa.explanation,
         "key_point": wa.key_point,
+        "recall_text": body.recall_text or "",
     }
 
-    # 如果是变式题，附加变式解析
+    # 如果是变式题，附加变式解析，并优先使用变式解析作为主解析
     if body.is_variant and wa.variant_data:
-        result["variant_explanation"] = wa.variant_data.get("variant_explanation", "")
+        variant_expl = wa.variant_data.get("variant_explanation", "")
+        result["variant_explanation"] = variant_expl
         result["variant_answer"] = wa.variant_data.get("variant_answer", "")
         result["core_knowledge"] = wa.variant_data.get("core_knowledge", "")
+        # 变式解析非空时，覆盖主 explanation 字段，避免前端回退到原题解析
+        if variant_expl:
+            result["explanation"] = variant_expl
 
     return result
 
 
-# ========== GET /stats ==========
+# ========== POST /evaluate-rationale ==========
+
+class RationaleEvaluateRequest(BaseModel):
+    wrong_answer_id: int
+    user_answer: str
+    confidence: str = "unsure"
+    rationale_text: str = ""
+    time_spent_seconds: int = 0
+
+
+@router.post("/evaluate-rationale")
+async def evaluate_challenge_rationale(
+    body: RationaleEvaluateRequest, db: Session = Depends(get_db)
+):
+    """
+    Phase 2 专用：仅做 AI 推理评估，不重复创建 retry 记录和 SM-2 更新。
+    submit 端点已在 Phase 1 完成了判定、retry、SM-2 等操作。
+    此端点仅返回 AI 对推理文本的评估结果。
+    """
+    wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == body.wrong_answer_id).first()
+    if not wa:
+        raise HTTPException(status_code=404, detail="错题不存在")
+
+    # 判定对错（和 submit 一致的逻辑）
+    if wa.variant_data:
+        correct = normalize_answer(wa.variant_data.get("variant_answer") or "")
+    else:
+        correct = normalize_answer(wa.correct_answer or "")
+    is_correct = normalize_answer(body.user_answer) == correct
+
+    # AI 评估推理
+    from services.variant_surgery_service import evaluate_rationale
+    ai_eval = await evaluate_rationale(wa, body.user_answer, body.rationale_text, is_correct)
+
+    verdict = ai_eval.get("verdict", "failed")
+
+    # 根据 verdict 更新 severity
+    if verdict == "lucky_guess":
+        wa.severity_tag = "landmine"
+    # 注意：不增加 error_count，因为这个端点不创建 retry 记录
+    # error_count 应该在实际提交答案时增加（submit 或 variant/judge）
+    wa.updated_at = datetime.now()
+    db.commit()
+
+    # 返回 AI 评估 + 变式解析
+    result = {
+        "is_correct": is_correct,
+        "correct_answer": wa.variant_data.get("variant_answer", "") if wa.variant_data else wa.correct_answer,
+        "verdict": verdict,
+        "reasoning_score": ai_eval.get("reasoning_score", 0),
+        "diagnosis": ai_eval.get("diagnosis", ""),
+        "weak_links": ai_eval.get("weak_links", []),
+        "severity_tag": wa.severity_tag,
+        "error_count": wa.error_count,
+        "retry_count": wa.retry_count,
+        # SM-2 状态（从已有数据读取，不再重新计算）
+        "sm2_ef": wa.sm2_ef,
+        "sm2_interval": wa.sm2_interval,
+        "sm2_repetitions": wa.sm2_repetitions,
+        "next_review_date": wa.next_review_date.isoformat() if wa.next_review_date else None,
+        "auto_archived": wa.mastery_status == "archived",
+    }
+
+    # 附加解析
+    if wa.variant_data:
+        result["variant_explanation"] = wa.variant_data.get("variant_explanation", "")
+        result["variant_answer"] = wa.variant_data.get("variant_answer", "")
+        result["core_knowledge"] = wa.variant_data.get("core_knowledge", "")
+    result["explanation"] = wa.explanation
+    result["key_point"] = wa.key_point
+
+    return result
 
 @router.get("/stats")
 async def get_challenge_stats(db: Session = Depends(get_db)):

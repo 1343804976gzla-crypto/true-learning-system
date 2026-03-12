@@ -14,6 +14,7 @@ import asyncio
 from models import get_db, WrongAnswer, QuizSession, ConceptMastery, Chapter, TestRecord
 from schemas import QuizSubmitRequest, GeneratedQuiz, QuizSubmission, QuizResult, QuizOption
 from services.quiz_service import get_quiz_service
+from utils.answer import answers_match
 
 router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 
@@ -98,9 +99,7 @@ async def submit_answer(
     except Exception as e:
         print(f"AI批改失败: {e}")
         # 返回默认批改结果
-        _user = (data.user_answer or "").strip().upper()
-        _correct = (test.ai_correct_answer or "").strip().upper()
-        is_correct = sorted(_user) == sorted(_correct) if len(_correct) > 1 else _user == _correct
+        is_correct = answers_match(data.user_answer, test.ai_correct_answer)
         grading_result = {
             "is_correct": is_correct,
             "score": 100 if is_correct else 0,
@@ -380,12 +379,7 @@ async def submit_quiz(
         if not question.get("concept_id"):
             continue
         
-        user_ans = (answer.user_answer or "").strip().upper()
-        correct_ans = (question.get("correct_answer") or "").strip().upper()
-        if question.get("type") == "X":
-            is_correct = sorted(user_ans) == sorted(correct_ans)
-        else:
-            is_correct = user_ans == correct_ans
+        is_correct = answers_match(answer.user_answer, question.get("correct_answer") or "")
         if is_correct:
             correct_count += 1
         

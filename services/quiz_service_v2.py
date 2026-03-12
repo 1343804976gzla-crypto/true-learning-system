@@ -25,6 +25,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+INVALID_CHAPTER_IDS = {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0", "uncategorized_ch0"}
+
 
 class QuizService:
     """整卷出题服务 - 医学考研专家模式"""
@@ -119,16 +121,20 @@ class QuizService:
 
     def _calculate_topic_overlap(self, content_keywords: Set[str], question_keywords: Set[str]) -> float:
         """
-        计算主题重叠度
+        计算主题重叠度：题目关键词中有多少来自原文内容。
+
+        使用 question_keywords 作为分母（而非 content_keywords），
+        因为原文关键词数量远大于题目关键词，用原文做分母会导致
+        即使完美的题目也只有 <1% 的重叠率。
 
         Returns:
             重叠度（0-1之间）
         """
-        if not content_keywords:
+        if not question_keywords:
             return 0.0
 
         overlap = len(content_keywords & question_keywords)
-        overlap_ratio = overlap / len(content_keywords)
+        overlap_ratio = overlap / len(question_keywords)
 
         return overlap_ratio
 
@@ -271,13 +277,12 @@ class QuizService:
         """
         动态分段阈值：
         - 20题时降低到 6000，减少单次输出体积导致的 JSON 截断概率。
-        - 15题时适度提前分段。
-        - 其余保持 9000。
+        - 15题及以下保持较大段（减少分段数，提升上下文完整性和题目质量）。
         """
         if num_questions >= 20:
             return 6000
         if num_questions >= 15:
-            return 7500
+            return 12000  # 15题：宁可少分段，保证每段上下文充分
         return 9000
 
     def _get_total_timeout_seconds(self, content_length: int, num_questions: int) -> int:
@@ -411,6 +416,26 @@ class QuizService:
                 return b
         return ""
 
+    def _is_placeholder_chapter(
+        self,
+        chapter_id: str = "",
+        book: str = "",
+        chapter_title: str = "",
+        chapter_number: str = "",
+    ) -> bool:
+        cid = str(chapter_id or "").strip()
+        subject = str(book or "").strip()
+        title = str(chapter_title or "").strip()
+        number = str(chapter_number or "").strip()
+        return (
+            cid in INVALID_CHAPTER_IDS
+            or cid.endswith("_ch0")
+            or subject in {"未分类", "unknown"}
+            or number == "0"
+            or title.startswith("自动补齐章节")
+            or title in {"待人工归类", "未知章节"}
+        )
+
     def _resolve_chapter_from_db(
         self,
         book: str = "",
@@ -420,6 +445,27 @@ class QuizService:
         confidence: str = "medium",
     ) -> Optional[Dict[str, str]]:
         from models import get_db, Chapter
+
+        def _pick_best(candidates: List[Any]) -> Optional[Any]:
+            real_candidates = [
+                ch for ch in candidates
+                if not self._is_placeholder_chapter(
+                    chapter_id=getattr(ch, "id", ""),
+                    book=getattr(ch, "book", ""),
+                    chapter_title=getattr(ch, "chapter_title", ""),
+                    chapter_number=getattr(ch, "chapter_number", ""),
+                )
+            ]
+            if not real_candidates:
+                return None
+            real_candidates.sort(
+                key=lambda x: (
+                    len(getattr(x, "chapter_title", "") or ""),
+                    getattr(x, "chapter_number", ""),
+                    getattr(x, "id", ""),
+                )
+            )
+            return real_candidates[0]
 
         def _pack(ch, conf: str) -> Dict[str, str]:
             return {
@@ -432,8 +478,10 @@ class QuizService:
         db = next(get_db())
         try:
             # 1) direct id lookup
-            if chapter_id:
-                ch = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+            if chapter_id and not self._is_placeholder_chapter(chapter_id=chapter_id):
+                ch = _pick_best(
+                    db.query(Chapter).filter(Chapter.id == chapter_id).all()
+                )
                 if ch:
                     return _pack(ch, confidence)
 
@@ -441,7 +489,9 @@ class QuizService:
                 m = re.match(r"^(.+_ch)0+([0-9]+)$", chapter_id)
                 if m:
                     normalized = f"{m.group(1)}{int(m.group(2))}"
-                    ch = db.query(Chapter).filter(Chapter.id == normalized).first()
+                    ch = _pick_best(
+                        db.query(Chapter).filter(Chapter.id == normalized).all()
+                    )
                     if ch:
                         return _pack(ch, confidence)
 
@@ -457,28 +507,28 @@ class QuizService:
                         num_candidates.append(str(parsed))
 
                 for cand in dict.fromkeys(num_candidates):
-                    ch = (
+                    ch = _pick_best((
                         db.query(Chapter)
                         .filter(
                             Chapter.book == book,
                             Chapter.chapter_number == cand,
                             Chapter.chapter_title.contains(chapter_title[:8]),
                         )
-                        .first()
-                    )
+                        .all()
+                    ))
                     if ch:
                         return _pack(ch, "high")
 
             # 3) book + title fuzzy (prefer title before number for higher precision)
             if book and chapter_title:
-                ch = (
+                ch = _pick_best((
                     db.query(Chapter)
                     .filter(
                         Chapter.book == book,
                         Chapter.chapter_title.contains(chapter_title[:8])
                     )
-                    .first()
-                )
+                    .all()
+                ))
                 if ch:
                     return _pack(ch, "medium")
 
@@ -499,19 +549,17 @@ class QuizService:
                         .filter(Chapter.book == book, Chapter.chapter_number == cand)
                         .all()
                     )
-                    if matches:
-                        # Prefer non-auto-filled titles when multiple chapter ids share one number.
-                        matches.sort(
-                            key=lambda x: (
-                                (x.chapter_title or "").startswith("\u81ea\u52a8\u8865\u9f50\u7ae0\u8282"),
-                                len(x.chapter_title or ""),
-                            )
-                        )
-                        return _pack(matches[0], "high")
+                    ch = _pick_best(matches)
+                    if ch:
+                        return _pack(ch, "high")
 
             # 5) title-only fuzzy
             if chapter_title:
-                ch = db.query(Chapter).filter(Chapter.chapter_title.contains(chapter_title[:8])).first()
+                ch = _pick_best(
+                    db.query(Chapter)
+                    .filter(Chapter.chapter_title.contains(chapter_title[:8]))
+                    .all()
+                )
                 if ch:
                     return _pack(ch, "low")
         finally:
@@ -574,6 +622,17 @@ class QuizService:
             # If AI prediction cannot be resolved to DB, prefer local inference from content.
             if inferred and inferred.get("chapter_id"):
                 return inferred
+            raw_is_placeholder = self._is_placeholder_chapter(
+                chapter_id=chapter_id,
+                book=book,
+                chapter_title=chapter_title,
+            )
+            if raw_is_placeholder:
+                chapter_id = ""
+                if book in {"未分类", "unknown"}:
+                    book = ""
+                if chapter_title.startswith("自动补齐章节") or chapter_title in {"待人工归类", "未知章节"}:
+                    chapter_title = ""
             if book or chapter_id or chapter_title:
                 return {
                     "book": book,
@@ -590,37 +649,57 @@ class QuizService:
 
         策略：
         1. 从 content 中识别科目（_extract_book_hint）
-        2. 若识别到科目，返回该科目的所有章节（chapter_id + title）
-        3. 若未识别到，仅返回科目名称列表（避免 token 爆炸）
+        2. 若识别到科目，优先返回该科目的真实章节（chapter_id + title）
+        3. 若未识别到，也返回完整真实章节目录，避免 AI 因缺少 chapter_id 只能输出占位值
         """
         from models import get_db, Chapter
         db = next(get_db())
         try:
+            def _list_real_chapters(book: str = "") -> List[Tuple[str, str, str, str]]:
+                query = db.query(
+                    Chapter.id,
+                    Chapter.book,
+                    Chapter.chapter_number,
+                    Chapter.chapter_title,
+                )
+                if book:
+                    query = query.filter(Chapter.book == book)
+                chapters = query.order_by(Chapter.book, Chapter.chapter_number).all()
+                return [
+                    (ch_id, ch_book, ch_num, ch_title)
+                    for ch_id, ch_book, ch_num, ch_title in chapters
+                    if not self._is_placeholder_chapter(
+                        chapter_id=ch_id,
+                        book=ch_book,
+                        chapter_title=ch_title,
+                        chapter_number=ch_num,
+                    )
+                ]
+
             # 尝试识别内容所属科目
             matched_book = self._extract_book_hint(content) if content else ""
 
             if matched_book:
-                chapters = (
-                    db.query(Chapter.id, Chapter.chapter_number, Chapter.chapter_title)
-                    .filter(Chapter.book == matched_book)
-                    .order_by(Chapter.chapter_number)
-                    .all()
-                )
+                chapters = _list_real_chapters(matched_book)
                 if chapters:
                     lines = [f"科目：{matched_book}，可选章节："]
-                    for ch_id, ch_num, ch_title in chapters:
-                        # 过滤自动补齐章节，避免噪音
-                        if ch_title and not ch_title.startswith("自动补齐章节"):
-                            lines.append(f"  - {ch_id}（第{ch_num}章 {ch_title}）")
+                    for ch_id, _, ch_num, ch_title in chapters:
+                        lines.append(f"  - {ch_id}（第{ch_num}章 {ch_title}）")
                     if len(lines) > 1:
                         return "\n".join(lines)
 
-            # 未匹配到科目，返回科目列表
-            books = db.query(Chapter.book).distinct().all()
-            book_list = [b[0] for b in books if b and b[0] and b[0] not in {"未分类", "unknown"}]
-            if not book_list:
-                return "生理学、生物化学、病理学、内科学、外科学"
-            return "可选科目：" + "、".join(sorted(book_list))
+            chapters = _list_real_chapters()
+            if chapters:
+                lines = ["所有可选章节："]
+                current_book = None
+                for ch_id, ch_book, ch_num, ch_title in chapters:
+                    if ch_book != current_book:
+                        current_book = ch_book
+                        lines.append(f"【{ch_book}】")
+                    lines.append(f"  - {ch_id}（第{ch_num}章 {ch_title}）")
+                return "\n".join(lines)
+
+            return "可选章节：生理学、生物化学、病理学、内科学、外科学"
         finally:
             db.close()
 
@@ -808,6 +887,7 @@ class QuizService:
         # 收集所有成功的题目
         all_questions = []
         chapter_prediction = None
+        seen_key_points = set()  # 跨段知识点去重
 
         for i, result in enumerate(results):
             segment_idx = i + 1
@@ -822,18 +902,30 @@ class QuizService:
                 print(f"[QuizService] ⚠️ 第 {segment_idx} 段返回无效结果")
                 continue
 
-            # 收集题目
+            # 收集题目（跨段 key_point 去重）
             segment_questions = result.get("questions", [])
             if segment_questions:
-                filtered_segment_questions = [
-                    q for q in segment_questions if not self._is_placeholder_question(q)
-                ]
-                dropped = len(segment_questions) - len(filtered_segment_questions)
+                filtered_segment_questions = []
+                dedup_dropped = 0
+                for q in segment_questions:
+                    if self._is_placeholder_question(q):
+                        continue
+                    kp = (q.get("key_point") or "").strip()
+                    if kp and kp in seen_key_points:
+                        dedup_dropped += 1
+                        continue
+                    if kp:
+                        seen_key_points.add(kp)
+                    filtered_segment_questions.append(q)
+
+                placeholder_dropped = len(segment_questions) - len(filtered_segment_questions) - dedup_dropped
                 all_questions.extend(filtered_segment_questions)
-                print(
-                    f"[QuizService] ✅ 第 {segment_idx} 段成功生成 {len(filtered_segment_questions)} 道题"
-                    + (f"（过滤占位题 {dropped} 道）" if dropped > 0 else "")
-                )
+                info_parts = [f"[QuizService] ✅ 第 {segment_idx} 段成功生成 {len(filtered_segment_questions)} 道题"]
+                if placeholder_dropped > 0:
+                    info_parts.append(f"过滤占位题 {placeholder_dropped} 道")
+                if dedup_dropped > 0:
+                    info_parts.append(f"去重 {dedup_dropped} 道")
+                print("（".join(info_parts) + ("）" if len(info_parts) > 1 else ""))
 
                 # 获取章节预测（使用第一个有效的）
                 if not chapter_prediction and result.get("chapter_prediction"):
@@ -860,9 +952,20 @@ class QuizService:
                     q for q in refill_result.get("questions", [])
                     if self._is_valid_question(q, 0) and not self._is_placeholder_question(q)
                 ]
-                if refill_questions:
-                    all_questions.extend(refill_questions[:missing])
-                    print(f"[QuizService] ✅ 追加补生 {min(len(refill_questions), missing)} 道题")
+                # 补生题也要跨段 key_point 去重
+                added = 0
+                for q in refill_questions:
+                    if len(all_questions) >= num_questions:
+                        break
+                    kp = (q.get("key_point") or "").strip()
+                    if kp and kp in seen_key_points:
+                        continue
+                    if kp:
+                        seen_key_points.add(kp)
+                    all_questions.append(q)
+                    added += 1
+                if added:
+                    print(f"[QuizService] ✅ 追加补生 {added} 道题")
             except Exception as refill_error:
                 print(f"[QuizService] ⚠️ 补生题目失败: {refill_error}")
 
@@ -940,7 +1043,9 @@ class QuizService:
 【科目与章节】
 {chapter_catalog}
 
-请根据讲课内容判断最匹配的章节，在 chapter_prediction 中填写对应的 chapter_id（若上方有列出）和 chapter_title。若无法确定具体章节，填写科目名和大致章节标题即可。
+请根据讲课内容判断最匹配的章节，在 chapter_prediction 中填写对应的 chapter_id 和 chapter_title。
+如果上方目录里存在匹配章节，chapter_id 必须从上方列表里选择真实 ID，禁止填写 0、unknown_ch0、未分类或空字符串。
+只有在目录里确实找不到合适章节时，chapter_id 才允许留空。
 
 【核心约束 - 违反则试卷无效】
 1. **绝对禁止逐题生成**：所有{num_questions}道题必须同时构思，确保全局知识点覆盖
@@ -968,7 +1073,7 @@ class QuizService:
 {{
     "paper_title": "实际试卷标题（不要写'试卷标题'）",
     "total_questions": {num_questions},
-    "chapter_prediction": {{"book": "生理学", "chapter_id": "", "chapter_title": "消化系统", "confidence": "high"}},
+    "chapter_prediction": {{"book": "生理学", "chapter_id": "physio_ch16", "chapter_title": "口腔食管和胃内消化", "confidence": "high"}},
     "difficulty_distribution": {{"基础": {basic}, "提高": {improve}, "难题": {hard}}},
     "questions": [
         {{
@@ -991,7 +1096,7 @@ class QuizService:
         schema = {
             "paper_title": "西医综合考研XX专项测试",
             "total_questions": num_questions,
-            "chapter_prediction": {"book": "生理学", "chapter_id": "", "chapter_title": "消化系统", "confidence": "high"},
+            "chapter_prediction": {"book": "生理学", "chapter_id": "physio_ch16", "chapter_title": "口腔食管和胃内消化", "confidence": "high"},
             "difficulty_distribution": {"基础": basic, "提高": improve, "难题": hard},
             "questions": [
                 {
@@ -1026,7 +1131,7 @@ class QuizService:
             content_bonus = min(300, content_len // 100)  # 每100字符+1秒，最多+300秒
             ai_timeout = max(300, base_timeout + content_bonus)
 
-            max_output_tokens = max(8192, num_questions * 800)  # 15题=12000, 20题=16000
+            max_output_tokens = max(8192, num_questions * 1200)  # 15题=18000, 20题=24000
             max_output_tokens = min(max_output_tokens, 32768)  # 模型上限保护
 
             logger.info(f"=== 开始生成 {num_questions} 道题 ===")
@@ -1052,15 +1157,22 @@ class QuizService:
                 logger.warning("⚠️ AI 返回的题目列表为空！")
                 logger.warning(f"完整返回: {result}")
 
-            # 验证题目有效性，过滤无效题目
+            # 验证题目有效性，过滤无效题目 + key_point 去重
             raw_questions = result.get("questions", [])
             valid_questions = []
+            seen_kp = set()
 
             for i, q in enumerate(raw_questions, 1):
-                if self._is_valid_question(q, i):
-                    valid_questions.append(q)
-                else:
+                if not self._is_valid_question(q, i):
                     logger.warning(f"⚠️ 第{i}题无效，已过滤")
+                    continue
+                kp = (q.get("key_point") or "").strip()
+                if kp and kp in seen_kp:
+                    logger.warning(f"⚠️ 第{i}题 key_point 重复（{kp}），已过滤")
+                    continue
+                if kp:
+                    seen_kp.add(kp)
+                valid_questions.append(q)
 
             logger.info(f"有效题目: {len(valid_questions)}/{len(raw_questions)}")
 
@@ -1100,8 +1212,7 @@ class QuizService:
                     uploaded_content,
                 )
                 or fallback_prediction
-                or self._resolve_chapter_from_db(chapter_id="0", confidence="low")
-                or {"book": "未分类", "chapter_id": "0", "chapter_title": "自动补齐章节(0)", "confidence": "low"}
+                or {"book": "", "chapter_id": "", "chapter_title": "", "confidence": "low"}
             )
 
             print(f"[QuizService] ✅ 最终返回 {len(questions)} 道题")
@@ -1120,8 +1231,7 @@ class QuizService:
             default_paper["paper_title"] = "⚠️ AI 生成失败 - 请重试"
             default_paper["chapter_prediction"] = (
                 fallback_prediction
-                or self._resolve_chapter_from_db(chapter_id="0", confidence="low")
-                or {"book": "未分类", "chapter_id": "0", "chapter_title": "自动补齐章节(0)", "confidence": "low"}
+                or {"book": "", "chapter_id": "", "chapter_title": "", "confidence": "low"}
             )
             return default_paper
     
@@ -1387,7 +1497,7 @@ class QuizService:
     ) -> List[Dict[str, Any]]:
         """
         基于知识点生成变式题
-        
+
         变式策略：
         1. 同一概念，不同问法
         2. 同一机制，正反两面
@@ -1395,14 +1505,14 @@ class QuizService:
         4. 病例变式，不同表现
         5. 选项变式，干扰项调整
         """
-        
+
         content = uploaded_content[:5000] if len(uploaded_content) > 5000 else uploaded_content
-        
+
         base_q = base_question.get("question", "")
         base_type = base_question.get("type", "A1")
         base_diff = base_question.get("difficulty", "基础")
         base_exp = base_question.get("explanation", "")
-        
+
         prompt = f"""【角色】你是资深西医综合考研命题专家，擅长设计高质量变式题。
 
 【任务】基于以下知识点和原题，生成{num_variations}道变式题。
@@ -1442,7 +1552,8 @@ class QuizService:
 
 【重要要求】
 - 5道题必须围绕"{key_point}"这个核心知识点
-- 题目不能重复，每道题考察不同角度
+- 每道题的题干必须完全不同，禁止仅修改个别词语
+- 每道题的 correct_answer 不能全部相同，至少要有 3 个不同的正确答案字母
 - 选项要有干扰性，似是而非
 - 答案和解析必须准确
 - **每道题必须有且仅有 A、B、C、D、E 五个选项，缺一不可**
@@ -1477,16 +1588,18 @@ class QuizService:
                 }
             ]
         }
-        
+
         try:
-            # use_heavy=True: Gemini优先（创造力强），失败自动走快速兜底链路
-            result = await self.ai.generate_json(prompt, schema, max_tokens=4000, temperature=0.4, use_heavy=True, timeout=360)
+            # 提高 token 预算：5 道题 × 1200 token/题 = 6000
+            result = await self.ai.generate_json(prompt, schema, max_tokens=6000, temperature=0.4, use_heavy=True, timeout=360)
             variations = result.get("variations", [])
 
             print(f"[Variation] AI返回了 {len(variations)} 道题")
 
-            # 检查并修复题目完整性
+            # 检查并修复题目完整性 + 去重
             valid_variations = []
+            seen_questions = set()  # 题干去重
+
             for i, v in enumerate(variations):
                 options = v.get("options", {})
 
@@ -1510,6 +1623,19 @@ class QuizService:
                     print(f"[Variation] 警告：第{i+1}题题目缺失，跳过")
                     continue
 
+                # 题干相似度去重：提取核心文本比较
+                q_text = v["question"].strip()
+                q_key = self._question_dedup_key(q_text)
+                if q_key in seen_questions:
+                    print(f"[Variation] 第{i+1}题与已有题目重复，跳过")
+                    continue
+                # 也检查是否和原题重复
+                base_key = self._question_dedup_key(base_q)
+                if q_key == base_key:
+                    print(f"[Variation] 第{i+1}题与原题重复，跳过")
+                    continue
+                seen_questions.add(q_key)
+
                 # 确保所有必需字段都存在
                 v["options"] = options
                 v["type"] = v.get("type") or base_type
@@ -1518,19 +1644,9 @@ class QuizService:
 
                 valid_variations.append(v)
 
-            # 如果有效题目不足，用原题变式补充
-            while len(valid_variations) < num_variations:
-                missing_count = num_variations - len(valid_variations)
-                print(f"[Variation] 有效题目不足，需要补充 {missing_count} 道题")
-                for i in range(missing_count):
-                    fallback_q = self._create_variation_from_base(
-                        len(valid_variations) + 1,
-                        key_point,
-                        base_question
-                    )
-                    valid_variations.append(fallback_q)
-                    if len(valid_variations) >= num_variations:
-                        break
+            # 不足时不再用原题冒充变式，直接返回实际数量
+            if len(valid_variations) < num_variations:
+                print(f"[Variation] 有效变式题 {len(valid_variations)}/{num_variations}，返回实际数量（不补充伪变式）")
 
             return valid_variations[:num_variations]
 
@@ -1540,6 +1656,17 @@ class QuizService:
             traceback.print_exc()
             # 不再静默返回原题冒充变式，直接抛异常让上层处理
             raise RuntimeError(f"变式题AI生成失败: {e}") from e
+
+    def _question_dedup_key(self, question_text: str) -> str:
+        """提取题干的去重键：去除标点、空白、序号前缀，只保留中文+字母。"""
+        import re
+        text = (question_text or "").strip()
+        # 去掉常见前缀：【概念变式】、1.、(1)、第1题 等
+        text = re.sub(r'^[\s\d.()（）【】\u3010\u3011\u2460-\u2473]*', '', text)
+        text = re.sub(r'^(概念|病例|机制|鉴别|应用)变式[】\u3011]?\s*', '', text)
+        # 只保留中文字符和英文字母
+        chars = re.findall(r'[\u4e00-\u9fa5a-zA-Z]', text)
+        return ''.join(chars)[:60]  # 取前60字符作为指纹
 
     def _create_variation_from_base(self, id: int, key_point: str, base_question: Dict) -> Dict:
         """基于原题创建变式（保留原题选项）"""

@@ -408,7 +408,36 @@
     console.log('JavaScript 开始加载...');
 
     const chapterId = '{{ chapter_id }}';
+    const INVALID_CHAPTER_IDS = new Set(['', '0', 'unknown_ch0', '未知_ch0', '无法识别_ch0', '未分类_ch0', 'uncategorized_ch0']);
     console.log('chapterId:', chapterId);
+
+    function isSelectableChapterId(value) {
+        const normalized = (value || '').toString().trim();
+        return normalized !== '' && !INVALID_CHAPTER_IDS.has(normalized);
+    }
+
+    function normalizeChapterCatalog(rawCatalog) {
+        const normalizedCatalog = {};
+        Object.keys(rawCatalog || {}).forEach(function(book) {
+            const validChapters = (rawCatalog[book] || []).filter(function(ch) {
+                const title = (ch.title || '').toString().trim();
+                const number = (ch.number || '').toString().trim();
+                return isSelectableChapterId(ch.id) &&
+                    number !== '0' &&
+                    title !== '待人工归类' &&
+                    title !== '未知章节' &&
+                    !title.startsWith('自动补齐章节');
+            });
+            if (validChapters.length > 0) {
+                normalizedCatalog[book] = validChapters;
+            }
+        });
+        return normalizedCatalog;
+    }
+
+    function getEffectiveChapterId() {
+        return isSelectableChapterId(confirmedChapterId) ? confirmedChapterId : '';
+    }
 
     let uploadedContent = '';
     let numQuestions = 10;
@@ -421,7 +450,7 @@
     let trackingSessionId = null;  // 学习轨迹会话ID
     let chaptersGrouped = {};      // 章节目录缓存
     let pendingExamData = null;    // 待确认的试卷数据
-    let confirmedChapterId = chapterId; // 确认后的章节ID
+    let confirmedChapterId = isSelectableChapterId(chapterId) ? chapterId : ''; // 确认后的章节ID
 
     function buildMaskedExplanationHtml(explanation, isCorrect, confidence, revealId, keyPoint) {
         const text = escapeHtml(explanation) || '暂无解析';  // ✅ 转义解析文本
@@ -451,7 +480,9 @@
     // 页面加载时获取章节目录
     (async function loadChapterCatalog() {
         try {
-            chaptersGrouped = await safeFetch('/api/chapters/grouped', {}, '加载章节目录失败');
+            chaptersGrouped = normalizeChapterCatalog(
+                await safeFetch('/api/chapters/grouped', {}, '加载章节目录失败')
+            );
             console.log('章节目录已加载，科目数:', Object.keys(chaptersGrouped).length);
         } catch(e) {
             console.error('加载章节目录失败:', e);
@@ -617,7 +648,7 @@
 
             // 立即保存数据到 sessionStorage（包括知识点）
             const tempData = {
-                chapterId: confirmedChapterId || chapterId,
+                chapterId: getEffectiveChapterId(),
                 uploadedContent: uploadedContent,
                 questions: questions,
                 knowledgePoints: data.knowledge_points || [],
@@ -630,10 +661,52 @@
                 console.warn('[Quiz Batch] sessionStorage保存失败:', e);
             }
 
-            // 直接开始答题，跳过大纲确认弹窗
+            // 使用 AI 章节预测来确定章节
             pendingExamData = data;
-            confirmedChapterId = chapterId; // 使用原始章节ID
-            proceedToExam();
+            const prediction = data.chapter_prediction;
+
+            if (prediction && isSelectableChapterId(prediction.chapter_id)) {
+                // 检查 AI 预测的章节是否在真实章节列表中
+                let predictionValid = false;
+                if (prediction.book && chaptersGrouped[prediction.book]) {
+                    predictionValid = chaptersGrouped[prediction.book].some(
+                        ch => ch.id === prediction.chapter_id
+                    );
+                }
+                // 也在所有科目中查找（防止 book 字段不匹配）
+                if (!predictionValid) {
+                    for (const book in chaptersGrouped) {
+                        if (chaptersGrouped[book].some(ch => ch.id === prediction.chapter_id)) {
+                            predictionValid = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (predictionValid) {
+                    // AI预测有效，自动确认章节
+                    try {
+                        await fetch('/api/quiz/batch/confirm-chapter/' + examId, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ chapter_id: prediction.chapter_id })
+                        });
+                        confirmedChapterId = prediction.chapter_id;
+                        console.log('[Chapter] AI自动确认章节:', prediction.chapter_id, prediction.chapter_title);
+                    } catch(e) {
+                        console.warn('[Chapter] 自动确认失败，使用原始ID:', e);
+                    }
+                    proceedToExam();
+                } else {
+                    // AI预测的章节无效，弹出确认弹窗让用户选择
+                    console.warn('[Chapter] AI预测章节无效:', prediction.chapter_id, '，弹出选择弹窗');
+                    showChapterConfirmModal(data);
+                }
+            } else {
+                // 无AI预测，弹出章节确认弹窗
+                console.log('[Chapter] 无AI章节预测，弹出选择弹窗');
+                showChapterConfirmModal(data);
+            }
 
         } catch (error) {
             console.error('[Quiz Batch] 生成失败:', error);
@@ -750,22 +823,22 @@
         }
 
         // 如果 AI 有预测，预选科目和章节
-        if (prediction && prediction.book) {
-            console.log('[Chapter] AI 预测科目:', prediction.book);
-            console.log('[Chapter] AI 预测章节ID:', prediction.chapter_id);
+            if (prediction && prediction.book) {
+                console.log('[Chapter] AI 预测科目:', prediction.book);
+                console.log('[Chapter] AI 预测章节ID:', prediction.chapter_id);
             console.log('[Chapter] AI 预测章节标题:', prediction.chapter_title);
             console.log('[Chapter] AI 置信度:', prediction.confidence);
 
             // 检查预测的科目是否存在
-            if (chaptersGrouped[prediction.book]) {
-                bookSelect.value = prediction.book;
-                onBookChange(); // 触发章节列表填充
+                if (chaptersGrouped[prediction.book]) {
+                    bookSelect.value = prediction.book;
+                    onBookChange(); // 触发章节列表填充
 
-                // 预选章节
-                if (prediction.chapter_id) {
-                    setTimeout(function() {
-                        const chapterSelect = document.getElementById('confirmChapter');
-                        chapterSelect.value = prediction.chapter_id;
+                    // 预选章节
+                    if (isSelectableChapterId(prediction.chapter_id)) {
+                        setTimeout(function() {
+                            const chapterSelect = document.getElementById('confirmChapter');
+                            chapterSelect.value = prediction.chapter_id;
                         console.log('[Chapter] 已预选章节:', prediction.chapter_id);
 
                         // 验证是否成功选中
@@ -846,7 +919,7 @@
     }
 
     function skipChapterConfirm() {
-        confirmedChapterId = chapterId; // 保持原始章节
+        confirmedChapterId = '';
         document.getElementById('chapterConfirmModal').classList.add('hidden');
         proceedToExam();
     }
@@ -860,7 +933,7 @@
         // 更新 sessionStorage 中的 chapterId 为确认后的值
         try {
             const tempData = JSON.parse(sessionStorage.getItem('examTempData') || '{}');
-            tempData.chapterId = confirmedChapterId || chapterId;
+            tempData.chapterId = getEffectiveChapterId();
             sessionStorage.setItem('examTempData', JSON.stringify(tempData));
         } catch(e) {
             console.warn('更新 sessionStorage 失败:', e);
@@ -1288,7 +1361,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     session_type: 'exam',
-                    chapter_id: confirmedChapterId || chapterId,
+                    chapter_id: getEffectiveChapterId(),
                     title: paperTitle || '整卷测试',
                     uploaded_content: uploadedContent
                 })

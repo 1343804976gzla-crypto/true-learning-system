@@ -5,7 +5,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Form, File, UploadFile
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
@@ -25,14 +25,20 @@ from learning_tracking_models import (
 router = APIRouter(prefix="/api/wrong-answers", tags=["wrong_answers_v2"])
 
 
+INVALID_CHAPTER_IDS = {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0"}
+
+
 # ========== Pydantic Models ==========
 
 class RetryRequest(BaseModel):
     user_answer: str
     confidence: str = "unsure"
     time_spent_seconds: int = 0
-    recall_text: str = ""              # 地雷盲测回忆文本
-    is_landmine_recall: bool = False   # 是否地雷盲测
+    recall_text: str = ""              # 回忆阶段文本
+    is_landmine_recall: bool = False   # 是否地雷盲测（兼容旧接口）
+    is_variant: bool = False           # 是否做的变式题
+    skip_recall: bool = False          # 是否跳过了回忆
+    skipped_rationale: bool = False    # 是否跳过了自证
 
 
 class VariantJudgeRequest(BaseModel):
@@ -136,9 +142,9 @@ def _normalize_option_map(options: Dict[str, Any]) -> Dict[str, str]:
     return {k: normalized[k] for k in ["A", "B", "C", "D", "E"] if k in normalized}
 
 
-def _normalize_answer(answer: str) -> str:
-    match = re.search(r"[A-E]", str(answer or "").upper())
-    return match.group(0) if match else ""
+from utils.answer import normalize_answer as _normalize_answer
+from utils.answer import answers_match as _answers_match
+from utils.sm2 import sm2_update, quality_from_result
 
 
 def _build_import_fingerprint(question_text: str, options: Dict[str, str]) -> str:
@@ -267,7 +273,9 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
             # 更新快照
             existing.explanation = g["explanation"]
             existing.key_point = g["key_point"]
-            existing.chapter_id = g["chapter_id"]
+            # chapter_id: 只补齐，不覆盖已识别的章节（避免冲掉AI分类结果）
+            if (not existing.chapter_id or existing.chapter_id == '0') and g["chapter_id"] and g["chapter_id"] != '0':
+                existing.chapter_id = g["chapter_id"]
             existing.updated_at = datetime.now()
             updated += 1
         else:
@@ -786,6 +794,11 @@ async def get_wrong_answer_detail(wrong_id: int, db: Session = Depends(get_db)):
         "last_retry_correct": wa.last_retry_correct,
         "mastery_status": wa.mastery_status,
         "has_variant": wa.variant_data is not None,
+        # SM-2 状态
+        "sm2_ef": wa.sm2_ef,
+        "sm2_interval": wa.sm2_interval,
+        "sm2_repetitions": wa.sm2_repetitions,
+        "next_review_date": wa.next_review_date.isoformat() if wa.next_review_date else None,
         "first_wrong_at": wa.first_wrong_at.isoformat() if wa.first_wrong_at else None,
         "last_wrong_at": wa.last_wrong_at.isoformat() if wa.last_wrong_at else None,
         "history": history,
@@ -806,17 +819,17 @@ async def get_wrong_answer_detail(wrong_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{wrong_id:int}/retry")
 async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(get_db)):
-    """提交重做结果"""
+    """提交重做结果（统一入口：原题/变式，含 SM-2 更新）"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
     if not wa:
         raise HTTPException(status_code=404, detail="错题不存在")
 
-    user_ans = (body.user_answer or "").strip().upper()
-    correct_ans = (wa.correct_answer or "").strip().upper()
-    if wa.question_type == "X":
-        is_correct = sorted(user_ans) == sorted(correct_ans)
+    # 判定对错：变式题用 variant_answer，原题用 correct_answer
+    if body.is_variant and wa.variant_data:
+        correct_raw = wa.variant_data.get("variant_answer") or ""
     else:
-        is_correct = user_ans == correct_ans
+        correct_raw = wa.correct_answer or ""
+    is_correct = _answers_match(body.user_answer, correct_raw)
 
     # 创建重做记录
     retry = WrongAnswerRetry(
@@ -828,6 +841,7 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
         retried_at=datetime.now(),
         rationale_text=body.recall_text or None,
         is_landmine_recall=body.is_landmine_recall,
+        is_variant=body.is_variant,
     )
     db.add(retry)
 
@@ -840,7 +854,6 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
 
     if not is_correct:
         wa.error_count += 1
-        # 可能升级 severity
         if wa.severity_tag not in ("critical",):
             if body.confidence == "sure":
                 wa.severity_tag = "critical"
@@ -851,7 +864,16 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
     if is_correct and body.confidence == "sure" and wa.severity_tag == "landmine":
         wa.severity_tag = "normal"
 
-    can_archive = is_correct and body.confidence == "sure"
+    # SM-2 更新（含跳过回忆/跳过自证的降档惩罚）
+    quality = quality_from_result(is_correct, body.confidence)
+    if body.skip_recall:
+        quality = max(0, quality - 1)
+    if body.skipped_rationale:
+        quality = max(0, quality - 1)
+    sm2_update(wa, quality)
+    auto_archived = wa.mastery_status == "archived"
+
+    can_archive = (is_correct and body.confidence == "sure") and not auto_archived
 
     db.commit()
 
@@ -864,11 +886,21 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
         "is_correct": is_correct,
         "correct_answer": wa.correct_answer,
         "explanation": wa.explanation,
+        "key_point": wa.key_point,
         "can_archive": can_archive,
+        "auto_archived": auto_archived,
         "severity_tag": wa.severity_tag,
         "error_count": wa.error_count,
         "retry_count": wa.retry_count,
         "recall_text": body.recall_text or "",
+        # SM-2 状态
+        "sm2_ef": wa.sm2_ef,
+        "sm2_interval": wa.sm2_interval,
+        "sm2_repetitions": wa.sm2_repetitions,
+        "next_review_date": wa.next_review_date.isoformat() if wa.next_review_date else None,
+        # 变式信息
+        "variant_answer": wa.variant_data.get("variant_answer") if body.is_variant and wa.variant_data else None,
+        "variant_explanation": wa.variant_data.get("variant_explanation") if body.is_variant and wa.variant_data else None,
         "previous_attempts": [
             {
                 "user_answer": r.user_answer,
@@ -1049,12 +1081,10 @@ async def get_available_books(db: Session = Depends(get_db)):
 
 @router.post("/{wrong_id:int}/variant/generate")
 async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)):
-    """生成变式题（仅 critical 错题）"""
+    """生成变式题（所有错题均可）"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
     if not wa:
         raise HTTPException(status_code=404, detail="错题不存在")
-    if wa.severity_tag != "critical":
-        raise HTTPException(status_code=400, detail="仅致命盲区(critical)错题支持变式挑战")
 
     # 缓存策略：24h内复用
     if wa.variant_data and wa.variant_data.get("generated_at"):
@@ -1062,10 +1092,11 @@ async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)
         try:
             gen_time = dt.fromisoformat(wa.variant_data["generated_at"])
             if (datetime.now() - gen_time).total_seconds() < 86400:
-                # 返回缓存（不含答案）
+                # 返回缓存
                 return {
                     "variant_question": wa.variant_data["variant_question"],
                     "variant_options": wa.variant_data["variant_options"],
+                    "variant_answer": wa.variant_data.get("variant_answer", ""),
                     "transform_type": wa.variant_data.get("transform_type", ""),
                     "core_knowledge": wa.variant_data.get("core_knowledge", ""),
                     "cached": True,
@@ -1084,6 +1115,7 @@ async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)
         return {
             "variant_question": variant["variant_question"],
             "variant_options": variant["variant_options"],
+            "variant_answer": variant.get("variant_answer", ""),
             "transform_type": variant.get("transform_type", ""),
             "core_knowledge": variant.get("core_knowledge", ""),
             "cached": False,
@@ -1096,23 +1128,18 @@ async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)
 async def judge_variant_answer(
     wrong_id: int, body: VariantJudgeRequest, db: Session = Depends(get_db)
 ):
-    """提交变式题答案 + 推理文本，获取AI判决"""
+    """提交变式题答案 + 推理文本，获取AI判决 + SM-2更新"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
     if not wa:
         raise HTTPException(status_code=404, detail="错题不存在")
     if not wa.variant_data:
         raise HTTPException(status_code=400, detail="尚未生成变式题")
 
-    variant_answer = (wa.variant_data.get("variant_answer") or "").strip().upper()
-    user_answer = (body.user_answer or "").strip().upper()
-    if wa.question_type == "X":
-        is_correct = sorted(user_answer) == sorted(variant_answer)
-    else:
-        is_correct = user_answer == variant_answer
+    is_correct = _answers_match(body.user_answer, wa.variant_data.get("variant_answer") or "")
 
     # AI评估推理
     from services.variant_surgery_service import evaluate_rationale
-    ai_eval = await evaluate_rationale(wa, user_answer, body.rationale_text, is_correct)
+    ai_eval = await evaluate_rationale(wa, body.user_answer, body.rationale_text, is_correct)
 
     # 创建重做记录
     retry = WrongAnswerRetry(
@@ -1135,17 +1162,26 @@ async def judge_variant_answer(
     wa.last_retried_at = datetime.now()
     wa.updated_at = datetime.now()
 
-    verdict = ai_eval.get("verdict", "failed")
-    can_archive = False
-
-    if verdict == "logic_closed":
-        can_archive = True
-    elif verdict == "lucky_guess":
-        wa.severity_tag = "landmine"
-    elif verdict == "failed":
+    # 答错时增加 error_count
+    if not is_correct:
         wa.error_count += 1
-        if body.confidence == "sure" and wa.severity_tag != "critical":
-            wa.severity_tag = "critical"
+
+    verdict = ai_eval.get("verdict", "failed")
+
+    if verdict == "lucky_guess":
+        wa.severity_tag = "landmine"
+    elif not is_correct and body.confidence == "sure" and wa.severity_tag != "critical":
+        # 答错且自信 → critical
+        wa.severity_tag = "critical"
+    # 注意：不再根据 verdict 增加 error_count
+    # error_count 应该只在答错时增加，而 verdict 是推理评估
+
+    # SM-2 更新
+    quality = quality_from_result(is_correct, body.confidence)
+    sm2_update(wa, quality)
+    auto_archived = wa.mastery_status == "archived"
+
+    can_archive = (verdict == "logic_closed") and not auto_archived
 
     db.commit()
 
@@ -1158,9 +1194,15 @@ async def judge_variant_answer(
         "diagnosis": ai_eval.get("diagnosis", ""),
         "weak_links": ai_eval.get("weak_links", []),
         "can_archive": can_archive,
+        "auto_archived": auto_archived,
         "severity_tag": wa.severity_tag,
         "error_count": wa.error_count,
         "retry_count": wa.retry_count,
+        # SM-2 状态
+        "sm2_ef": wa.sm2_ef,
+        "sm2_interval": wa.sm2_interval,
+        "sm2_repetitions": wa.sm2_repetitions,
+        "next_review_date": wa.next_review_date.isoformat() if wa.next_review_date else None,
     }
 
 
@@ -1184,3 +1226,187 @@ async def get_rescue_report(wrong_id: int, db: Session = Depends(get_db)):
     content = build_rescue_report(wa, retry)
 
     return {"content": content, "format": "markdown"}
+
+
+@router.post("/recognize-chapters")
+async def recognize_chapters_for_wrong_answers(
+    batch_size: int = Query(default=20, ge=1, le=100),
+    process_all: bool = Query(default=False),
+    db: Session = Depends(get_db)
+):
+    """
+    批量为未分类/未关联错题识别章节
+
+    Args:
+        batch_size: 每批处理的数量（1-100）
+        process_all: 是否循环处理直到没有可修复记录
+    """
+    def get_chapter(chapter_id: Optional[str]) -> Optional[Chapter]:
+        cid = (chapter_id or "").strip()
+        if not cid:
+            return None
+        return db.query(Chapter).filter(Chapter.id == cid).first()
+
+    def is_placeholder_chapter(chapter: Optional[Chapter]) -> bool:
+        if not chapter:
+            return True
+        title = str(chapter.chapter_title or "")
+        return "自动补齐" in title or chapter.id == "0"
+
+    def normalize_existing_chapter_id(chapter_id: Optional[str]) -> Optional[str]:
+        cid = (chapter_id or "").strip()
+        if not cid or cid in INVALID_CHAPTER_IDS:
+            return None
+
+        exact = get_chapter(cid)
+        if exact and not is_placeholder_chapter(exact):
+            return exact.id
+
+        match = re.match(r"^(.+_ch)([0-9]+)$", cid)
+        if not match:
+            return None
+
+        prefix, number = match.groups()
+        number_int = int(number)
+        for candidate in (
+            f"{prefix}{number_int}",
+            f"{prefix}{number_int:02d}",
+            f"{prefix}{number}",
+        ):
+            chapter = get_chapter(candidate)
+            if chapter and not is_placeholder_chapter(chapter):
+                return chapter.id
+
+        return None
+
+    def build_candidate_query():
+        return (
+            db.query(WrongAnswerV2)
+            .outerjoin(Chapter, WrongAnswerV2.chapter_id == Chapter.id)
+            .filter(
+                or_(
+                    WrongAnswerV2.chapter_id.is_(None),
+                    WrongAnswerV2.chapter_id == "",
+                    WrongAnswerV2.chapter_id == "0",
+                    WrongAnswerV2.chapter_id.like('%未分类%'),
+                    WrongAnswerV2.chapter_id.in_(["unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0"]),
+                    Chapter.id.is_(None),
+                )
+            )
+        )
+
+    from services.ai_client import get_ai_client
+
+    real_chapters = db.query(Chapter).filter(
+        ~Chapter.chapter_title.like('%自动补齐%'),
+        Chapter.id != '0',
+        ~Chapter.id.like('%未分类%')
+    ).all()
+    valid_ids = {ch.id for ch in real_chapters}
+
+    chapter_text_parts = []
+    current_book = ""
+    for chapter in sorted(real_chapters, key=lambda ch: (ch.book, ch.chapter_number)):
+        if chapter.book != current_book:
+            current_book = chapter.book
+            chapter_text_parts.append(f"\n【{current_book}】")
+        chapter_text_parts.append(f"  {chapter.id} → {chapter.chapter_title}")
+    chapter_list_text = "\n".join(chapter_text_parts)
+
+    ai = get_ai_client()
+    total_processed = 0
+    recognized_count = 0
+    failed_count = 0
+    normalized_count = 0
+    loop_count = 0
+    max_loops = 50 if process_all else 1
+
+    while loop_count < max_loops:
+        candidates = (
+            build_candidate_query()
+            .order_by(WrongAnswerV2.id.asc())
+            .limit(batch_size)
+            .all()
+        )
+
+        if not candidates:
+            break
+
+        loop_count += 1
+        batch_updated = 0
+
+        for wrong in candidates:
+            total_processed += 1
+
+            normalized_current = normalize_existing_chapter_id(wrong.chapter_id)
+            if normalized_current and normalized_current != wrong.chapter_id:
+                wrong.chapter_id = normalized_current
+                recognized_count += 1
+                normalized_count += 1
+                batch_updated += 1
+                continue
+
+            content = f"{wrong.key_point or ''}\n\n{wrong.question_text[:500]}"
+
+            try:
+                result = await ai.generate_json(
+                    f"""从以下章节列表中，选择与题目最匹配的一个章节ID。
+
+考点：{wrong.key_point or '(无)'}
+题目：{(wrong.question_text or '')[:300]}
+
+章节列表：
+{chapter_list_text}
+
+只返回JSON：{{"chapter_id": "xxx"}}
+chapter_id必须是列表中的值。""",
+                    {"chapter_id": "string"},
+                    max_tokens=100,
+                    temperature=0.1,
+                    use_heavy=False,
+                    timeout=30,
+                )
+                target_chapter_id = str(result.get("chapter_id") or "").strip()
+
+                if target_chapter_id in valid_ids and target_chapter_id != wrong.chapter_id:
+                    wrong.chapter_id = target_chapter_id
+                    recognized_count += 1
+                    batch_updated += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[RecognizeChapters] 错题ID {wrong.id} 识别失败: {e}")
+                failed_count += 1
+
+        db.commit()
+
+        if not process_all or batch_updated == 0:
+            break
+
+    remaining = build_candidate_query().count()
+
+    if total_processed == 0:
+        message = "没有需要识别的错题"
+    elif remaining == 0:
+        message = f"识别完成：成功 {recognized_count} 题，失败 {failed_count} 题"
+    elif process_all:
+        message = (
+            f"本轮处理完成：成功 {recognized_count} 题，失败 {failed_count} 题，"
+            f"仍剩余 {remaining} 题待处理"
+        )
+    else:
+        message = (
+            f"本批处理完成：成功 {recognized_count} 题，失败 {failed_count} 题，"
+            f"仍剩余 {remaining} 题待处理"
+        )
+
+    return {
+        "success": True,
+        "message": message,
+        "total": total_processed,
+        "recognized": recognized_count,
+        "failed": failed_count,
+        "normalized": normalized_count,
+        "remaining": remaining,
+        "process_all": process_all,
+    }

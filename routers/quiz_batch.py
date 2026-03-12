@@ -24,6 +24,13 @@ _exam_cache = {}
 # 单独存储用于细节练习的数据（不删除）
 _detail_cache = {}
 
+INVALID_CHAPTER_IDS = {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0", "uncategorized_ch0"}
+
+
+def _normalize_confirmed_chapter_id(chapter_id: str) -> str:
+    normalized = str(chapter_id or "").strip()
+    return normalized if normalized and normalized not in INVALID_CHAPTER_IDS else ""
+
 class GenerateRequest(BaseModel):
     uploaded_content: str
     num_questions: int = 10
@@ -48,9 +55,10 @@ async def confirm_chapter(exam_id: str, request: ConfirmChapterRequest):
     exam = _exam_cache.get(exam_id)
     if not exam:
         raise HTTPException(status_code=404, detail="试卷不存在或已过期")
-    exam["chapter_id"] = request.chapter_id
-    print(f"[Exam] 章节确认: exam={exam_id}, chapter={request.chapter_id}")
-    return {"success": True, "chapter_id": request.chapter_id}
+    confirmed_chapter_id = _normalize_confirmed_chapter_id(request.chapter_id)
+    exam["chapter_id"] = confirmed_chapter_id
+    print(f"[Exam] 章节确认: exam={exam_id}, chapter={confirmed_chapter_id or '未确认'}")
+    return {"success": True, "chapter_id": confirmed_chapter_id}
 
 @router.post("/generate/{chapter_id}")
 async def generate_exam(
@@ -80,7 +88,7 @@ async def generate_exam(
 
         exam_id = str(uuid.uuid4())
         _exam_cache[exam_id] = {
-            "chapter_id": chapter_id,
+            "chapter_id": _normalize_confirmed_chapter_id(chapter_id),
             "chapter_prediction": result.get("chapter_prediction"),
             "questions": result["questions"],
             "created_at": datetime.now(),
@@ -162,14 +170,53 @@ async def submit_exam(
 
     # Resolve a valid chapter id for QuizSession foreign key.
     session_chapter_id = None
-    if chapter_id and chapter_id != "0":
+    # 方式1: 直接使用 chapter_id（来自前端确认）
+    if chapter_id and chapter_id not in INVALID_CHAPTER_IDS:
         if db.query(Chapter).filter(Chapter.id == chapter_id).first():
             session_chapter_id = chapter_id
 
+    # 方式2: 使用 AI 的 chapter_prediction
     if not session_chapter_id and isinstance(chapter_prediction, dict):
         predicted_id = str(chapter_prediction.get("chapter_id") or "").strip()
-        if predicted_id and db.query(Chapter).filter(Chapter.id == predicted_id).first():
-            session_chapter_id = predicted_id
+        if predicted_id and predicted_id not in INVALID_CHAPTER_IDS:
+            if db.query(Chapter).filter(Chapter.id == predicted_id).first():
+                session_chapter_id = predicted_id
+
+    # 方式3: 从题目内容推断章节（最后的安全网）
+    if not session_chapter_id and questions:
+        try:
+            # 收集题目的考点信息用于匹配
+            key_points = [q.get("key_point", "") for q in questions[:5] if q.get("key_point")]
+            content_hint = " ".join(key_points[:3])
+            if content_hint:
+                quiz_service_for_chapter = get_quiz_service()
+                inferred = quiz_service_for_chapter._infer_chapter_prediction(content_hint)
+                if inferred and inferred.get("chapter_id"):
+                    inferred_id = inferred["chapter_id"]
+                    if inferred_id not in INVALID_CHAPTER_IDS:
+                        if db.query(Chapter).filter(Chapter.id == inferred_id).first():
+                            session_chapter_id = inferred_id
+                            print(f"[Exam] 从题目考点推断章节: {inferred_id}")
+        except Exception as e:
+            print(f"[Exam] 章节推断失败: {e}")
+
+    # 方式4: 从原始讲课内容推断章节（题目考点失效时的最终兜底）
+    if not session_chapter_id:
+        uploaded_content = (exam.get("uploaded_content") or "").strip()
+        if uploaded_content:
+            try:
+                quiz_service_for_chapter = get_quiz_service()
+                inferred = quiz_service_for_chapter._infer_chapter_prediction(uploaded_content[:8000])
+                if inferred and inferred.get("chapter_id"):
+                    inferred_id = inferred["chapter_id"]
+                    if inferred_id not in INVALID_CHAPTER_IDS:
+                        if db.query(Chapter).filter(Chapter.id == inferred_id).first():
+                            session_chapter_id = inferred_id
+                            print(f"[Exam] 从原始内容推断章节: {inferred_id}")
+            except Exception as e:
+                print(f"[Exam] 原始内容章节推断失败: {e}")
+
+    print(f"[Exam] 最终章节ID: {session_chapter_id} (原始: {chapter_id})")
 
     quiz_session = QuizSession(
         session_type=f"exam_{num_questions}",
@@ -252,6 +299,7 @@ async def submit_exam(
             else:
                 # 不存在：创建新错题
                 concept_id = ensure_concept_for_wrong(question, i)
+                wrong_chapter_id = session_chapter_id or "uncategorized_ch0"
 
                 # 判断初始严重度
                 if detail.get("confidence") == "sure":
@@ -270,7 +318,7 @@ async def submit_exam(
                     key_point=question.get("key_point", ""),
                     question_type=question.get("type", "A1"),
                     difficulty=question.get("difficulty", "基础"),
-                    chapter_id=session_chapter_id,
+                    chapter_id=wrong_chapter_id,
                     error_count=1,
                     encounter_count=1,
                     severity_tag=severity,

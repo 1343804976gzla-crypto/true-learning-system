@@ -49,7 +49,111 @@
         </div>
     </div>
     
-    <!-- 识别结果展示区域 -->
+    <!-- 章节识别结果弹窗 -->
+    <div id="recognitionModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="px-6 py-4 border-b bg-gradient-to-r from-green-50 to-blue-50 flex justify-between items-center">
+                <h2 class="text-xl font-semibold text-green-800">✅ AI章节识别完成</h2>
+                <button onclick="closeRecognitionModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+
+            <div class="p-6">
+                <!-- 识别结果 -->
+                <div class="mb-6 bg-blue-50 p-4 rounded-lg">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <span class="text-gray-600 text-sm">📚 教材：</span>
+                            <span id="modalResultBook" class="font-semibold text-lg"></span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600 text-sm">📖 版本：</span>
+                            <span id="modalResultEdition" class="font-medium"></span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600 text-sm">📑 章节号：</span>
+                            <span id="modalResultChapter" class="font-semibold text-lg text-blue-600"></span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600 text-sm">📝 标题：</span>
+                            <span id="modalResultTitle" class="font-semibold text-lg"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 知识点列表 - 按重要性分组 -->
+                <div class="mb-6">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="font-semibold text-lg">🎯 识别到的知识点</h3>
+                        <span class="text-xs text-gray-500">AI已自动分级</span>
+                    </div>
+
+                    <!-- 主体内容 -->
+                    <div id="modalMainConcepts" class="mb-4">
+                        <div class="flex items-center text-red-700 font-medium mb-2">
+                            <span class="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
+                            <span>🔴 主体内容（重点掌握）</span>
+                            <span id="modalMainCount" class="ml-2 text-xs bg-red-100 px-2 py-0.5 rounded"></span>
+                        </div>
+                        <div id="modalMainList" class="space-y-2 pl-4 border-l-2 border-red-200"></div>
+                    </div>
+
+                    <!-- 次要内容 -->
+                    <div id="modalSecondaryConcepts" class="mb-4">
+                        <div class="flex items-center text-yellow-700 font-medium mb-2">
+                            <span class="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
+                            <span>🟡 次要内容（需要了解）</span>
+                            <span id="modalSecondaryCount" class="ml-2 text-xs bg-yellow-100 px-2 py-0.5 rounded"></span>
+                        </div>
+                        <div id="modalSecondaryList" class="space-y-2 pl-4 border-l-2 border-yellow-200"></div>
+                    </div>
+
+                    <!-- 提及内容 -->
+                    <div id="modalMentionConcepts" class="mb-4">
+                        <div class="flex items-center text-green-700 font-medium mb-2 cursor-pointer" onclick="toggleModalMention()">
+                            <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                            <span>🟢 提及内容（简单了解）</span>
+                            <span id="modalMentionCount" class="ml-2 text-xs bg-green-100 px-2 py-0.5 rounded"></span>
+                            <span id="modalMentionToggle" class="ml-auto text-xs">▼</span>
+                        </div>
+                        <div id="modalMentionList" class="space-y-2 pl-4 border-l-2 border-green-200"></div>
+                    </div>
+                </div>
+
+                <!-- 主体内容概括 -->
+                <div id="modalMainTopicSection" class="mb-6 bg-blue-50 p-4 rounded hidden">
+                    <h3 class="font-medium mb-2 text-blue-800">📌 本节课主体</h3>
+                    <p id="modalMainTopic" class="text-blue-700 text-sm"></p>
+                </div>
+
+                <!-- 摘要 -->
+                <div class="mb-6 bg-gray-50 p-4 rounded">
+                    <h3 class="font-medium mb-2">📋 章节摘要：</h3>
+                    <p id="modalResultSummary" class="text-gray-600 text-sm leading-relaxed"></p>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="flex justify-between items-center pt-4 border-t">
+                    <button onclick="reRecognize()" class="text-gray-500 hover:text-gray-700 flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        重新识别
+                    </button>
+                    <div class="space-x-3">
+                        <button onclick="closeRecognitionModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">
+                            稍后处理
+                        </button>
+                        <a id="modalStartLearningBtn" href="#"
+                           class="inline-block bg-gradient-to-r from-green-500 to-blue-500 text-white px-6 py-2 rounded-lg hover:from-green-600 hover:to-blue-600 transition shadow-lg">
+                            开始学习 →
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 识别结果展示区域（保留原有的，用于向下兼容） -->
     <div id="resultArea" class="mt-6 hidden">
         <div class="bg-white rounded-lg shadow">
             <div class="px-6 py-4 border-b bg-green-50">
@@ -191,8 +295,8 @@
             const result = await response.json();
             
             if (response.ok) {
-                // 显示识别结果
-                displayResult(result);
+                // 显示识别结果弹窗
+                displayResultModal(result);
             } else {
                 alert('识别失败：' + result.detail);
             }
@@ -328,6 +432,125 @@
     document.getElementById('re识别Btn').addEventListener('click', () => {
         document.getElementById('resultArea').classList.add('hidden');
         document.getElementById('content').focus();
+    });
+
+    // ========== 弹窗相关函数 ==========
+
+    // 显示识别结果弹窗
+    function displayResultModal(data) {
+        const extracted = data.extracted;
+
+        // 填充弹窗内容
+        document.getElementById('modalResultBook').textContent = extracted.book;
+        document.getElementById('modalResultEdition').textContent = extracted.edition || '-';
+        document.getElementById('modalResultChapter').textContent = extracted.chapter_number;
+        document.getElementById('modalResultTitle').textContent = extracted.chapter_title;
+        document.getElementById('modalResultSummary').textContent = extracted.summary || extracted.main_topic || '暂无摘要';
+
+        // 主体内容概括
+        if (extracted.main_topic) {
+            document.getElementById('modalMainTopicSection').classList.remove('hidden');
+            document.getElementById('modalMainTopic').textContent = extracted.main_topic;
+        } else {
+            document.getElementById('modalMainTopicSection').classList.add('hidden');
+        }
+
+        // 按重要性分组显示知识点
+        const concepts = extracted.concepts || [];
+        const mainConcepts = concepts.filter(c => c.importance === 'main' || !c.importance);
+        const secondaryConcepts = concepts.filter(c => c.importance === 'secondary');
+        const mentionConcepts = concepts.filter(c => c.importance === 'mention');
+
+        // 主体内容
+        const modalMainList = document.getElementById('modalMainList');
+        const modalMainSection = document.getElementById('modalMainConcepts');
+        modalMainList.innerHTML = '';
+
+        if (mainConcepts.length > 0) {
+            modalMainSection.classList.remove('hidden');
+            document.getElementById('modalMainCount').textContent = mainConcepts.length + '个';
+            mainConcepts.forEach(concept => {
+                modalMainList.appendChild(createConceptCard(concept, 'red'));
+            });
+        } else {
+            modalMainSection.classList.add('hidden');
+        }
+
+        // 次要内容
+        const modalSecondaryList = document.getElementById('modalSecondaryList');
+        const modalSecondarySection = document.getElementById('modalSecondaryConcepts');
+        modalSecondaryList.innerHTML = '';
+
+        if (secondaryConcepts.length > 0) {
+            modalSecondarySection.classList.remove('hidden');
+            document.getElementById('modalSecondaryCount').textContent = secondaryConcepts.length + '个';
+            secondaryConcepts.forEach(concept => {
+                modalSecondaryList.appendChild(createConceptCard(concept, 'yellow'));
+            });
+        } else {
+            modalSecondarySection.classList.add('hidden');
+        }
+
+        // 提及内容
+        const modalMentionList = document.getElementById('modalMentionList');
+        const modalMentionSection = document.getElementById('modalMentionConcepts');
+        modalMentionList.innerHTML = '';
+
+        if (mentionConcepts.length > 0) {
+            modalMentionSection.classList.remove('hidden');
+            document.getElementById('modalMentionCount').textContent = mentionConcepts.length + '个';
+            mentionConcepts.forEach(concept => {
+                modalMentionList.appendChild(createConceptCard(concept, 'green'));
+            });
+        } else {
+            modalMentionSection.classList.add('hidden');
+        }
+
+        // 设置学习链接
+        const chapterId = extracted.chapter_id;
+        document.getElementById('modalStartLearningBtn').href = `/chapter/${chapterId}`;
+
+        // 显示弹窗
+        document.getElementById('recognitionModal').classList.remove('hidden');
+    }
+
+    // 关闭识别结果弹窗
+    function closeRecognitionModal() {
+        document.getElementById('recognitionModal').classList.add('hidden');
+    }
+
+    // 切换弹窗中的提及内容显示/隐藏
+    function toggleModalMention() {
+        const list = document.getElementById('modalMentionList');
+        const toggle = document.getElementById('modalMentionToggle');
+
+        if (list.classList.contains('hidden')) {
+            list.classList.remove('hidden');
+            toggle.textContent = '▼';
+        } else {
+            list.classList.add('hidden');
+            toggle.textContent = '▶';
+        }
+    }
+
+    // 重新识别
+    function reRecognize() {
+        closeRecognitionModal();
+        document.getElementById('content').focus();
+    }
+
+    // 点击弹窗外部关闭
+    document.getElementById('recognitionModal').addEventListener('click', (e) => {
+        if (e.target.id === 'recognitionModal') {
+            closeRecognitionModal();
+        }
+    });
+
+    // ESC键关闭弹窗
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeRecognitionModal();
+        }
     });
 </script>
 {% endblock %}

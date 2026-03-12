@@ -492,11 +492,17 @@ async def start_learning_session(
         else:
             title = f"{now} 细节练习"
     
+    # 验证 chapter_id：无效值存为 None，避免污染后续数据
+    INVALID_CHAPTER_IDS = {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0", "uncategorized_ch0"}
+    valid_chapter_id = body.chapter_id
+    if valid_chapter_id in INVALID_CHAPTER_IDS:
+        valid_chapter_id = None
+
     # 创建会话记录
     learning_session = LearningSession(
         id=session_id,
         session_type=body.session_type,
-        chapter_id=body.chapter_id,
+        chapter_id=valid_chapter_id,
         title=title,
         description=title,
         uploaded_content=body.uploaded_content[:10000] if body.uploaded_content else None,
