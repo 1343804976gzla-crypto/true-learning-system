@@ -15,9 +15,6 @@
             <p class="text-gray-500">按痛点驱动的强制重做系统</p>
         </div>
         <div class="flex space-x-2 items-center">
-            <a href="/dashboard/stats" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 text-sm inline-flex items-center gap-1">
-                📊 数据看板
-            </a>
             <button onclick="recognizeChapters(this)" class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 text-sm">🔍 识别章节</button>
             <button onclick="openImportModal()" class="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600 text-sm">导入外部错题</button>
 
@@ -37,23 +34,132 @@
     </div>
 </div>
 
-<!-- 统计卡片 -->
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-red-500">
-        <div class="text-sm text-gray-500">活跃错题</div>
-        <div id="statActive" class="text-3xl font-bold text-red-600">0</div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-orange-500">
-        <div class="text-sm text-gray-500">特级重灾区</div>
-        <div id="statCritical" class="text-3xl font-bold text-orange-600">0</div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
-        <div class="text-sm text-gray-500">已归档</div>
-        <div id="statArchived" class="text-3xl font-bold text-green-600">0</div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
-        <div class="text-sm text-gray-500">重做正确率</div>
-        <div id="statRetryRate" class="text-3xl font-bold text-purple-600">0%</div>
+<!-- 错题本数据看板 -->
+<div class="space-y-6 mb-6">
+    <div class="bg-white rounded-2xl shadow border border-slate-200 overflow-hidden">
+        <div class="px-6 py-5 border-b bg-gradient-to-r from-slate-900 via-slate-800 to-slate-700 text-white">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div>
+                    <div class="text-xs uppercase tracking-[0.24em] text-slate-300 mb-1">Wrong Answer Dashboard</div>
+                    <h2 class="text-2xl font-bold">错题本数据看板</h2>
+                    <p class="text-sm text-slate-300 mt-1">把错题积压、复习压力和清零趋势一次看清。</p>
+                </div>
+                <div id="dashboardUpdatedAt" class="text-xs text-slate-300">等待同步...</div>
+            </div>
+        </div>
+
+        <div class="p-6 space-y-6">
+            <div class="grid grid-cols-2 xl:grid-cols-6 gap-4">
+                <div class="rounded-2xl border border-red-200 bg-red-50 p-4">
+                    <div class="text-xs font-semibold tracking-wide text-red-500 uppercase">活跃错题</div>
+                    <div id="dashboardActiveCount" class="mt-2 text-3xl font-bold text-red-600">-</div>
+                    <div id="dashboardActiveDelta" class="mt-2 text-sm text-red-500">较昨日 -</div>
+                </div>
+                <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                    <div class="text-xs font-semibold tracking-wide text-emerald-500 uppercase">今日消灭</div>
+                    <div id="dashboardTodayArchived" class="mt-2 text-3xl font-bold text-emerald-600">-</div>
+                    <div id="dashboardWeekArchived" class="mt-2 text-sm text-emerald-500">本周累计 -</div>
+                </div>
+                <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <div class="text-xs font-semibold tracking-wide text-amber-500 uppercase">今日新增</div>
+                    <div id="dashboardTodayNew" class="mt-2 text-3xl font-bold text-amber-600">-</div>
+                    <div id="dashboardWeekNew" class="mt-2 text-sm text-amber-500">本周累计 -</div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">净变化</div>
+                    <div id="dashboardNetChange" class="mt-2 text-3xl font-bold text-slate-700">-</div>
+                    <div id="dashboardNetHint" class="mt-2 text-sm text-slate-500">↑ 好转 / ↓ 恶化</div>
+                </div>
+                <div class="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                    <div class="text-xs font-semibold tracking-wide text-violet-500 uppercase">重做正确率</div>
+                    <div id="dashboardRetryRate" class="mt-2 text-3xl font-bold text-violet-600">-%</div>
+                    <div id="dashboardRetryDelta" class="mt-2 text-sm text-violet-500">较上周 -</div>
+                </div>
+                <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                    <div class="text-xs font-semibold tracking-wide text-blue-500 uppercase">连续学习</div>
+                    <div id="dashboardStreakDays" class="mt-2 text-3xl font-bold text-blue-600">-</div>
+                    <div id="dashboardMaxStreak" class="mt-2 text-sm text-blue-500">最长记录 -</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                <div class="xl:col-span-3 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-semibold text-slate-800">总体掌握进度</h3>
+                        <span id="dashboardMasteryPercent" class="text-sm font-semibold text-slate-600">-</span>
+                    </div>
+                    <div id="dashboardMasteryMeta" class="text-sm text-slate-500 mb-3">已归档 - / 总计 -</div>
+                    <div class="h-4 rounded-full bg-slate-200 overflow-hidden">
+                        <div id="dashboardMasteryBar" class="h-4 rounded-full bg-slate-400 transition-all duration-500" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-5">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-semibold text-slate-800">严重度分布</h3>
+                        <span id="dashboardSeveritySummary" class="text-xs text-slate-400">活跃题目</span>
+                    </div>
+                    <div id="dashboardSeverityList" class="space-y-3">
+                        <div class="text-sm text-slate-400">等待数据...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                <div class="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-5">
+                    <h3 class="font-semibold text-slate-800 mb-3">复习压力</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-1 gap-3">
+                        <div id="dashboardPressureToday" class="rounded-xl border p-4 bg-slate-50 border-slate-200">
+                            <div class="text-xs text-slate-500 uppercase tracking-wide">今日待复习</div>
+                            <div id="dashboardDueToday" class="mt-2 text-2xl font-bold text-slate-700">-</div>
+                        </div>
+                        <div id="dashboardPressureTomorrow" class="rounded-xl border p-4 bg-slate-50 border-slate-200">
+                            <div class="text-xs text-slate-500 uppercase tracking-wide">明日待复习</div>
+                            <div id="dashboardDueTomorrow" class="mt-2 text-2xl font-bold text-slate-700">-</div>
+                        </div>
+                        <div id="dashboardPressureWeek" class="rounded-xl border p-4 bg-slate-50 border-slate-200">
+                            <div class="text-xs text-slate-500 uppercase tracking-wide">本周待复习</div>
+                            <div id="dashboardDueWeek" class="mt-2 text-2xl font-bold text-slate-700">-</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="xl:col-span-3 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <h3 class="font-semibold text-slate-800 mb-3">未来预测</h3>
+                    <div id="dashboardProjectionBody" class="space-y-2 text-sm text-slate-600">
+                        <div>等待数据...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                <button type="button" onclick="toggleDashboardSection('trend')" class="w-full px-5 py-4 flex items-center justify-between hover:bg-slate-50 transition">
+                    <div>
+                        <div class="font-semibold text-slate-800 text-left">7 日趋势图</div>
+                        <div class="text-sm text-slate-500 text-left">每日新增 / 消灭 / 净变化</div>
+                    </div>
+                    <span id="dashboardTrendToggle" class="text-slate-400">▼</span>
+                </button>
+                <div id="dashboardTrendSection" class="hidden px-5 pb-5">
+                    <div id="dashboardTrendBody" class="space-y-3">
+                        <div class="text-sm text-slate-400">等待数据...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                <button type="button" onclick="toggleDashboardSection('chapters')" class="w-full px-5 py-4 flex items-center justify-between hover:bg-slate-50 transition">
+                    <div>
+                        <div class="font-semibold text-slate-800 text-left">薄弱章节 TOP5</div>
+                        <div class="text-sm text-slate-500 text-left">活跃错题、严重度和章节掌握度</div>
+                    </div>
+                    <span id="dashboardChaptersToggle" class="text-slate-400">▼</span>
+                </button>
+                <div id="dashboardChaptersSection" class="hidden px-5 pb-5">
+                    <div id="dashboardWeakChaptersBody" class="space-y-3">
+                        <div class="text-sm text-slate-400">等待数据...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -475,6 +581,8 @@ var currentIsVariant = false;    // 当前是否使用变式题
 var batchVariantCache = {};      // 批量模式变式预加载缓存
 var importPreviewItems = [];     // 外部导入解析预览
 var importMeta = null;           // 外部导入解析元数据
+var dashboardData = null;        // 错题本看板数据
+var dashboardCollapsed = { trend: true, chapters: true };
 
 // ========== 融合升级全局状态 (Merge & Upgrade) ==========
 var currentFusionSourceId = null;    // 当前融合源题目ID
@@ -484,6 +592,279 @@ var currentFusionId = null;          // 当前融合题ID
 var fusionJudgePending = false;      // 是否有待评判的答案
 
 document.addEventListener('DOMContentLoaded', function() { syncAndReload(); });
+
+function formatSignedNumber(value) {
+    var num = Number(value || 0);
+    if (num > 0) return '+' + num;
+    return String(num);
+}
+
+function formatDeltaText(value, zeroText) {
+    var num = Number(value || 0);
+    if (num === 0) return zeroText || '无变化';
+    return formatSignedNumber(num);
+}
+
+function getMasteryBarClass(percent) {
+    if (percent >= 80) return 'bg-emerald-500';
+    if (percent >= 60) return 'bg-blue-500';
+    if (percent >= 30) return 'bg-amber-500';
+    return 'bg-red-500';
+}
+
+function getPressureTone(count) {
+    var num = Number(count || 0);
+    if (num === 0) {
+        return {
+            cardClass: 'rounded-xl border p-4 bg-emerald-50 border-emerald-200',
+            textClass: 'mt-2 text-2xl font-bold text-emerald-600'
+        };
+    }
+    if (num <= 10) {
+        return {
+            cardClass: 'rounded-xl border p-4 bg-blue-50 border-blue-200',
+            textClass: 'mt-2 text-2xl font-bold text-blue-600'
+        };
+    }
+    if (num <= 20) {
+        return {
+            cardClass: 'rounded-xl border p-4 bg-amber-50 border-amber-200',
+            textClass: 'mt-2 text-2xl font-bold text-amber-600'
+        };
+    }
+    return {
+        cardClass: 'rounded-xl border p-4 bg-red-50 border-red-200',
+        textClass: 'mt-2 text-2xl font-bold text-red-600'
+    };
+}
+
+function getTrendMeta(direction) {
+    var metaMap = {
+        accelerating: { icon: '↑', className: 'text-emerald-600', label: '加速好转中' },
+        improving: { icon: '↑', className: 'text-green-600', label: '稳步好转' },
+        stable: { icon: '→', className: 'text-slate-500', label: '基本持平' },
+        worsening: { icon: '↓', className: 'text-red-600', label: '仍在恶化' }
+    };
+    return metaMap[direction] || metaMap.stable;
+}
+
+function getTodayNetMeta(netChange) {
+    var num = Number(netChange || 0);
+    if (num > 0) {
+        return {
+            valueClass: 'mt-2 text-3xl font-bold text-emerald-600',
+            hintClass: 'mt-2 text-sm text-emerald-600',
+            hintText: '↑ 今天净减少 ' + num + ' 题'
+        };
+    }
+    if (num < 0) {
+        return {
+            valueClass: 'mt-2 text-3xl font-bold text-red-600',
+            hintClass: 'mt-2 text-sm text-red-600',
+            hintText: '↓ 今天净增加 ' + Math.abs(num) + ' 题'
+        };
+    }
+    return {
+        valueClass: 'mt-2 text-3xl font-bold text-slate-700',
+        hintClass: 'mt-2 text-sm text-slate-500',
+        hintText: '→ 今日持平'
+    };
+}
+
+function getSeverityDisplayConfig(tag) {
+    var map = {
+        critical: { label: '🚨 致命盲区', className: 'bg-red-500' },
+        stubborn: { label: '🚑 顽固病灶', className: 'bg-orange-500' },
+        landmine: { label: '⚠️ 隐形地雷', className: 'bg-yellow-500' },
+        normal: { label: '📋 普通', className: 'bg-slate-500' }
+    };
+    return map[tag] || { label: tag || '未标注', className: 'bg-slate-400' };
+}
+
+function toggleDashboardSection(sectionKey) {
+    var contentEl = document.getElementById(sectionKey === 'trend' ? 'dashboardTrendSection' : 'dashboardChaptersSection');
+    var toggleEl = document.getElementById(sectionKey === 'trend' ? 'dashboardTrendToggle' : 'dashboardChaptersToggle');
+    dashboardCollapsed[sectionKey] = !dashboardCollapsed[sectionKey];
+    if (dashboardCollapsed[sectionKey]) {
+        contentEl.classList.add('hidden');
+        toggleEl.textContent = '▼';
+    } else {
+        contentEl.classList.remove('hidden');
+        toggleEl.textContent = '▲';
+    }
+}
+
+function renderSeverityDistribution(distribution) {
+    var container = document.getElementById('dashboardSeverityList');
+    var total = 0;
+    Object.keys(distribution || {}).forEach(function(key) {
+        total += Number(distribution[key] && distribution[key].count || 0);
+    });
+    document.getElementById('dashboardSeveritySummary').textContent = '活跃题目 ' + total + ' 道';
+
+    var order = ['critical', 'stubborn', 'landmine', 'normal'];
+    container.innerHTML = order.map(function(tag) {
+        var item = distribution && distribution[tag] ? distribution[tag] : { count: 0, percent: 0 };
+        var config = getSeverityDisplayConfig(tag);
+        var width = Math.max(Number(item.percent || 0), item.count > 0 ? 6 : 0);
+        return '<div>' +
+            '<div class="flex items-center justify-between text-sm mb-1">' +
+                '<span class="text-slate-700 font-medium">' + config.label + '</span>' +
+                '<span class="text-slate-500">' + item.count + '（' + Number(item.percent || 0).toFixed(1) + '%）</span>' +
+            '</div>' +
+            '<div class="h-2 rounded-full bg-slate-100 overflow-hidden">' +
+                '<div class="h-2 rounded-full ' + config.className + '" style="width:' + width + '%"></div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function renderProjection(projection) {
+    var meta = getTrendMeta(projection && projection.trend_direction);
+    var clearText = projection && projection.estimated_days_to_clear !== null && projection.estimated_days_to_clear !== undefined
+        ? ('约 ' + projection.estimated_days_to_clear + ' 天后（' + (projection.estimated_clear_date || '-') + '）')
+        : '当前速度无法清零，需加大复习量';
+
+    document.getElementById('dashboardProjectionBody').innerHTML =
+        '<div class="flex items-center justify-between border-b border-slate-200 pb-2">' +
+            '<span>日均消灭</span><span class="font-semibold text-emerald-600">' + Number(projection.avg_daily_archived || 0).toFixed(1) + ' 题/天</span>' +
+        '</div>' +
+        '<div class="flex items-center justify-between border-b border-slate-200 pb-2">' +
+            '<span>日均新增</span><span class="font-semibold text-amber-600">' + Number(projection.avg_daily_new || 0).toFixed(1) + ' 题/天</span>' +
+        '</div>' +
+        '<div class="flex items-center justify-between border-b border-slate-200 pb-2">' +
+            '<span>净消灭速度</span><span class="font-semibold ' + (Number(projection.net_daily_rate || 0) >= 0 ? 'text-emerald-600' : 'text-red-600') + '">' + Number(projection.net_daily_rate || 0).toFixed(1) + ' 题/天</span>' +
+        '</div>' +
+        '<div class="flex items-center justify-between border-b border-slate-200 pb-2">' +
+            '<span>预计清零</span><span class="font-semibold text-slate-700">' + clearText + '</span>' +
+        '</div>' +
+        '<div class="flex items-center justify-between">' +
+            '<span>趋势</span><span class="font-semibold ' + meta.className + '">' + meta.icon + ' ' + escapeHtml(projection.trend_description || meta.label) + '</span>' +
+        '</div>';
+}
+
+function renderDailyTrendRows(rows) {
+    var container = document.getElementById('dashboardTrendBody');
+    if (!rows || rows.length === 0) {
+        container.innerHTML = '<div class="text-sm text-slate-400">暂无趋势数据</div>';
+        return;
+    }
+
+    var maxAbs = rows.reduce(function(maxValue, item) {
+        return Math.max(maxValue, Math.abs(Number(item.net || 0)));
+    }, 1);
+
+    container.innerHTML = rows.map(function(item) {
+        var net = Number(item.net || 0);
+        var directionLabel = net > 0 ? '好转' : (net < 0 ? '恶化' : '持平');
+        var barPercent = Math.max(6, Math.round(Math.abs(net) / maxAbs * 100));
+        var barClass = net > 0 ? 'bg-emerald-500' : (net < 0 ? 'bg-red-500' : 'bg-slate-300');
+
+        return '<div class="rounded-xl border border-slate-200 p-3 bg-slate-50">' +
+            '<div class="grid grid-cols-1 lg:grid-cols-[96px,auto,120px] gap-3 items-center">' +
+                '<div class="font-medium text-slate-700">' + escapeHtml((item.date || '').slice(5)) + '</div>' +
+                '<div>' +
+                    '<div class="flex items-center justify-between text-sm text-slate-500 mb-1">' +
+                        '<span>新增 ' + item.new + '</span>' +
+                        '<span>消灭 ' + item.archived + '</span>' +
+                        '<span class="' + (net > 0 ? 'text-emerald-600' : (net < 0 ? 'text-red-600' : 'text-slate-500')) + '">净变化 ' + formatSignedNumber(net) + '</span>' +
+                    '</div>' +
+                    '<div class="h-2 rounded-full bg-slate-200 overflow-hidden">' +
+                        '<div class="h-2 rounded-full ' + barClass + '" style="width:' + barPercent + '%"></div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="text-sm font-medium ' + (net > 0 ? 'text-emerald-600' : (net < 0 ? 'text-red-600' : 'text-slate-500')) + '">' + directionLabel + '</div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function renderWeakChapters(chapters) {
+    var container = document.getElementById('dashboardWeakChaptersBody');
+    if (!chapters || chapters.length === 0) {
+        container.innerHTML = '<div class="text-sm text-slate-400">暂无章节数据</div>';
+        return;
+    }
+
+    container.innerHTML = chapters.map(function(item, index) {
+        var mastery = Number(item.mastery_percent || 0);
+        var barClass = getMasteryBarClass(mastery);
+        return '<div class="rounded-xl border border-slate-200 p-4 bg-slate-50">' +
+            '<div class="grid grid-cols-1 lg:grid-cols-[40px,minmax(0,1fr),110px,110px,140px] gap-3 items-center">' +
+                '<div class="text-lg font-bold text-slate-400">' + (index + 1) + '</div>' +
+                '<div>' +
+                    '<div class="font-semibold text-slate-800">' + escapeHtml(item.chapter_name || '未分类') + '</div>' +
+                    '<div class="text-xs text-slate-500 mt-1">章节ID：' + escapeHtml(item.chapter_id || '未分类') + '</div>' +
+                '</div>' +
+                '<div class="text-sm text-slate-600">活跃错题 <span class="font-bold text-red-600">' + item.active_count + '</span></div>' +
+                '<div class="text-sm text-slate-600">致命 ' + item.critical_count + ' · 顽固 ' + item.stubborn_count + '</div>' +
+                '<div>' +
+                    '<div class="flex items-center justify-between text-xs text-slate-500 mb-1"><span>掌握度</span><span>' + mastery.toFixed(1) + '%</span></div>' +
+                    '<div class="h-2 rounded-full bg-slate-200 overflow-hidden"><div class="h-2 rounded-full ' + barClass + '" style="width:' + mastery + '%"></div></div>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function renderDashboard(data) {
+    dashboardData = data || {};
+    var overview = dashboardData.overview || {};
+    var today = dashboardData.today || {};
+    var thisWeek = dashboardData.this_week || {};
+    var projection = dashboardData.projection || {};
+    var reviewPressure = dashboardData.review_pressure || {};
+
+    document.getElementById('dashboardUpdatedAt').textContent = '最近同步：' + new Date().toLocaleString('zh-CN');
+
+    document.getElementById('dashboardActiveCount').textContent = overview.active_count ?? '-';
+    document.getElementById('dashboardActiveDelta').textContent = '较昨日 ' + formatDeltaText(overview.active_delta_vs_yesterday, '无变化');
+
+    document.getElementById('dashboardTodayArchived').textContent = today.archived_count ?? '-';
+    document.getElementById('dashboardWeekArchived').textContent = '本周累计 ' + (thisWeek.archived_count ?? '-');
+
+    document.getElementById('dashboardTodayNew').textContent = today.new_count ?? '-';
+    document.getElementById('dashboardWeekNew').textContent = '本周累计 ' + (thisWeek.new_count ?? '-');
+
+    var netMeta = getTodayNetMeta(today.net_change);
+    document.getElementById('dashboardNetChange').textContent = formatSignedNumber(today.net_change || 0);
+    document.getElementById('dashboardNetChange').className = netMeta.valueClass;
+    document.getElementById('dashboardNetHint').textContent = netMeta.hintText;
+    document.getElementById('dashboardNetHint').className = netMeta.hintClass;
+
+    document.getElementById('dashboardRetryRate').textContent = Number(overview.retry_correct_rate || 0).toFixed(1) + '%';
+    document.getElementById('dashboardRetryDelta').textContent = '较上周 ' + formatDeltaText(overview.retry_rate_delta_vs_last_week, '持平');
+
+    document.getElementById('dashboardStreakDays').textContent = overview.streak_days ?? '-';
+    document.getElementById('dashboardMaxStreak').textContent = '最长记录 ' + (overview.max_streak_days ?? '-') + ' 天';
+
+    var masteryPercent = Number(overview.mastery_percent || 0);
+    document.getElementById('dashboardMasteryPercent').textContent = masteryPercent.toFixed(1) + '%';
+    document.getElementById('dashboardMasteryMeta').textContent = '已归档 ' + (overview.archived_count || 0) + ' / 总计 ' + (overview.total_count || 0);
+    var masteryBar = document.getElementById('dashboardMasteryBar');
+    masteryBar.className = 'h-4 rounded-full transition-all duration-500 ' + getMasteryBarClass(masteryPercent);
+    masteryBar.style.width = masteryPercent + '%';
+
+    renderSeverityDistribution(dashboardData.severity_distribution || {});
+
+    var pressureConfigs = [
+        { key: 'today_due', cardId: 'dashboardPressureToday', valueId: 'dashboardDueToday' },
+        { key: 'tomorrow_due', cardId: 'dashboardPressureTomorrow', valueId: 'dashboardDueTomorrow' },
+        { key: 'week_due', cardId: 'dashboardPressureWeek', valueId: 'dashboardDueWeek' }
+    ];
+    pressureConfigs.forEach(function(item) {
+        var value = reviewPressure[item.key] || 0;
+        var tone = getPressureTone(value);
+        document.getElementById(item.cardId).className = tone.cardClass;
+        var valueEl = document.getElementById(item.valueId);
+        valueEl.className = tone.textClass;
+        valueEl.textContent = value;
+    });
+
+    renderProjection(projection);
+    renderDailyTrendRows(dashboardData.daily_trend || []);
+    renderWeakChapters(dashboardData.weak_chapters || []);
+}
 
 // ========== Sync ==========
 async function syncAndReload() {
@@ -546,18 +927,15 @@ async function recognizeChapters(buttonEl) {
 
 async function loadStats() {
     try {
-        const data = await safeFetch('/api/wrong-answers/stats', {}, '加载统计数据失败');
-        document.getElementById('statActive').textContent = data.total_active;
-        document.getElementById('statCritical').textContent = data.severity_counts.critical || 0;
-        document.getElementById('statArchived').textContent = data.total_archived;
-        document.getElementById('statRetryRate').textContent = data.retry_correct_rate + '%';
+        const data = await safeFetch('/api/wrong-answers/dashboard', {}, '加载数据看板失败');
+        renderDashboard(data);
     } catch(e) {
         console.error('stats error', e);
-        // 显示默认值
-        document.getElementById('statActive').textContent = '-';
-        document.getElementById('statCritical').textContent = '-';
-        document.getElementById('statArchived').textContent = '-';
-        document.getElementById('statRetryRate').textContent = '-';
+        document.getElementById('dashboardUpdatedAt').textContent = '加载失败，请稍后重试';
+        document.getElementById('dashboardSeverityList').innerHTML = '<div class="text-sm text-red-500">看板数据加载失败</div>';
+        document.getElementById('dashboardProjectionBody').innerHTML = '<div class="text-sm text-red-500">预测数据加载失败</div>';
+        document.getElementById('dashboardTrendBody').innerHTML = '<div class="text-sm text-red-500">趋势数据加载失败</div>';
+        document.getElementById('dashboardWeakChaptersBody').innerHTML = '<div class="text-sm text-red-500">章节数据加载失败</div>';
     }
 }
 

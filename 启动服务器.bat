@@ -42,7 +42,7 @@ echo ========================================
 echo.
 echo 📌 快速访问:
 echo    - 错题本: http://localhost:8000/wrong-answers
-echo    - 数据看板: http://localhost:8000/dashboard/stats
+echo    - 错题看板: http://localhost:8000/wrong-answers
 echo.
 echo 💡 提示:
 echo    - 按 Ctrl+C 停止服务器

@@ -56,12 +56,11 @@ print("✅ 启动完成！")
 print("=" * 60)
 print("\n访问地址:")
 print("  - 错题本: http://localhost:8000/wrong-answers")
-print("  - 数据看板: http://localhost:8000/dashboard/stats")
+print("  - 错题看板: http://localhost:8000/wrong-answers")
 print("\n提示: 关闭此窗口不会停止服务器")
 print("      如需停止服务器，请在任务管理器中结束 python.exe 进程")
 print("\n")
 
 # 等待用户查看信息
 time.sleep(3)
-
 

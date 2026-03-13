@@ -147,6 +147,7 @@ async def index_redirect():
 async def dashboard(request: Request, db: Session = Depends(get_db)):
     """仪表盘 - 学习总览"""
     from learning_tracking_models import LearningSession, QuestionRecord
+    from routers.learning_tracking import _load_unique_question_records, _build_record_stats
     from sqlalchemy import desc as sa_desc
 
     # 最近5次学习会话
@@ -154,18 +155,20 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         sa_desc(LearningSession.started_at)
     ).limit(5).all()
 
-    # 总体统计
+    # 总体统计 — 统一使用去重后的 QuestionRecord 作为唯一数据源
     all_sessions = db.query(LearningSession).all()
     total_sessions = len(all_sessions)
-    total_questions = sum((s.correct_count or 0) + (s.wrong_count or 0) for s in all_sessions)
-    total_correct = sum(s.correct_count or 0 for s in all_sessions)
     total_duration = sum(s.duration_seconds or 0 for s in all_sessions)
+
+    all_records = _load_unique_question_records(db)
+    record_stats = _build_record_stats(all_records)
+    total_questions = record_stats["total_questions"]
+    total_correct = record_stats["correct_count"]
     avg_accuracy = round(total_correct / total_questions * 100, 1) if total_questions > 0 else 0
 
-    # 知识点统计
-    all_qr = db.query(QuestionRecord).all()
+    # 知识点统计 — 同样基于去重后的 QuestionRecord
     kp_stats = {}
-    for qr in all_qr:
+    for qr in all_records:
         kp = qr.key_point or "未分类"
         if kp not in kp_stats:
             kp_stats[kp] = {"total": 0, "correct": 0}
@@ -514,10 +517,8 @@ async def wrong_answers_page(request: Request):
 
 @app.get("/dashboard/stats", response_class=HTMLResponse)
 async def dashboard_stats_page(request: Request):
-    """数据看板页面 - 错题消耗进度与预期清仓时间"""
-    return templates.TemplateResponse("dashboard_stats.html", {
-        "request": request
-    })
+    """兼容旧入口：统一跳转到已嵌入错题本的新数据看板。"""
+    return RedirectResponse(url="/wrong-answers", status_code=307)
 
 
 @app.get("/quiz/practice/{chapter_id}", response_class=HTMLResponse)
@@ -667,4 +668,5 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    reload_enabled = os.getenv("TLS_RELOAD", "").strip().lower() in {"1", "true", "yes", "on"}
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=reload_enabled)

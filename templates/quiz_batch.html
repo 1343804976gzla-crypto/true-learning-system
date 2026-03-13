@@ -188,7 +188,7 @@
         <div class="flex justify-between items-center mb-2">
             <div class="flex items-center space-x-4">
                 <span class="text-sm text-gray-500">答题进度</span>
-                <span class="text-xs text-gray-400">| 快捷 1-5选选项 | Q确定 W模糊 E不会 | ↑↓切换</span>
+                <span class="text-xs text-gray-400">| 1-5选答案 / W后1-5选模糊项 | Q确定 W模糊 E不会 | ↑↓切换</span>
             </div>
             <div class="flex items-center space-x-4">
                 <span id="progressDetail" class="text-sm"></span>
@@ -439,18 +439,270 @@
         return isSelectableChapterId(confirmedChapterId) ? confirmedChapterId : '';
     }
 
+    function normalizeChapterTitleForMatch(title) {
+        return (title || '')
+            .toString()
+            .trim()
+            .replace(/\s+/g, '')
+            .replace(/[()（）【】\[\]、，。；：:·\-_]/g, '')
+            .replace(/与|及/g, '和');
+    }
+
+    function getChapterTitleMatchScore(predictedTitle, actualTitle) {
+        const predicted = normalizeChapterTitleForMatch(predictedTitle);
+        const actual = normalizeChapterTitleForMatch(actualTitle);
+        if (!predicted || !actual) return 0;
+        if (predicted === actual) return 100;
+        if (actual.includes(predicted) || predicted.includes(actual)) {
+            return 70 + Math.min(predicted.length, actual.length);
+        }
+
+        let score = 0;
+        const maxWindow = Math.min(4, predicted.length);
+        for (let size = 2; size <= maxWindow; size++) {
+            for (let i = 0; i <= predicted.length - size; i++) {
+                const token = predicted.slice(i, i + size);
+                if (actual.includes(token)) {
+                    score += size;
+                }
+            }
+        }
+
+        if (predicted.slice(0, 2) && predicted.slice(0, 2) === actual.slice(0, 2)) {
+            score += 4;
+        }
+
+        return score;
+    }
+
+    function findPredictedChapterMatch(prediction) {
+        if (!prediction) return null;
+
+        const predictedId = (prediction.chapter_id || '').toString().trim();
+        if (isSelectableChapterId(predictedId)) {
+            for (const book in chaptersGrouped) {
+                const matchedById = (chaptersGrouped[book] || []).find(function(ch) {
+                    return ch.id === predictedId;
+                });
+                if (matchedById) {
+                    return { book: book, chapter: matchedById, score: 1000, matchedBy: 'id' };
+                }
+            }
+        }
+
+        const predictedTitle = prediction.chapter_title || '';
+        if (!predictedTitle) return null;
+
+        const bookEntries = (prediction.book && chaptersGrouped[prediction.book])
+            ? [[prediction.book, chaptersGrouped[prediction.book]]]
+            : Object.entries(chaptersGrouped);
+
+        const matches = [];
+        bookEntries.forEach(function(entry) {
+            const book = entry[0];
+            const chapters = entry[1] || [];
+            chapters.forEach(function(ch) {
+                const score = getChapterTitleMatchScore(predictedTitle, ch.title);
+                if (score > 0) {
+                    matches.push({ book: book, chapter: ch, score: score, matchedBy: 'title' });
+                }
+            });
+        });
+
+        matches.sort(function(a, b) { return b.score - a.score; });
+        if (matches.length === 0) return null;
+        if (matches[0].score >= 100) return matches[0];
+        if (matches[0].score >= 12 && (!matches[1] || matches[0].score >= matches[1].score + 4)) {
+            return matches[0];
+        }
+        return null;
+    }
+
     let uploadedContent = '';
     let numQuestions = 10;
     let examId = null;
     let questions = [];
     let userAnswers = {};
     let userConfidence = {};
+    let userFuzzyOptions = {};
     let timerInterval = null;
     let currentQuestion = 0;
     let trackingSessionId = null;  // 学习轨迹会话ID
     let chaptersGrouped = {};      // 章节目录缓存
     let pendingExamData = null;    // 待确认的试卷数据
     let confirmedChapterId = isSelectableChapterId(chapterId) ? chapterId : ''; // 确认后的章节ID
+
+    function normalizeOptionLetter(value) {
+        const normalized = String(value || '').trim().toUpperCase();
+        return /^[A-E]$/.test(normalized) ? normalized : '';
+    }
+
+    function getQuestionOptionLetters(question) {
+        const options = question && question.options ? Object.keys(question.options) : [];
+        const normalized = options
+            .map(function(opt) { return normalizeOptionLetter(opt); })
+            .filter(function(opt) { return !!opt; })
+            .sort();
+        return normalized.length > 0 ? normalized : ['A', 'B', 'C', 'D', 'E'];
+    }
+
+    function normalizeFuzzyOptions(options, question) {
+        const allowed = new Set(getQuestionOptionLetters(question));
+        const normalized = [];
+        (Array.isArray(options) ? options : []).forEach(function(opt) {
+            const letter = normalizeOptionLetter(opt);
+            if (letter && allowed.has(letter) && !normalized.includes(letter)) {
+                normalized.push(letter);
+            }
+        });
+        return normalized.sort();
+    }
+
+    function getQuestionFuzzyOptions(idx) {
+        return normalizeFuzzyOptions(userFuzzyOptions[idx], questions[idx]);
+    }
+
+    function setQuestionFuzzyOptions(idx, options) {
+        const normalized = normalizeFuzzyOptions(options, questions[idx]);
+        if (normalized.length > 0) {
+            userFuzzyOptions[idx] = normalized;
+        } else {
+            delete userFuzzyOptions[idx];
+        }
+    }
+
+    function clearQuestionFuzzyOptions(idx) {
+        delete userFuzzyOptions[idx];
+    }
+
+    function buildFuzzyOptionsPayload() {
+        const payload = {};
+        Object.keys(userFuzzyOptions).forEach(function(idx) {
+            if ((userConfidence[idx] || '') !== 'unsure') {
+                return;
+            }
+            const normalized = getQuestionFuzzyOptions(idx);
+            if (normalized.length > 0) {
+                payload[idx] = normalized;
+            }
+        });
+        return payload;
+    }
+
+    function getShortcutOptionByKey(key, question) {
+        if (!(key >= '1' && key <= '5')) return '';
+        const optionLetters = getQuestionOptionLetters(question);
+        return optionLetters[parseInt(key, 10) - 1] || '';
+    }
+
+    function tryToggleFuzzyOptionByShortcut(idx, key) {
+        if ((userConfidence[idx] || '') !== 'unsure') {
+            return false;
+        }
+
+        const option = getShortcutOptionByKey(key, questions[idx]);
+        if (!option) {
+            return false;
+        }
+
+        toggleFuzzyOption(idx, option);
+        return true;
+    }
+
+    function buildFuzzyOptionsPanelHtml(index) {
+        const buttons = getQuestionOptionLetters(questions[index]).map(function(opt) {
+            return '<button type="button" onclick="toggleFuzzyOption(' + index + ', \'' + opt + '\')" ' +
+                'id="fuzzy-opt-' + index + '-' + opt + '" ' +
+                'class="px-3 py-1 rounded-full text-sm border transition border-yellow-300 text-yellow-700 hover:bg-yellow-100">' +
+                opt + '</button>';
+        }).join('');
+
+        return '<div id="fuzzy-panel-' + index + '" class="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-3 hidden">' +
+            '<div class="text-xs font-medium text-yellow-700 mb-2">对哪些选项模糊？（可多选）</div>' +
+            '<div class="flex flex-wrap gap-2">' + buttons + '</div>' +
+            '<div id="fuzzy-summary-' + index + '" class="mt-2 text-xs text-yellow-700">可多选，包括你已选的答案</div>' +
+            '</div>';
+    }
+
+    function updateFuzzyOptionButtons(idx) {
+        const selected = new Set(getQuestionFuzzyOptions(idx));
+        getQuestionOptionLetters(questions[idx]).forEach(function(opt) {
+            const button = document.getElementById('fuzzy-opt-' + idx + '-' + opt);
+            if (!button) return;
+            if (selected.has(opt)) {
+                button.className = 'px-3 py-1 rounded-full text-sm border transition bg-yellow-500 border-yellow-500 text-white';
+            } else {
+                button.className = 'px-3 py-1 rounded-full text-sm border transition border-yellow-300 text-yellow-700 hover:bg-yellow-100';
+            }
+        });
+    }
+
+    function renderConfidenceState(idx) {
+        const level = userConfidence[idx] || '';
+        const fuzzyOptions = getQuestionFuzzyOptions(idx);
+        const btnSure = document.getElementById('btn-sure-' + idx);
+        const btnUnsure = document.getElementById('btn-unsure-' + idx);
+        const btnNo = document.getElementById('btn-no-' + idx);
+        const display = document.getElementById('confidence-display-' + idx);
+        const panel = document.getElementById('fuzzy-panel-' + idx);
+        const summary = document.getElementById('fuzzy-summary-' + idx);
+
+        if (btnSure) btnSure.classList.remove('bg-green-500', 'text-white');
+        if (btnUnsure) btnUnsure.classList.remove('bg-yellow-500', 'text-white');
+        if (btnNo) btnNo.classList.remove('bg-red-500', 'text-white');
+        if (panel) panel.classList.add('hidden');
+
+        if (!display) return;
+
+        if (!level) {
+            display.textContent = '';
+            display.className = 'mt-2 text-sm text-center hidden';
+            return;
+        }
+
+        if (level === 'sure') {
+            if (btnSure) btnSure.classList.add('bg-green-500', 'text-white');
+            display.textContent = '✓ 我确定这道题会做';
+            display.className = 'mt-2 text-sm text-center text-green-600 font-medium';
+        } else if (level === 'unsure') {
+            if (btnUnsure) btnUnsure.classList.add('bg-yellow-500', 'text-white');
+            display.textContent = fuzzyOptions.length > 0
+                ? '？模糊选项：' + fuzzyOptions.join('、')
+                : '？这道题有点模糊，请勾选具体选项';
+            display.className = 'mt-2 text-sm text-center text-yellow-600 font-medium';
+            if (panel) panel.classList.remove('hidden');
+            if (summary) {
+                summary.textContent = fuzzyOptions.length > 0
+                    ? '已标记：' + fuzzyOptions.join('、')
+                    : '可多选，包括你已选的答案';
+            }
+            updateFuzzyOptionButtons(idx);
+        } else if (level === 'no') {
+            if (btnNo) btnNo.classList.add('bg-red-500', 'text-white');
+            display.textContent = '✗ 这道题完全不会';
+            display.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+        }
+
+        display.classList.remove('hidden');
+    }
+
+    function buildFuzzyReportSection(questionIndex, question) {
+        if ((userConfidence[questionIndex] || '') !== 'unsure') {
+            return '';
+        }
+
+        const fuzzyOptions = getQuestionFuzzyOptions(questionIndex);
+        if (fuzzyOptions.length === 0) {
+            return '';
+        }
+
+        let report = '模糊选项：' + fuzzyOptions.join('、') + '\n';
+        fuzzyOptions.forEach(function(opt) {
+            const optionText = (question && question.options && question.options[opt]) || ('选项' + opt);
+            report += '  → ' + opt + '. ' + optionText + '\n';
+        });
+        return report;
+    }
 
     function buildMaskedExplanationHtml(explanation, isCorrect, confidence, revealId, keyPoint) {
         const text = escapeHtml(explanation) || '暂无解析';  // ✅ 转义解析文本
@@ -744,11 +996,14 @@
 
         // 数字键 1-5 选择选项
         if (key >= '1' && key <= '5') {
-            const optIndex = parseInt(key) - 1;
-            const options = ['A', 'B', 'C', 'D', 'E'];
-            const opt = options[optIndex];
+            if (tryToggleFuzzyOptionByShortcut(currentQuestion, key)) {
+                e.preventDefault();
+                return;
+            }
 
-            if (questions[currentQuestion]) {
+            const opt = getShortcutOptionByKey(key, questions[currentQuestion]);
+
+            if (questions[currentQuestion] && opt) {
                 const input = document.querySelector('input[name="q' + currentQuestion + '"][value="' + opt + '"]');
                 if (input) input.checked = true;
                 const isMultiple = questions[currentQuestion].type === 'X';
@@ -811,6 +1066,7 @@
         document.getElementById('loadingState').classList.add('hidden');
         const modal = document.getElementById('chapterConfirmModal');
         const prediction = data.chapter_prediction;
+        const matchedPrediction = findPredictedChapterMatch(prediction);
 
         // 填充科目下拉
         const bookSelect = document.getElementById('confirmBook');
@@ -823,49 +1079,82 @@
         }
 
         // 如果 AI 有预测，预选科目和章节
-            if (prediction && prediction.book) {
-                console.log('[Chapter] AI 预测科目:', prediction.book);
-                console.log('[Chapter] AI 预测章节ID:', prediction.chapter_id);
+        if (prediction && (prediction.book || prediction.chapter_title || prediction.chapter_id)) {
+            console.log('[Chapter] AI 预测科目:', prediction.book);
+            console.log('[Chapter] AI 预测章节ID:', prediction.chapter_id);
             console.log('[Chapter] AI 预测章节标题:', prediction.chapter_title);
             console.log('[Chapter] AI 置信度:', prediction.confidence);
 
-            // 检查预测的科目是否存在
-                if (chaptersGrouped[prediction.book]) {
-                    bookSelect.value = prediction.book;
-                    onBookChange(); // 触发章节列表填充
+            // 查找科目：精确匹配 → 模糊匹配（包含关系）
+            let targetBook = matchedPrediction
+                ? matchedPrediction.book
+                : (chaptersGrouped[prediction.book] ? prediction.book : '');
 
-                    // 预选章节
-                    if (isSelectableChapterId(prediction.chapter_id)) {
-                        setTimeout(function() {
-                            const chapterSelect = document.getElementById('confirmChapter');
-                            chapterSelect.value = prediction.chapter_id;
-                        console.log('[Chapter] 已预选章节:', prediction.chapter_id);
+            if (!targetBook && prediction.book) {
+                const predBook = prediction.book.replace(/\s+/g, '');
+                for (const book in chaptersGrouped) {
+                    const normBook = book.replace(/\s+/g, '');
+                    if (normBook.includes(predBook) || predBook.includes(normBook)) {
+                        targetBook = book;
+                        console.log('[Chapter] 科目模糊匹配:', prediction.book, '→', book);
+                        break;
+                    }
+                }
+            }
 
-                        // 验证是否成功选中
-                        if (chapterSelect.value === prediction.chapter_id) {
-                            console.log('[Chapter] ✅ 章节预选成功');
-                        } else {
-                            console.warn('[Chapter] ⚠️ 章节预选失败，可能章节ID不存在');
+            if (targetBook) {
+                bookSelect.value = targetBook;
+                onBookChange();
+
+                // 预选章节：精确匹配 → 降低阈值的标题匹配
+                let targetChapterId = null;
+                if (matchedPrediction && matchedPrediction.chapter && matchedPrediction.chapter.id) {
+                    targetChapterId = matchedPrediction.chapter.id;
+                } else if (prediction.chapter_title && chaptersGrouped[targetBook]) {
+                    // matchedPrediction 为空时，用更宽松的阈值在当前科目下找最佳匹配
+                    let bestScore = 0;
+                    let bestChapter = null;
+                    chaptersGrouped[targetBook].forEach(function(ch) {
+                        const score = getChapterTitleMatchScore(prediction.chapter_title, ch.title);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestChapter = ch;
                         }
-                    }, 150);  // 增加延迟到 150ms
+                    });
+                    if (bestChapter && bestScore >= 4) {
+                        targetChapterId = bestChapter.id;
+                        console.log('[Chapter] 章节宽松匹配:', prediction.chapter_title, '→', bestChapter.title, '(分数:', bestScore, ')');
+                    }
                 }
 
-                // 显示AI预测信息
-                document.getElementById('aiPredictionText').textContent =
-                    prediction.book + ' > ' + (prediction.chapter_title || '未知章节');
-                const badge = document.getElementById('aiConfidenceBadge');
-                const conf = prediction.confidence || 'medium';
-                badge.textContent = conf === 'high' ? '高置信' : (conf === 'medium' ? '中置信' : '低置信');
-                badge.className = 'ml-2 px-2 py-0.5 rounded text-xs ' +
-                    (conf === 'high' ? 'bg-green-100 text-green-700' :
-                     conf === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                     'bg-red-100 text-red-700');
-                document.getElementById('aiPredictionInfo').classList.remove('hidden');
-            } else {
+                if (targetChapterId) {
+                    setTimeout(function() {
+                        var chapterSelect = document.getElementById('confirmChapter');
+                        chapterSelect.value = targetChapterId;
+                        if (chapterSelect.value === targetChapterId) {
+                            console.log('[Chapter] ✅ 章节预选成功:', targetChapterId);
+                        } else {
+                            console.warn('[Chapter] ⚠️ 章节预选失败，ID不在下拉列表中');
+                        }
+                    }, 150);
+                }
+            } else if (prediction.book) {
                 console.warn('[Chapter] ⚠️ AI 预测的科目不存在:', prediction.book);
                 console.warn('[Chapter] 可用科目:', Object.keys(chaptersGrouped));
-                document.getElementById('aiPredictionInfo').classList.add('hidden');
             }
+
+            document.getElementById('aiPredictionText').textContent =
+                (matchedPrediction ? matchedPrediction.book : (prediction.book || '未知科目')) +
+                ' > ' +
+                (matchedPrediction ? matchedPrediction.chapter.title : (prediction.chapter_title || '未知章节'));
+            const badge = document.getElementById('aiConfidenceBadge');
+            const conf = prediction.confidence || 'medium';
+            badge.textContent = conf === 'high' ? '高置信' : (conf === 'medium' ? '中置信' : '低置信');
+            badge.className = 'ml-2 px-2 py-0.5 rounded text-xs ' +
+                (conf === 'high' ? 'bg-green-100 text-green-700' :
+                 conf === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                 'bg-red-100 text-red-700');
+            document.getElementById('aiPredictionInfo').classList.remove('hidden');
         } else {
             console.log('[Chapter] ❌ 没有 AI 预测数据或数据不完整');
             if (prediction) {
@@ -955,6 +1244,10 @@
     function displayExam(data) {
         document.getElementById('loadingState').classList.add('hidden');
         document.getElementById('examArea').classList.remove('hidden');
+        userAnswers = {};
+        userConfidence = {};
+        userFuzzyOptions = {};
+        lastExamResult = null;
         currentQuestion = 0;
 
         document.getElementById('paperTitle').textContent = data.paper_title;
@@ -1011,7 +1304,9 @@
                 '<button type="button" onclick="setConfidence(' + index + ', \'sure\')" id="btn-sure-' + index + '" class="px-3 py-1 rounded-full text-sm border-2 border-green-500 text-green-600 hover:bg-green-500 hover:text-white transition">Q 确定</button>' +
                 '<button type="button" onclick="setConfidence(' + index + ', \'unsure\')" id="btn-unsure-' + index + '" class="px-3 py-1 rounded-full text-sm border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white transition">W 模糊</button>' +
                 '<button type="button" onclick="setConfidence(' + index + ', \'no\')" id="btn-no-' + index + '" class="px-3 py-1 rounded-full text-sm border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white transition">E 不会</button>' +
-                '</div></div><div id="confidence-display-' + index + '" class="mt-2 text-sm text-center hidden"></div></div>';
+                '</div></div><div id="confidence-display-' + index + '" class="mt-2 text-sm text-center hidden"></div>' +
+                buildFuzzyOptionsPanelHtml(index) +
+                '</div>';
 
             container.appendChild(div);
         });
@@ -1019,52 +1314,41 @@
         updateProgress();
     }
 
+    function toggleFuzzyOption(idx, opt) {
+        const option = normalizeOptionLetter(opt);
+        if (!option) return;
+
+        if (userConfidence[idx] !== 'unsure') {
+            userConfidence[idx] = 'unsure';
+        }
+
+        const current = getQuestionFuzzyOptions(idx);
+        if (current.includes(option)) {
+            setQuestionFuzzyOptions(idx, current.filter(function(item) { return item !== option; }));
+        } else {
+            current.push(option);
+            setQuestionFuzzyOptions(idx, current);
+        }
+
+        renderConfidenceState(idx);
+    }
+
     function setConfidence(idx, level) {
         const currentConfidence = userConfidence[idx];
 
         // 如果已选中相同等级，则取消选择
         if (currentConfidence === level) {
-            userConfidence[idx] = '';
-
-            const btnSure = document.getElementById('btn-sure-' + idx);
-            const btnUnsure = document.getElementById('btn-unsure-' + idx);
-            const btnNo = document.getElementById('btn-no-' + idx);
-            const display = document.getElementById('confidence-display-' + idx);
-
-            btnSure.classList.remove('bg-green-500', 'text-white');
-            btnUnsure.classList.remove('bg-yellow-500', 'text-white');
-            btnNo.classList.remove('bg-red-500', 'text-white');
-
-            display.textContent = '';
-            display.className = 'mt-2 text-sm text-center hidden';
+            delete userConfidence[idx];
+            clearQuestionFuzzyOptions(idx);
+            renderConfidenceState(idx);
             return;
         }
 
         userConfidence[idx] = level;
-
-        const btnSure = document.getElementById('btn-sure-' + idx);
-        const btnUnsure = document.getElementById('btn-unsure-' + idx);
-        const btnNo = document.getElementById('btn-no-' + idx);
-        const display = document.getElementById('confidence-display-' + idx);
-
-        btnSure.classList.remove('bg-green-500', 'text-white');
-        btnUnsure.classList.remove('bg-yellow-500', 'text-white');
-        btnNo.classList.remove('bg-red-500', 'text-white');
-
-        if (level === 'sure') {
-            btnSure.classList.add('bg-green-500', 'text-white');
-            display.textContent = '✓ 我确定这道题会做';
-            display.className = 'mt-2 text-sm text-center text-green-600 font-medium';
-        } else if (level === 'unsure') {
-            btnUnsure.classList.add('bg-yellow-500', 'text-white');
-            display.textContent = '？这道题有点模糊';
-            display.className = 'mt-2 text-sm text-center text-yellow-600 font-medium';
-        } else if (level === 'no') {
-            btnNo.classList.add('bg-red-500', 'text-white');
-            display.textContent = '✗ 这道题完全不会';
-            display.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+        if (level !== 'unsure') {
+            clearQuestionFuzzyOptions(idx);
         }
-        display.classList.remove('hidden');
+        renderConfidenceState(idx);
     }
 
     function selectOption(idx, opt, isMultiple) {
@@ -1182,7 +1466,8 @@
 
             const submitData = {
                 answers: answers,
-                confidence: userConfidence
+                confidence: userConfidence,
+                fuzzy_options: buildFuzzyOptionsPayload()
             };
 
             const response = await fetch('/api/quiz/batch/submit/' + examId, {
@@ -1504,6 +1789,7 @@
             report += `你的答案：${userAnswer || '未作答'}\n`;
             report += `正确答案：${correctAnswer}\n`;
             report += `自信度：${confMap[conf] || conf}\n`;
+            report += buildFuzzyReportSection(i, q);
             report += `结果：${d.is_correct ? '✓ 正确' : '✗ 错误'}\n`;
             report += `核心考点：${d.key_point || '未标注'}\n\n`;
             report += `解析：${d.explanation || '无解析'}\n`;

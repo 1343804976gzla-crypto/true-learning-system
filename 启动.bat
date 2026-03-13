@@ -31,7 +31,7 @@ echo ========================================
 echo.
 echo 访问地址:
 echo   - 错题本: http://localhost:8000/wrong-answers
-echo   - 数据看板: http://localhost:8000/dashboard/stats
+echo   - 错题看板: http://localhost:8000/wrong-answers
 echo.
 echo 提示:
 echo   - 服务器正在后台运行

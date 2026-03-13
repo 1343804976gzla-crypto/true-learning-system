@@ -40,7 +40,7 @@
             <div class="flex justify-between items-center mb-2">
                 <div class="flex items-center space-x-4">
                     <span class="text-sm text-gray-500">练习进度</span>
-                    <span class="text-xs text-gray-400">| 快捷键：1-5 选项 | Q 确定 W 模糊 E 不会 | ↑↓ 切换</span>
+                    <span class="text-xs text-gray-400">| 1-5 选答案 / W后1-5选模糊项 | Q 确定 W 模糊 E 不会 | ↑↓ 切换</span>
                 </div>
                 <div class="flex items-center space-x-4">
                     <span id="knowledgeTitle" class="text-blue-600 font-medium"></span>
@@ -72,6 +72,8 @@
     <!-- 练习结果 -->
     <div id="resultArea" class="hidden space-y-6">
         <div class="bg-white rounded-lg shadow p-6 text-center">
+            <div class="mb-3 text-sm text-gray-500">当前知识点</div>
+            <div id="resultKnowledgeTitle" class="text-2xl font-bold text-slate-700 mb-4"></div>
             <div class="text-6xl mb-4" id="practiceEmoji"></div>
             <div class="text-5xl font-bold text-blue-600 mb-2" id="practiceScore">0</div>
             <div class="text-gray-500">分</div>
@@ -84,6 +86,11 @@
                     <div class="text-2xl font-bold text-red-600" id="practiceWrong">0</div>
                     <div class="text-sm text-gray-500">错误</div>
                 </div>
+            </div>
+            <div class="mt-6 flex justify-center">
+                <button type="button" onclick="copyPracticeSummary()" id="copyPracticeSummaryBtn" class="bg-indigo-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-indigo-600 transition flex items-center">
+                    <span id="copyPracticeSummaryText">一键复制本知识点总结</span>
+                </button>
             </div>
         </div>
 
@@ -140,18 +147,252 @@
 
     let examData = null;
     let knowledgeMap = {};
+    let knowledgeStatsMap = {};
     let currentKnowledge = null;
     let practiceQuestions = [];
     let currentPracticeIndex = 0;
     let practiceAnswers = {};
     let practiceConfidence = {};
+    let practiceFuzzyOptions = {};
     let isPracticeMode = false;
     let detailTrackingSessionId = null;
+    let lastPracticeResult = null;
 
     function revealMaskedExplanation(revealId, triggerBtn) {
         const explanationEl = document.getElementById(revealId);
         if (explanationEl) explanationEl.classList.remove('hidden');
         if (triggerBtn) triggerBtn.classList.add('hidden');
+    }
+
+    function getQuestionKnowledgeKey(question, index) {
+        const keyPoint = (question && question.key_point ? question.key_point : '').toString().trim();
+        return keyPoint || ('考点' + (index + 1));
+    }
+
+    function buildKnowledgeMapFromQuestions(questions) {
+        const map = {};
+        (questions || []).forEach(function(q, i) {
+            const keyPoint = getQuestionKnowledgeKey(q, i);
+            if (!map[keyPoint]) {
+                map[keyPoint] = {
+                    type: q.type || 'A1',
+                    difficulty: q.difficulty || '基础',
+                    question: q.question || '',
+                    options: q.options || {},
+                    correct_answer: q.correct_answer || 'A',
+                    explanation: q.explanation || '',
+                    key_point: keyPoint
+                };
+            }
+        });
+        return map;
+    }
+
+    function getOrderedKnowledgePointsFromExamData(data, map) {
+        const ordered = [];
+        (data && Array.isArray(data.knowledge_points) ? data.knowledge_points : []).forEach(function(key) {
+            const normalized = (key || '').toString().trim();
+            if (normalized && map[normalized] && ordered.indexOf(normalized) === -1) {
+                ordered.push(normalized);
+            }
+        });
+        Object.keys(map || {}).forEach(function(key) {
+            if (ordered.indexOf(key) === -1) {
+                ordered.push(key);
+            }
+        });
+        return ordered;
+    }
+
+    function normalizeOptionLetter(value) {
+        const normalized = String(value || '').trim().toUpperCase();
+        return /^[A-E]$/.test(normalized) ? normalized : '';
+    }
+
+    function getPracticeOptionLetters(question) {
+        const options = question && question.options ? Object.keys(question.options) : [];
+        const normalized = options
+            .map(function(opt) { return normalizeOptionLetter(opt); })
+            .filter(function(opt) { return !!opt; })
+            .sort();
+        return normalized.length > 0 ? normalized : ['A', 'B', 'C', 'D', 'E'];
+    }
+
+    function normalizePracticeFuzzyOptions(options, question) {
+        const allowed = new Set(getPracticeOptionLetters(question));
+        const normalized = [];
+        (Array.isArray(options) ? options : []).forEach(function(opt) {
+            const letter = normalizeOptionLetter(opt);
+            if (letter && allowed.has(letter) && !normalized.includes(letter)) {
+                normalized.push(letter);
+            }
+        });
+        return normalized.sort();
+    }
+
+    function getPracticeFuzzyOptions(idx) {
+        return normalizePracticeFuzzyOptions(practiceFuzzyOptions[idx], practiceQuestions[idx]);
+    }
+
+    function setPracticeFuzzyOptions(idx, options) {
+        const normalized = normalizePracticeFuzzyOptions(options, practiceQuestions[idx]);
+        if (normalized.length > 0) {
+            practiceFuzzyOptions[idx] = normalized;
+        } else {
+            delete practiceFuzzyOptions[idx];
+        }
+    }
+
+    function clearPracticeFuzzyOptions(idx) {
+        delete practiceFuzzyOptions[idx];
+    }
+
+    function getConfidenceLabel(confidence) {
+        const confMap = {
+            sure: 'Q 确定',
+            unsure: 'W 模糊',
+            no: 'E 不会'
+        };
+        return confMap[confidence] || '未标注';
+    }
+
+    function getPracticeShortcutOptionByKey(key, question) {
+        if (!(key >= '1' && key <= '5')) return '';
+        const optionLetters = getPracticeOptionLetters(question);
+        return optionLetters[parseInt(key, 10) - 1] || '';
+    }
+
+    function tryTogglePracticeFuzzyOptionByShortcut(idx, key) {
+        if ((practiceConfidence[idx] || '') !== 'unsure') {
+            return false;
+        }
+
+        const option = getPracticeShortcutOptionByKey(key, practiceQuestions[idx]);
+        if (!option) {
+            return false;
+        }
+
+        togglePracticeFuzzyOption(idx, option);
+        return true;
+    }
+
+    function buildPracticeFuzzyOptionsPanelHtml(idx) {
+        const buttons = getPracticeOptionLetters(practiceQuestions[idx]).map(function(opt) {
+            return '<button type="button" onclick="togglePracticeFuzzyOption(' + idx + ', \'' + opt + '\')" ' +
+                'id="practice-fuzzy-opt-' + idx + '-' + opt + '" ' +
+                'class="px-3 py-1 rounded-full text-sm border transition border-yellow-300 text-yellow-700 hover:bg-yellow-100">' +
+                opt + '</button>';
+        }).join('');
+
+        return '<div id="practice-fuzzy-panel-' + idx + '" class="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-3 hidden">' +
+            '<div class="text-xs font-medium text-yellow-700 mb-2">对哪些选项模糊？（可多选）</div>' +
+            '<div class="flex flex-wrap gap-2">' + buttons + '</div>' +
+            '<div id="practice-fuzzy-summary-' + idx + '" class="mt-2 text-xs text-yellow-700">可多选，包括你已选的答案</div>' +
+            '</div>';
+    }
+
+    function updatePracticeFuzzyOptionButtons(idx) {
+        const selected = new Set(getPracticeFuzzyOptions(idx));
+        getPracticeOptionLetters(practiceQuestions[idx]).forEach(function(opt) {
+            const button = document.getElementById('practice-fuzzy-opt-' + idx + '-' + opt);
+            if (!button) return;
+            if (selected.has(opt)) {
+                button.className = 'px-3 py-1 rounded-full text-sm border transition bg-yellow-500 border-yellow-500 text-white';
+            } else {
+                button.className = 'px-3 py-1 rounded-full text-sm border transition border-yellow-300 text-yellow-700 hover:bg-yellow-100';
+            }
+        });
+    }
+
+    function renderPracticeConfidenceState(idx) {
+        const level = practiceConfidence[idx] || '';
+        const fuzzyOptions = getPracticeFuzzyOptions(idx);
+        const btnSure = document.getElementById('practice-btn-sure-' + idx);
+        const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
+        const btnNo = document.getElementById('practice-btn-no-' + idx);
+        const display = document.getElementById('practice-confidence-display-' + idx);
+        const panel = document.getElementById('practice-fuzzy-panel-' + idx);
+        const summary = document.getElementById('practice-fuzzy-summary-' + idx);
+
+        if (btnSure) btnSure.classList.remove('bg-green-500', 'text-white');
+        if (btnUnsure) btnUnsure.classList.remove('bg-yellow-500', 'text-white');
+        if (btnNo) btnNo.classList.remove('bg-red-500', 'text-white');
+        if (panel) panel.classList.add('hidden');
+
+        if (!display) return;
+
+        if (!level) {
+            display.textContent = '';
+            display.className = 'mt-2 text-sm text-center hidden';
+            return;
+        }
+
+        if (level === 'sure') {
+            if (btnSure) btnSure.classList.add('bg-green-500', 'text-white');
+            display.textContent = '✓ 我确定这道题会做';
+            display.className = 'mt-2 text-sm text-center text-green-600 font-medium';
+        } else if (level === 'unsure') {
+            if (btnUnsure) btnUnsure.classList.add('bg-yellow-500', 'text-white');
+            display.textContent = fuzzyOptions.length > 0
+                ? '？模糊选项：' + fuzzyOptions.join('、')
+                : '？这道题有点模糊，请勾选具体选项';
+            display.className = 'mt-2 text-sm text-center text-yellow-600 font-medium';
+            if (panel) panel.classList.remove('hidden');
+            if (summary) {
+                summary.textContent = fuzzyOptions.length > 0
+                    ? '已标记：' + fuzzyOptions.join('、')
+                    : '可多选，包括你已选的答案';
+            }
+            updatePracticeFuzzyOptionButtons(idx);
+        } else {
+            if (btnNo) btnNo.classList.add('bg-red-500', 'text-white');
+            display.textContent = '✗ 这道题完全不会';
+            display.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+        }
+
+        display.classList.remove('hidden');
+    }
+
+    function buildPracticeFuzzyDetailHtml(detail) {
+        const fuzzyOptions = Array.isArray(detail && detail.fuzzy_options) ? detail.fuzzy_options : [];
+        if (fuzzyOptions.length === 0) {
+            return '';
+        }
+
+        let html = '<div class="mt-3 rounded-lg bg-yellow-50 border border-yellow-200 px-3 py-2 text-sm text-yellow-800">' +
+            '<div class="font-medium">模糊选项：' + fuzzyOptions.join('、') + '</div>';
+        fuzzyOptions.forEach(function(opt) {
+            const optionText = detail.option_texts && detail.option_texts[opt]
+                ? detail.option_texts[opt]
+                : ((detail.options && detail.options[opt]) || ('选项' + opt));
+            html += '<div class="mt-1">→ ' + opt + '. ' + escapeHtml(optionText) + '</div>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    function buildPracticeFuzzyReportSection(detail) {
+        const fuzzyOptions = Array.isArray(detail && detail.fuzzy_options) ? detail.fuzzy_options : [];
+        if (fuzzyOptions.length === 0) {
+            return '';
+        }
+
+        let report = '模糊选项：' + fuzzyOptions.join('、') + '\n';
+        fuzzyOptions.forEach(function(opt) {
+            const optionText = detail.option_texts && detail.option_texts[opt]
+                ? detail.option_texts[opt]
+                : ((detail.options && detail.options[opt]) || ('选项' + opt));
+            report += '  → ' + opt + '. ' + optionText + '\n';
+        });
+        return report;
+    }
+
+    function getSeverityBadgeText(tag) {
+        if (tag === 'stubborn') return '顽固病灶';
+        if (tag === 'critical') return '致命盲区';
+        if (tag === 'landmine') return '隐形地雷';
+        if (tag === 'normal') return '普通错误';
+        return '';
     }
 
     function buildMaskedExplanationHtml(explanation, isCorrect, confidence, revealId) {
@@ -342,46 +583,36 @@
 
         // 如果已选中相同等级，则取消选择
         if (currentConfidence === level) {
-            practiceConfidence[idx] = '';
-
-            const btnSure = document.getElementById('practice-btn-sure-' + idx);
-            const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
-            const btnNo = document.getElementById('practice-btn-no-' + idx);
-            const display = document.getElementById('practice-confidence-display-' + idx);
-
-            btnSure.classList.remove('bg-green-500', 'text-white');
-            btnUnsure.classList.remove('bg-yellow-500', 'text-white');
-            btnNo.classList.remove('bg-red-500', 'text-white');
-
-            display.textContent = '';
-            display.className = 'mt-2 text-sm text-center hidden';
+            delete practiceConfidence[idx];
+            clearPracticeFuzzyOptions(idx);
+            renderPracticeConfidenceState(idx);
             return;
         }
 
         practiceConfidence[idx] = level;
-        const btnSure = document.getElementById('practice-btn-sure-' + idx);
-        const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
-        const btnNo = document.getElementById('practice-btn-no-' + idx);
-        const display = document.getElementById('practice-confidence-display-' + idx);
-
-        btnSure.classList.remove('bg-green-500', 'text-white');
-        btnUnsure.classList.remove('bg-yellow-500', 'text-white');
-        btnNo.classList.remove('bg-red-500', 'text-white');
-
-        if (level === 'sure') {
-            btnSure.classList.add('bg-green-500', 'text-white');
-            display.textContent = '✓ 我确定这道题会做';
-            display.className = 'mt-2 text-sm text-center text-green-600 font-medium';
-        } else if (level === 'unsure') {
-            btnUnsure.classList.add('bg-yellow-500', 'text-white');
-            display.textContent = '？这道题有点模糊';
-            display.className = 'mt-2 text-sm text-center text-yellow-600 font-medium';
-        } else {
-            btnNo.classList.add('bg-red-500', 'text-white');
-            display.textContent = '✗ 这道题完全不会';
-            display.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+        if (level !== 'unsure') {
+            clearPracticeFuzzyOptions(idx);
         }
-        display.classList.remove('hidden');
+        renderPracticeConfidenceState(idx);
+    }
+
+    function togglePracticeFuzzyOption(idx, opt) {
+        const option = normalizeOptionLetter(opt);
+        if (!option) return;
+
+        if (practiceConfidence[idx] !== 'unsure') {
+            practiceConfidence[idx] = 'unsure';
+        }
+
+        const current = getPracticeFuzzyOptions(idx);
+        if (current.includes(option)) {
+            setPracticeFuzzyOptions(idx, current.filter(function(item) { return item !== option; }));
+        } else {
+            current.push(option);
+            setPracticeFuzzyOptions(idx, current);
+        }
+
+        renderPracticeConfidenceState(idx);
     }
 
     function selectPracticeOption(opt) {
@@ -453,12 +684,13 @@
         const container = document.getElementById('questionsContainer');
         const isMultiple = q.type === 'X';
         const inputType = isMultiple ? 'checkbox' : 'radio';
+        const optionLetters = getPracticeOptionLetters(q);
         const variationBadge = q.variation_type
             ? '<span class="bg-purple-100 text-purple-700 px-2 py-1 rounded text-sm ml-2">' + q.variation_type + '</span>'
             : '';
 
         let optionsHtml = '';
-        ['A', 'B', 'C', 'D', 'E'].forEach(function(opt) {
+        optionLetters.forEach(function(opt) {
             optionsHtml += '<label class="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:border-blue-500 transition option-label" data-opt="' + opt + '">' +
                 '<input type="' + inputType + '" name="practiceOpt" value="' + opt + '" class="mt-1 mr-3" onchange="selectPracticeOption(\'' + opt + '\')">' +
                 '<span class="font-bold mr-2">' + opt + '.</span><span>' + (q.options[opt] || ('选项' + opt)) + '</span></label>';
@@ -485,6 +717,7 @@
             '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'no\')" id="practice-btn-no-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white transition">E 不会</button>' +
             '</div></div>' +
             '<div id="practice-confidence-display-' + currentPracticeIndex + '" class="mt-2 text-sm text-center hidden"></div>' +
+            buildPracticeFuzzyOptionsPanelHtml(currentPracticeIndex) +
             '</div>' +
             '</div>';
 
@@ -515,9 +748,7 @@
         }
 
         // 恢复信心度
-        if (practiceConfidence.hasOwnProperty(currentPracticeIndex) && practiceConfidence[currentPracticeIndex]) {
-            setPracticeConfidence(currentPracticeIndex, practiceConfidence[currentPracticeIndex]);
-        }
+        renderPracticeConfidenceState(currentPracticeIndex);
 
         updatePracticeControls();
     }
@@ -544,20 +775,36 @@
             if (isCorrect) correctCount++;
             details.push({
                 question: q.question,
+                type: q.type || 'A1',
+                difficulty: q.difficulty || '基础',
                 options: q.options,
                 user_answer: userAns,
                 correct_answer: correctAns,
                 is_correct: isCorrect,
                 explanation: q.explanation,
-                confidence: practiceConfidence[i]
+                confidence: practiceConfidence[i] || '',
+                fuzzy_options: getPracticeFuzzyOptions(i),
+                option_texts: getPracticeFuzzyOptions(i).reduce(function(acc, opt) {
+                    acc[opt] = (q.options && q.options[opt]) || ('选项' + opt);
+                    return acc;
+                }, {})
             });
         });
 
         const total = practiceQuestions.length;
         const score = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+        lastPracticeResult = {
+            knowledge_point: currentKnowledge || '',
+            score: score,
+            correct_count: correctCount,
+            wrong_count: total - correctCount,
+            total: total,
+            details: details
+        };
 
         document.getElementById('questionArea').classList.add('hidden');
         document.getElementById('resultArea').classList.remove('hidden');
+        document.getElementById('resultKnowledgeTitle').textContent = currentKnowledge || '未命名知识点';
         document.getElementById('practiceScore').textContent = score;
         document.getElementById('practiceCorrect').textContent = correctCount;
         document.getElementById('practiceWrong').textContent = total - correctCount;
@@ -571,9 +818,10 @@
         details.forEach(function(d, i) {
             const userAnswer = d.user_answer || '';
             const correctAnswer = d.correct_answer || '';
+            const optionLetters = getPracticeOptionLetters({ options: d.options || {} });
             let optionsHtml = '';
 
-            ['A', 'B', 'C', 'D', 'E'].forEach(function(opt) {
+            optionLetters.forEach(function(opt) {
                 const isSelected = userAnswer.includes(opt);
                 const isCorrectOpt = correctAnswer.includes(opt);
                 let cls = 'p-2 rounded mb-1 ';
@@ -589,16 +837,88 @@
             const div = document.createElement('div');
             div.className = 'p-6';
             const explanationId = 'detailExplanation-' + i;
+            const confidenceHtml =
+                '<div class="mb-3 text-sm text-gray-600">' +
+                '<span class="font-medium text-gray-700">自信度：</span>' + getConfidenceLabel(d.confidence) +
+                '</div>';
             div.innerHTML =
                 '<div class="flex items-center justify-between mb-3">' +
                 '<div class="flex items-center space-x-2">' +
                 '<span class="font-bold">第' + (i + 1) + '题</span>' +
                 '<span class="' + (d.is_correct ? 'text-green-600' : 'text-red-600') + ' font-bold">' + (d.is_correct ? '✓ 正确' : '✗ 错误') + '</span>' +
-                '</div></div>' +
+                '</div>' +
+                '<span class="text-sm text-gray-500">' + d.type + (d.type === 'X' ? '（多选）' : '') + ' · ' + d.difficulty + '</span>' +
+                '</div>' +
                 '<p class="mb-3 text-gray-800">' + escapeHtml(d.question) + '</p>' +
                 '<div class="mb-4">' + optionsHtml + '</div>' +
+                confidenceHtml +
+                buildPracticeFuzzyDetailHtml(d) +
                 buildMaskedExplanationHtml(d.explanation, d.is_correct, d.confidence, explanationId);
             container.appendChild(div);
+        });
+    }
+
+    function copyPracticeSummary() {
+        if (!lastPracticeResult || !Array.isArray(lastPracticeResult.details) || lastPracticeResult.details.length === 0) {
+            alert('暂无可复制的知识点总结。');
+            return;
+        }
+
+        let report = '';
+        report += '==============================\n';
+        report += '细节强化知识点总结\n';
+        report += '==============================\n\n';
+        report += '【基本信息】\n';
+        report += '知识点：' + (lastPracticeResult.knowledge_point || '未命名知识点') + '\n';
+        report += '练习时间：' + new Date().toLocaleString('zh-CN') + '\n';
+        report += '得分：' + lastPracticeResult.score + ' 分\n';
+        report += '正确：' + lastPracticeResult.correct_count + ' 题 / 错误：' + lastPracticeResult.wrong_count + ' 题 / 总计：' + lastPracticeResult.total + ' 题\n\n';
+        report += '【题目详情】\n\n';
+
+        lastPracticeResult.details.forEach(function(detail, index) {
+            const userAnswer = detail.user_answer || '';
+            const correctAnswer = detail.correct_answer || '';
+            report += '第 ' + (index + 1) + ' 题 [' + (detail.type || '') + '] [' + (detail.difficulty || '') + ']\n';
+            report += (detail.question || '') + '\n\n';
+
+            getPracticeOptionLetters({ options: detail.options || {} }).forEach(function(opt) {
+                const isCorrectOpt = correctAnswer.includes(opt);
+                const isSelected = userAnswer.includes(opt);
+                let mark = '  ';
+                if (isCorrectOpt) mark = '✓ ';
+                else if (isSelected && !isCorrectOpt) mark = '✗ ';
+                report += mark + opt + '. ' + (((detail.options || {})[opt]) || ('选项' + opt)) + '\n';
+            });
+
+            report += '\n';
+            report += '你的答案：' + (userAnswer || '未作答') + '\n';
+            report += '正确答案：' + correctAnswer + '\n';
+            report += '自信度：' + getConfidenceLabel(detail.confidence) + '\n';
+            report += buildPracticeFuzzyReportSection(detail);
+            report += '结果：' + (detail.is_correct ? '✓ 正确' : '✗ 错误') + '\n\n';
+            report += '解析：' + (detail.explanation || '无解析') + '\n';
+            report += '------------------------------------------------------------\n\n';
+        });
+
+        report += '报告生成时间：' + new Date().toLocaleString('zh-CN') + '\n';
+
+        navigator.clipboard.writeText(report).then(function() {
+            const btn = document.getElementById('copyPracticeSummaryBtn');
+            const text = document.getElementById('copyPracticeSummaryText');
+            const originalText = text.textContent;
+
+            btn.classList.remove('bg-indigo-500', 'hover:bg-indigo-600');
+            btn.classList.add('bg-green-500', 'hover:bg-green-600');
+            text.textContent = '✅ 已复制到剪贴板';
+
+            setTimeout(function() {
+                btn.classList.remove('bg-green-500', 'hover:bg-green-600');
+                btn.classList.add('bg-indigo-500', 'hover:bg-indigo-600');
+                text.textContent = originalText;
+            }, 2000);
+        }).catch(function(err) {
+            console.error('复制失败:', err);
+            alert('复制失败，请手动复制以下内容：\n\n' + report.substring(0, 500) + '...');
         });
     }
 
@@ -632,10 +952,14 @@
 
             const key = e.key;
             if (key >= '1' && key <= '5') {
-                const options = ['A', 'B', 'C', 'D', 'E'];
-                const opt = options[parseInt(key, 10) - 1];
+                if (tryTogglePracticeFuzzyOptionByShortcut(currentPracticeIndex, key)) {
+                    e.preventDefault();
+                    return;
+                }
+
+                const opt = getPracticeShortcutOptionByKey(key, practiceQuestions[currentPracticeIndex]);
                 const input = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
-                if (input) {
+                if (input && opt) {
                     input.checked = true;
                     selectPracticeOption(opt);
                 }
@@ -687,35 +1011,36 @@
         document.getElementById('practiceArea').classList.remove('hidden');
 
         const questions = examData.questions || [];
+        knowledgeStatsMap = examData.knowledge_point_stats || {};
 
         // 构建知识点映射：每个知识点对应第一道相关题目
-        knowledgeMap = {};
-        questions.forEach(function(q, i) {
-            const keyPoint = q.key_point || ('考点' + (i + 1));
-            // 只保留第一次出现的知识点对应的题目
-            if (!knowledgeMap[keyPoint]) {
-                knowledgeMap[keyPoint] = {
-                    type: q.type || 'A1',
-                    difficulty: q.difficulty || '基础',
-                    question: q.question || '',
-                    options: q.options || {},
-                    correct_answer: q.correct_answer || 'A',
-                    explanation: q.explanation || '',
-                    key_point: keyPoint
-                };
-            }
-        });
+        knowledgeMap = buildKnowledgeMapFromQuestions(questions);
+        const orderedKnowledgePoints = getOrderedKnowledgePointsFromExamData(examData, knowledgeMap);
 
         const knowledgeList = document.getElementById('knowledgeList');
         knowledgeList.innerHTML = '';
-        Object.keys(knowledgeMap).forEach(function(key) {
+        orderedKnowledgePoints.forEach(function(key) {
             const k = knowledgeMap[key];
+            if (!k) return;
+
             const statusClass = k.difficulty === '基础' ? 'text-green-600'
                 : (k.difficulty === '提高' ? 'text-yellow-600' : 'text-red-600');
+            const meta = knowledgeStatsMap[key] || {};
+            const detailBits = [];
+            if ((meta.error_count || 0) > 0) {
+                detailBits.push('错' + meta.error_count + '题');
+            }
+            const severityText = getSeverityBadgeText(meta.severity_tag || '');
+            if (severityText) {
+                detailBits.push(severityText);
+            }
+            const detailHtml = detailBits.length > 0
+                ? '<div class="mt-1 text-sm text-red-500">' + detailBits.join(' · ') + '</div>'
+                : '';
 
             const div = document.createElement('div');
             div.className = 'flex items-center justify-between p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-blue-50 cursor-pointer transition';
-            div.innerHTML = '<div><span class="font-bold text-lg">' + key + '</span><span class="ml-2 ' + statusClass + '">' + k.difficulty + '</span></div>' +
+            div.innerHTML = '<div><span class="font-bold text-lg">' + key + '</span><span class="ml-2 ' + statusClass + '">' + k.difficulty + '</span>' + detailHtml + '</div>' +
                 '<span class="bg-blue-500 text-white px-4 py-2 rounded-lg">开始练习</span>';
 
             div.addEventListener('click', async function() {
@@ -723,6 +1048,8 @@
                 currentPracticeIndex = 0;
                 practiceAnswers = {};
                 practiceConfidence = {};
+                practiceFuzzyOptions = {};
+                lastPracticeResult = null;
                 isPracticeMode = true;
 
                 document.getElementById('knowledgeList').parentElement.classList.add('hidden');
@@ -739,10 +1066,14 @@
 
     window.selectPracticeOption = selectPracticeOption;
     window.setPracticeConfidence = setPracticeConfidence;
+    window.togglePracticeFuzzyOption = togglePracticeFuzzyOption;
+    window.copyPracticeSummary = copyPracticeSummary;
     window.retryGeneration = async function(keyPoint) {
         currentPracticeIndex = 0;
         practiceAnswers = {};
         practiceConfidence = {};
+        practiceFuzzyOptions = {};
+        lastPracticeResult = null;
         await generateVariationQuestions(keyPoint);
     };
     window.backToList = function() {
@@ -750,6 +1081,7 @@
         document.getElementById('questionArea').classList.add('hidden');
         document.getElementById('knowledgeList').parentElement.classList.remove('hidden');
         isPracticeMode = false;
+        detailTrackingSessionId = null;
     };
     window.endStudySession = function() {
         const score = document.getElementById('practiceScore').textContent;

@@ -7,13 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any, Tuple
 import json
 import uuid
 import hashlib
 
 from models import get_db, QuizSession, WrongAnswer, ConceptMastery, Chapter
-from learning_tracking_models import WrongAnswerV2, make_fingerprint
+from learning_tracking_models import WrongAnswerV2, make_fingerprint, INVALID_CHAPTER_IDS
 from services.quiz_service_v2 import get_quiz_service
 
 router = APIRouter(prefix="/api/quiz/batch", tags=["batch_quiz"])
@@ -24,12 +24,191 @@ _exam_cache = {}
 # 单独存储用于细节练习的数据（不删除）
 _detail_cache = {}
 
-INVALID_CHAPTER_IDS = {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0", "uncategorized_ch0"}
+DETAIL_PRIORITY_WEIGHTS = {
+    "error_count": 3,
+    "severity": {
+        "stubborn": 10,
+        "critical": 8,
+        "landmine": 5,
+        "normal": 3,
+        "": 0,
+    },
+}
+DETAIL_SEVERITY_RANK = {"": 0, "normal": 1, "landmine": 2, "critical": 3, "stubborn": 4}
 
 
 def _normalize_confirmed_chapter_id(chapter_id: str) -> str:
     normalized = str(chapter_id or "").strip()
     return normalized if normalized and normalized not in INVALID_CHAPTER_IDS else ""
+
+
+def _get_question_key_point(question: Dict[str, Any], index: int) -> str:
+    key_point = str(question.get("key_point") or "").strip()
+    return key_point or f"考点{index + 1}"
+
+
+def _severity_from_confidence(confidence: str) -> str:
+    normalized = str(confidence or "").strip().lower()
+    if normalized == "sure":
+        return "critical"
+    if normalized in {"unsure", "no"}:
+        return "landmine"
+    return "normal"
+
+
+def _normalize_fuzzy_option_list(raw_options: Any, question_options: Optional[Dict[str, Any]] = None) -> List[str]:
+    allowed = {
+        str(key or "").strip().upper()
+        for key in (question_options or {}).keys()
+        if str(key or "").strip().upper() in {"A", "B", "C", "D", "E"}
+    }
+    if not allowed:
+        allowed = {"A", "B", "C", "D", "E"}
+
+    normalized: List[str] = []
+    for item in raw_options or []:
+        option = str(item or "").strip().upper()
+        if option and option in allowed and option not in normalized:
+            normalized.append(option)
+
+    return sorted(normalized)
+
+
+def _build_fuzzy_option_cache(
+    questions: List[Dict[str, Any]],
+    confidence: Optional[Dict[str, str]],
+    fuzzy_options: Optional[Dict[str, List[str]]],
+) -> Dict[str, Dict[str, Any]]:
+    cached: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(fuzzy_options, dict):
+        return cached
+
+    confidence_map = confidence or {}
+    for raw_index, raw_options in fuzzy_options.items():
+        try:
+            question_index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+
+        if question_index < 0 or question_index >= len(questions):
+            continue
+
+        conf = str(
+            confidence_map.get(str(question_index), confidence_map.get(question_index, ""))
+            or ""
+        ).strip().lower()
+        if conf != "unsure":
+            continue
+
+        question = questions[question_index] or {}
+        normalized_options = _normalize_fuzzy_option_list(raw_options, question.get("options"))
+        if not normalized_options:
+            continue
+
+        option_texts: Dict[str, str] = {}
+        question_options = question.get("options") or {}
+        for option in normalized_options:
+            option_text = str(question_options.get(option) or f"选项{option}").strip()
+            option_texts[option] = option_text
+
+        cached[str(question_index)] = {
+            "options": normalized_options,
+            "option_texts": option_texts,
+            "key_point": _get_question_key_point(question, question_index),
+        }
+
+    return cached
+
+
+def _aggregate_exam_wrong_questions(wrong_questions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for item in wrong_questions:
+        key_point = str(item.get("key_point") or "").strip()
+        if not key_point:
+            continue
+
+        entry = grouped.setdefault(
+            key_point,
+            {
+                "key_point": key_point,
+                "error_count": 0,
+                "severity_tag": "",
+                "severity_rank": 0,
+            },
+        )
+        entry["error_count"] += int(item.get("error_count") or 1)
+
+        severity_tag = str(item.get("severity_tag") or "").strip()
+        severity_rank = DETAIL_SEVERITY_RANK.get(severity_tag, 0)
+        if severity_rank > entry["severity_rank"]:
+            entry["severity_rank"] = severity_rank
+            entry["severity_tag"] = severity_tag
+
+    for entry in grouped.values():
+        if entry["error_count"] >= 2:
+            entry["severity_tag"] = "stubborn"
+            entry["severity_rank"] = DETAIL_SEVERITY_RANK["stubborn"]
+        entry["severity_weight"] = DETAIL_PRIORITY_WEIGHTS["severity"].get(entry["severity_tag"], 0)
+
+    return grouped
+
+
+def _build_detail_knowledge_order(exam: Dict[str, Any], db: Session) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
+    questions = exam.get("questions", [])
+    knowledge_points: List[str] = []
+    original_order: Dict[str, int] = {}
+    for i, question in enumerate(questions):
+        key_point = _get_question_key_point(question, i)
+        if key_point not in original_order:
+            original_order[key_point] = len(knowledge_points)
+            knowledge_points.append(key_point)
+
+    wrong_summary = _aggregate_exam_wrong_questions(exam.get("exam_wrong_questions") or [])
+    chapter_id = _normalize_confirmed_chapter_id(exam.get("chapter_id", ""))
+    concept_rows = []
+    if knowledge_points:
+        query = db.query(ConceptMastery.name, ConceptMastery.understanding)
+        if chapter_id:
+            query = query.filter(ConceptMastery.chapter_id == chapter_id)
+        concept_rows = query.filter(ConceptMastery.name.in_(knowledge_points)).all()
+
+    understanding_map: Dict[str, float] = {}
+    for name, understanding in concept_rows:
+        kp_name = str(name or "").strip()
+        if not kp_name:
+            continue
+        current_value = understanding_map.get(kp_name, 0.0)
+        understanding_map[kp_name] = max(current_value, float(understanding or 0.0))
+
+    stats_map: Dict[str, Dict[str, Any]] = {}
+    ranked_rows = []
+    for key_point in knowledge_points:
+        wrong_data = wrong_summary.get(key_point, {})
+        understanding = min(1.0, max(0.0, float(understanding_map.get(key_point, 0.0))))
+        mastery_penalty = round((1.0 - understanding) * 10, 2)
+        error_count = int(wrong_data.get("error_count") or 0)
+        severity_tag = str(wrong_data.get("severity_tag") or "")
+        severity_weight = int(wrong_data.get("severity_weight") or 0)
+        priority_score = round(
+            error_count * DETAIL_PRIORITY_WEIGHTS["error_count"] + severity_weight + mastery_penalty,
+            2,
+        )
+        stats = {
+            "key_point": key_point,
+            "error_count": error_count,
+            "severity_tag": severity_tag,
+            "severity_weight": severity_weight,
+            "understanding": understanding,
+            "mastery_penalty": mastery_penalty,
+            "priority_score": priority_score,
+            "original_order": original_order[key_point],
+        }
+        stats_map[key_point] = stats
+        ranked_rows.append(stats)
+
+    ranked_rows.sort(key=lambda item: (-item["priority_score"], item["original_order"]))
+    ordered_points = [item["key_point"] for item in ranked_rows]
+    return ordered_points, stats_map
 
 class GenerateRequest(BaseModel):
     uploaded_content: str
@@ -38,6 +217,7 @@ class GenerateRequest(BaseModel):
 class SubmitRequest(BaseModel):
     answers: List[str]
     confidence: Optional[Dict[str, str]] = {}
+    fuzzy_options: Optional[Dict[str, List[str]]] = {}
 
 class GenerateVariationRequest(BaseModel):
     key_point: str
@@ -156,7 +336,8 @@ async def submit_exam(
         raise HTTPException(status_code=404, detail="试卷已过期或不存在")
 
     answers = request.answers
-    confidence = request.confidence
+    confidence = request.confidence or {}
+    fuzzy_options = request.fuzzy_options or {}
     questions = exam.get("questions", [])
     num_questions = exam.get("num_questions", 10)
     chapter_id = exam.get("chapter_id", "")
@@ -167,6 +348,9 @@ async def submit_exam(
     
     quiz_service = get_quiz_service()
     result = quiz_service.grade_paper(questions, answers, confidence)
+    exam_fuzzy_options = _build_fuzzy_option_cache(questions, confidence, fuzzy_options)
+    result["fuzzy_options"] = exam_fuzzy_options
+    exam_wrong_questions = []
 
     # Resolve a valid chapter id for QuizSession foreign key.
     session_chapter_id = None
@@ -272,6 +456,16 @@ async def submit_exam(
     for i, detail in enumerate(result["details"]):
         if not detail["is_correct"]:
             question = questions[i]
+            key_point = _get_question_key_point(question, i)
+            current_exam_severity = _severity_from_confidence(detail.get("confidence"))
+            exam_wrong_questions.append(
+                {
+                    "key_point": key_point,
+                    "severity_tag": current_exam_severity,
+                    "error_count": 1,
+                    "question_index": i,
+                }
+            )
 
             # 生成题目指纹（用于去重）
             question_text = question.get("question", "")
@@ -332,6 +526,11 @@ async def submit_exam(
                 print(f"[WrongAnswer] 新增错题: {fingerprint[:8]}... (严重度: {severity})")
 
     db.commit()
+    exam["chapter_id"] = session_chapter_id or exam.get("chapter_id", "")
+    exam["exam_wrong_questions"] = exam_wrong_questions
+    exam["fuzzy_options"] = exam_fuzzy_options
+    exam["score"] = result.get("score")
+    exam["wrong_count"] = result.get("wrong_count")
 
     _detail_cache[exam_id] = exam
 
@@ -365,7 +564,7 @@ async def get_exam(exam_id: str):
     }
 
 @router.get("/detail/{exam_id}")
-async def get_exam_for_detail(exam_id: str):
+async def get_exam_for_detail(exam_id: str, db: Session = Depends(get_db)):
     """获取试卷用于细节练习（保留完整数据包括答案）"""
     exam = _exam_cache.get(exam_id)
     if not exam:
@@ -386,17 +585,15 @@ async def get_exam_for_detail(exam_id: str):
             "explanation": q.get("explanation", "")
         })
 
-    knowledge_points = []
-    for q in exam["questions"]:
-        kp = q.get("key_point", "").strip()
-        if kp and kp not in knowledge_points:
-            knowledge_points.append(kp)
+    knowledge_points, knowledge_point_stats = _build_detail_knowledge_order(exam, db)
 
     return {
         "exam_id": exam_id,
         "chapter_id": exam.get("chapter_id", ""),
         "questions": questions,
         "knowledge_points": knowledge_points,
+        "knowledge_point_stats": knowledge_point_stats,
+        "fuzzy_options": exam.get("fuzzy_options", {}),
         "num_questions": exam["num_questions"],
         "uploadedContent": exam.get("uploaded_content", "")  # 传递原始内容给前端
     }

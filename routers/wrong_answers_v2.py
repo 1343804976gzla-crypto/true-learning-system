@@ -5,13 +5,14 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Form, File, UploadFile
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, or_
+from sqlalchemy import desc, func, or_, case
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 from pathlib import Path
 from difflib import SequenceMatcher
 import io
+import math
 import re
 
 from services.content_parser_v2 import get_content_parser
@@ -19,13 +20,62 @@ from services.content_parser_v2 import get_content_parser
 from models import get_db, Chapter
 from learning_tracking_models import (
     QuestionRecord, LearningSession, WrongAnswerV2, WrongAnswerRetry,
-    make_fingerprint
+    make_fingerprint, INVALID_CHAPTER_IDS
 )
 
 router = APIRouter(prefix="/api/wrong-answers", tags=["wrong_answers_v2"])
 
 
-INVALID_CHAPTER_IDS = {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0"}
+def _coerce_to_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _build_retry_streaks(retry_dates: List[date], today_value: date) -> Dict[str, int]:
+    unique_dates = sorted({d for d in retry_dates if d})
+    if not unique_dates:
+        return {"streak_days": 0, "max_streak_days": 0}
+
+    date_set = set(unique_dates)
+    check_date = today_value if today_value in date_set else today_value - timedelta(days=1)
+    streak_days = 0
+    while check_date in date_set:
+        streak_days += 1
+        check_date -= timedelta(days=1)
+
+    max_streak = 0
+    current = 0
+    previous = None
+    for item in unique_dates:
+        if previous and item == previous + timedelta(days=1):
+            current += 1
+        else:
+            current = 1
+        max_streak = max(max_streak, current)
+        previous = item
+
+    return {"streak_days": streak_days, "max_streak_days": max_streak}
+
+
+def _trend_description(direction: str) -> str:
+    mapping = {
+        "accelerating": "加速好转中",
+        "improving": "稳步好转",
+        "stable": "基本持平",
+        "worsening": "仍在恶化",
+    }
+    return mapping.get(direction, "趋势待观察")
 
 
 # ========== Pydantic Models ==========
@@ -593,6 +643,262 @@ async def get_wrong_answer_stats(db: Session = Depends(get_db)):
         "top_weak_points": top_weak_points,
         "retry_correct_rate": retry_correct_rate,
         "total_retries": total_retries,
+    }
+
+
+@router.get("/dashboard")
+async def get_wrong_answer_dashboard(db: Session = Depends(get_db)):
+    """错题本数据看板"""
+    today_value = date.today()
+    tomorrow_value = today_value + timedelta(days=1)
+    week_start = today_value - timedelta(days=today_value.weekday())
+    week_end = week_start + timedelta(days=6)
+    trend_dates = [today_value - timedelta(days=offset) for offset in range(6, -1, -1)]
+    trend_start = trend_dates[0]
+
+    active_query = db.query(WrongAnswerV2).filter(WrongAnswerV2.mastery_status == "active")
+    archived_query = db.query(WrongAnswerV2).filter(WrongAnswerV2.mastery_status == "archived")
+
+    active_count = active_query.count()
+    archived_count = archived_query.count()
+    total_count = active_count + archived_count
+    mastery_percent = round(archived_count / total_count * 100, 1) if total_count > 0 else 0.0
+
+    total_retries = db.query(WrongAnswerRetry).count()
+    correct_retries = db.query(WrongAnswerRetry).filter(WrongAnswerRetry.is_correct == True).count()
+    retry_correct_rate = round(correct_retries / total_retries * 100, 1) if total_retries > 0 else 0.0
+
+    def _retry_rate_between(start_date: date, end_date: date) -> float:
+        rows = db.query(WrongAnswerRetry).filter(
+            func.date(WrongAnswerRetry.retried_at) >= start_date.isoformat(),
+            func.date(WrongAnswerRetry.retried_at) <= end_date.isoformat(),
+        )
+        total = rows.count()
+        if total == 0:
+            return 0.0
+        correct = rows.filter(WrongAnswerRetry.is_correct == True).count()
+        return round(correct / total * 100, 1)
+
+    retry_rate_current_week = _retry_rate_between(today_value - timedelta(days=6), today_value)
+    retry_rate_previous_week = _retry_rate_between(today_value - timedelta(days=13), today_value - timedelta(days=7))
+    retry_rate_delta_vs_last_week = round(retry_rate_current_week - retry_rate_previous_week, 1)
+
+    severity_counts: Dict[str, int] = {}
+    severity_distribution: Dict[str, Dict[str, float]] = {}
+    for tag in ["critical", "stubborn", "landmine", "normal"]:
+        count = active_query.filter(WrongAnswerV2.severity_tag == tag).count()
+        severity_counts[tag] = count
+        severity_distribution[tag] = {
+            "count": count,
+            "percent": round(count / active_count * 100, 1) if active_count > 0 else 0.0,
+        }
+
+    today_due = active_query.filter(
+        WrongAnswerV2.next_review_date.isnot(None),
+        WrongAnswerV2.next_review_date <= today_value,
+    ).count()
+    tomorrow_due = active_query.filter(
+        WrongAnswerV2.next_review_date.isnot(None),
+        WrongAnswerV2.next_review_date <= tomorrow_value,
+    ).count()
+    week_due = active_query.filter(
+        WrongAnswerV2.next_review_date.isnot(None),
+        WrongAnswerV2.next_review_date <= week_end,
+    ).count()
+
+    created_rows = db.query(
+        func.date(WrongAnswerV2.created_at).label("day"),
+        func.count(WrongAnswerV2.id).label("count"),
+    ).filter(
+        WrongAnswerV2.created_at.isnot(None),
+        func.date(WrongAnswerV2.created_at) >= trend_start.isoformat(),
+        func.date(WrongAnswerV2.created_at) <= today_value.isoformat(),
+    ).group_by("day").all()
+    created_map = {str(day): int(count or 0) for day, count in created_rows if day}
+
+    archived_rows = db.query(
+        func.date(WrongAnswerV2.archived_at).label("day"),
+        func.count(WrongAnswerV2.id).label("count"),
+    ).filter(
+        WrongAnswerV2.archived_at.isnot(None),
+        func.date(WrongAnswerV2.archived_at) >= trend_start.isoformat(),
+        func.date(WrongAnswerV2.archived_at) <= today_value.isoformat(),
+    ).group_by("day").all()
+    archived_map = {str(day): int(count or 0) for day, count in archived_rows if day}
+
+    retried_rows = db.query(
+        func.date(WrongAnswerRetry.retried_at).label("day"),
+        func.count(WrongAnswerRetry.id).label("count"),
+    ).filter(
+        WrongAnswerRetry.retried_at.isnot(None),
+        func.date(WrongAnswerRetry.retried_at) >= trend_start.isoformat(),
+        func.date(WrongAnswerRetry.retried_at) <= today_value.isoformat(),
+    ).group_by("day").all()
+    retried_map = {str(day): int(count or 0) for day, count in retried_rows if day}
+
+    today_key = today_value.isoformat()
+    today_new_count = created_map.get(today_key, 0)
+    today_archived_count = archived_map.get(today_key, 0)
+    today_retried_count = retried_map.get(today_key, 0)
+    today_net_change = today_archived_count - today_new_count
+
+    week_keys = {
+        (week_start + timedelta(days=offset)).isoformat()
+        for offset in range((today_value - week_start).days + 1)
+    }
+    this_week_new_count = sum(created_map.get(key, 0) for key in week_keys)
+    this_week_archived_count = sum(archived_map.get(key, 0) for key in week_keys)
+    this_week_net_change = this_week_archived_count - this_week_new_count
+
+    daily_trend: List[Dict[str, Any]] = []
+    for item_date in trend_dates:
+        day_key = item_date.isoformat()
+        new_count = created_map.get(day_key, 0)
+        archived_day_count = archived_map.get(day_key, 0)
+        daily_trend.append({
+            "date": day_key,
+            "new": new_count,
+            "archived": archived_day_count,
+            "net": archived_day_count - new_count,
+        })
+
+    sum_archived = sum(item["archived"] for item in daily_trend)
+    sum_new = sum(item["new"] for item in daily_trend)
+    avg_daily_archived_raw = sum_archived / len(daily_trend) if daily_trend else 0.0
+    avg_daily_new_raw = sum_new / len(daily_trend) if daily_trend else 0.0
+    net_daily_rate_raw = avg_daily_archived_raw - avg_daily_new_raw
+
+    recent_3d = daily_trend[-3:]
+    previous_4d = daily_trend[:-3]
+    recent_3d_rate = (
+        sum(item["archived"] - item["new"] for item in recent_3d) / len(recent_3d)
+        if recent_3d else 0.0
+    )
+    prev_4d_rate = (
+        sum(item["archived"] - item["new"] for item in previous_4d) / len(previous_4d)
+        if previous_4d else 0.0
+    )
+
+    if recent_3d_rate > prev_4d_rate + 0.5:
+        trend_direction = "accelerating"
+    elif recent_3d_rate > 0:
+        trend_direction = "improving"
+    elif abs(recent_3d_rate) < 1e-9:
+        trend_direction = "stable"
+    else:
+        trend_direction = "worsening"
+
+    estimated_days_to_clear = None
+    estimated_clear_date = None
+    projection_message = "当前速度无法清零，需加大复习量"
+    if net_daily_rate_raw > 0:
+        estimated_days_to_clear = int(math.ceil(active_count / net_daily_rate_raw)) if active_count > 0 else 0
+        estimated_clear_date = (today_value + timedelta(days=estimated_days_to_clear)).isoformat()
+        projection_message = f"约 {estimated_days_to_clear} 天后可清零"
+
+    retry_date_rows = db.query(func.date(WrongAnswerRetry.retried_at)).filter(
+        WrongAnswerRetry.retried_at.isnot(None)
+    ).distinct().all()
+    retry_dates = [_coerce_to_date(item[0]) for item in retry_date_rows]
+    streak_stats = _build_retry_streaks([d for d in retry_dates if d], today_value)
+
+    chapter_totals_rows = db.query(
+        WrongAnswerV2.chapter_id.label("chapter_id"),
+        func.count(WrongAnswerV2.id).label("total_count"),
+        func.sum(case((WrongAnswerV2.mastery_status == "archived", 1), else_=0)).label("archived_count"),
+    ).group_by(WrongAnswerV2.chapter_id).all()
+    chapter_totals = {
+        row.chapter_id: {
+            "total_count": int(row.total_count or 0),
+            "archived_count": int(row.archived_count or 0),
+        }
+        for row in chapter_totals_rows
+    }
+
+    weak_chapter_rows = db.query(
+        WrongAnswerV2.chapter_id.label("chapter_id"),
+        func.count(WrongAnswerV2.id).label("active_count"),
+        func.sum(case((WrongAnswerV2.severity_tag == "critical", 1), else_=0)).label("critical_count"),
+        func.sum(case((WrongAnswerV2.severity_tag == "stubborn", 1), else_=0)).label("stubborn_count"),
+    ).filter(
+        WrongAnswerV2.mastery_status == "active"
+    ).group_by(WrongAnswerV2.chapter_id).order_by(
+        desc("active_count")
+    ).limit(5).all()
+
+    chapter_ids = [row.chapter_id for row in weak_chapter_rows if row.chapter_id]
+    chapter_map = {}
+    if chapter_ids:
+        for chapter in db.query(Chapter).filter(Chapter.id.in_(chapter_ids)).all():
+            chapter_map[chapter.id] = chapter
+
+    weak_chapters: List[Dict[str, Any]] = []
+    for row in weak_chapter_rows:
+        chapter_id = row.chapter_id
+        chapter = chapter_map.get(chapter_id)
+        total_info = chapter_totals.get(chapter_id, {"total_count": int(row.active_count or 0), "archived_count": 0})
+        total_for_chapter = int(total_info["total_count"] or 0)
+        archived_for_chapter = int(total_info["archived_count"] or 0)
+        mastery_for_chapter = round(archived_for_chapter / total_for_chapter * 100, 1) if total_for_chapter > 0 else 0.0
+
+        if chapter:
+            chapter_name = chapter.chapter_title
+        elif chapter_id:
+            chapter_name = chapter_id
+        else:
+            chapter_name = "未分类"
+
+        weak_chapters.append({
+            "chapter_id": chapter_id or "",
+            "chapter_name": chapter_name,
+            "active_count": int(row.active_count or 0),
+            "critical_count": int(row.critical_count or 0),
+            "stubborn_count": int(row.stubborn_count or 0),
+            "mastery_percent": mastery_for_chapter,
+        })
+
+    return {
+        "overview": {
+            "active_count": active_count,
+            "archived_count": archived_count,
+            "total_count": total_count,
+            "mastery_percent": mastery_percent,
+            "retry_correct_rate": retry_correct_rate,
+            "retry_rate_delta_vs_last_week": retry_rate_delta_vs_last_week,
+            "streak_days": streak_stats["streak_days"],
+            "max_streak_days": streak_stats["max_streak_days"],
+            "active_delta_vs_yesterday": today_new_count - today_archived_count,
+        },
+        "today": {
+            "new_count": today_new_count,
+            "archived_count": today_archived_count,
+            "retried_count": today_retried_count,
+            "net_change": today_net_change,
+            "trend": "improving" if today_net_change > 0 else ("worsening" if today_net_change < 0 else "stable"),
+        },
+        "this_week": {
+            "new_count": this_week_new_count,
+            "archived_count": this_week_archived_count,
+            "net_change": this_week_net_change,
+        },
+        "severity_distribution": severity_distribution,
+        "review_pressure": {
+            "today_due": today_due,
+            "tomorrow_due": tomorrow_due,
+            "week_due": week_due,
+        },
+        "projection": {
+            "avg_daily_archived": round(avg_daily_archived_raw, 1),
+            "avg_daily_new": round(avg_daily_new_raw, 1),
+            "net_daily_rate": round(net_daily_rate_raw, 1),
+            "estimated_days_to_clear": estimated_days_to_clear,
+            "estimated_clear_date": estimated_clear_date,
+            "trend_direction": trend_direction,
+            "trend_description": _trend_description(trend_direction),
+            "projection_message": projection_message,
+        },
+        "daily_trend": daily_trend,
+        "weak_chapters": weak_chapters,
     }
 
 

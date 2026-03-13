@@ -5,19 +5,19 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, and_, cast, Date as SADate
+from sqlalchemy import desc
 from datetime import datetime, date, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
-import json
 import os
 import re
 import uuid
 
-from models import get_db
+from models import get_db, Chapter
 from learning_tracking_models import (
-    LearningSession, LearningActivity, QuestionRecord, 
-    DailyLearningLog, LearningInsight, SessionStatus, ActivityType
+    LearningSession, LearningActivity, QuestionRecord,
+    DailyLearningLog, LearningInsight, SessionStatus, ActivityType,
+    WrongAnswerV2, make_fingerprint, INVALID_CHAPTER_IDS
 )
 
 router = APIRouter(prefix="/api/tracking", tags=["learning_tracking"])
@@ -169,6 +169,264 @@ MASTER_PLAN_MILESTONES = [
     {"id": "five-hour-1", "stage": "冲刺押题阶段", "date": "12-17", "title": "五小时（第一场）"},
     {"id": "five-hour-2", "stage": "冲刺押题阶段", "date": "12-20", "title": "五小时（第二场）"},
 ]
+
+
+def _normalize_valid_chapter_id(chapter_id: Optional[str]) -> Optional[str]:
+    normalized = str(chapter_id or "").strip()
+    if not normalized or normalized in INVALID_CHAPTER_IDS:
+        return None
+    return normalized
+
+
+def _normalize_question_options(options: Any) -> Dict[str, str]:
+    if not isinstance(options, dict):
+        return {}
+
+    normalized: Dict[str, str] = {}
+    for key, value in options.items():
+        option_key = re.sub(r"[^A-E]", "", str(key or "").upper())[:1]
+        option_value = str(value or "").strip()
+        if option_key and option_value:
+            normalized[option_key] = option_value
+
+    return {key: normalized[key] for key in ["A", "B", "C", "D", "E"] if key in normalized}
+
+
+def _build_question_record_fingerprint(record: QuestionRecord) -> str:
+    return make_fingerprint((record.question_text or "").strip())
+
+
+def _build_question_record_fingerprint_candidates(record: QuestionRecord) -> List[str]:
+    candidates: List[str] = []
+    primary = _build_question_record_fingerprint(record)
+    if primary:
+        candidates.append(primary)
+
+    question_text = (record.question_text or "").strip()
+    options = _normalize_question_options(record.options)
+    if question_text and options:
+        option_snapshot = "||".join(
+            f"{key}:{options.get(key, '').strip()}"
+            for key in ["A", "B", "C", "D", "E"]
+            if key in options
+        )
+        option_fingerprint = make_fingerprint(f"{question_text}||{option_snapshot}")
+        if option_fingerprint not in candidates:
+            candidates.append(option_fingerprint)
+
+    return candidates
+
+
+def _display_key_point(record: QuestionRecord) -> str:
+    key_point = (record.key_point or "").strip()
+    if key_point:
+        return key_point
+
+    question_text = re.sub(r"\s+", " ", (record.question_text or "").strip())
+    if question_text:
+        return f"考点待提取：{question_text[:20]}"
+
+    return "考点待提取：未命名题目"
+
+
+def _question_record_sort_key(record: QuestionRecord) -> Tuple[datetime, int]:
+    return (record.answered_at or datetime.min, record.id or 0)
+
+
+def _group_records_by_session(records: List[QuestionRecord]) -> Dict[str, List[QuestionRecord]]:
+    grouped: Dict[str, List[QuestionRecord]] = {}
+    for record in records:
+        grouped.setdefault(record.session_id, []).append(record)
+    return grouped
+
+
+def _load_unique_question_records(
+    db: Session,
+    session_ids: Optional[List[str]] = None
+) -> List[QuestionRecord]:
+    query = db.query(QuestionRecord)
+    if session_ids is not None:
+        if not session_ids:
+            return []
+        query = query.filter(QuestionRecord.session_id.in_(session_ids))
+
+    latest_by_key: Dict[Tuple[str, int], QuestionRecord] = {}
+    for record in query.all():
+        key = (record.session_id, record.question_index)
+        existing = latest_by_key.get(key)
+        if existing is None or _question_record_sort_key(record) >= _question_record_sort_key(existing):
+            latest_by_key[key] = record
+
+    return sorted(latest_by_key.values(), key=lambda item: (item.session_id, item.question_index))
+
+
+def _build_record_stats(records: List[QuestionRecord]) -> Dict[str, int]:
+    stats = {
+        "total_questions": 0,
+        "answered_questions": 0,
+        "correct_count": 0,
+        "wrong_count": 0,
+        "sure_count": 0,
+        "unsure_count": 0,
+        "no_count": 0,
+    }
+
+    for record in records:
+        stats["total_questions"] += 1
+        stats["answered_questions"] += 1
+        if record.is_correct:
+            stats["correct_count"] += 1
+        else:
+            stats["wrong_count"] += 1
+
+        confidence = (record.confidence or "").strip()
+        if confidence == "sure":
+            stats["sure_count"] += 1
+        elif confidence == "unsure":
+            stats["unsure_count"] += 1
+        elif confidence == "no":
+            stats["no_count"] += 1
+
+    return stats
+
+
+def _sync_session_question_stats(
+    session: LearningSession,
+    db: Session
+) -> Tuple[List[QuestionRecord], Dict[str, int]]:
+    records = _load_unique_question_records(db, session_ids=[session.id])
+    stats = _build_record_stats(records)
+
+    session.answered_questions = stats["answered_questions"]
+    session.correct_count = stats["correct_count"]
+    session.wrong_count = stats["wrong_count"]
+    session.sure_count = stats["sure_count"]
+    session.unsure_count = stats["unsure_count"]
+    session.no_count = stats["no_count"]
+    session.updated_at = datetime.now()
+
+    return records, stats
+
+
+def _normalize_lookup_token(value: Optional[str]) -> str:
+    return re.sub(r"[\s_\-:：]+", "", str(value or "").strip().lower())
+
+
+_CHAPTER_PREFIX_ALIASES: Dict[str, List[str]] = {
+    "physio": ["physiology", "physio"],
+    "physiology": ["physiology", "physio"],
+    "patho": ["pathology", "patho"],
+    "pathology": ["pathology", "patho"],
+    "internal": ["internal_medicine", "internal"],
+    "internal_medicine": ["internal_medicine", "internal"],
+    "biochem": ["biochemistry", "biochem"],
+    "biochemistry": ["biochemistry", "biochem"],
+    "surgery": ["surgery"],
+    "diagnostics": ["diagnostics"],
+}
+
+
+def _expand_chapter_id_variants(chapter_id: str) -> List[str]:
+    """将 physio_ch10 展开为 [physio_ch10, physiology_ch10] 等变体"""
+    match = re.match(r"^([a-z_]+?)_ch(.+)$", chapter_id.lower())
+    if not match:
+        return [chapter_id]
+    prefix, suffix = match.group(1), match.group(2)
+    aliases = _CHAPTER_PREFIX_ALIASES.get(prefix, [prefix])
+    return [f"{alias}_ch{suffix}" for alias in aliases]
+
+
+def _resolve_chapter_id_from_map(
+    chapter_id: Optional[str],
+    chapter_map: Dict[str, Chapter]
+) -> Optional[str]:
+    normalized = _normalize_valid_chapter_id(chapter_id)
+    if not normalized:
+        return None
+    if normalized in chapter_map:
+        return normalized
+
+    # 尝试缩写展开：physio_ch10 → physiology_ch10
+    for variant in _expand_chapter_id_variants(normalized):
+        if variant in chapter_map:
+            return variant
+
+    # 最后兜底：token 级别模糊匹配
+    needle = _normalize_lookup_token(normalized)
+    for candidate_id in chapter_map.keys():
+        if _normalize_lookup_token(candidate_id) == needle:
+            return candidate_id
+
+    return None
+
+
+def _load_wrong_answer_chapter_lookup(
+    db: Session,
+    records: List[QuestionRecord]
+) -> Dict[Tuple[str, int], str]:
+    fingerprint_candidates: Dict[Tuple[str, int], List[str]] = {}
+    fingerprints = set()
+
+    for record in records:
+        key = (record.session_id, record.question_index)
+        candidates = _build_question_record_fingerprint_candidates(record)
+        if not candidates:
+            continue
+        fingerprint_candidates[key] = candidates
+        fingerprints.update(candidates)
+
+    if not fingerprints:
+        return {}
+
+    rows = db.query(
+        WrongAnswerV2.question_fingerprint,
+        WrongAnswerV2.chapter_id
+    ).filter(
+        WrongAnswerV2.question_fingerprint.in_(list(fingerprints))
+    ).all()
+
+    fingerprint_map: Dict[str, str] = {}
+    for fingerprint, chapter_id in rows:
+        normalized = _normalize_valid_chapter_id(chapter_id)
+        if normalized:
+            fingerprint_map[fingerprint] = normalized
+
+    lookup: Dict[Tuple[str, int], str] = {}
+    for key, candidates in fingerprint_candidates.items():
+        for fingerprint in candidates:
+            chapter_id = fingerprint_map.get(fingerprint)
+            if chapter_id:
+                lookup[key] = chapter_id
+                break
+
+    return lookup
+
+
+def _resolve_period_bounds(
+    period: str,
+    date_str: Optional[str]
+) -> Tuple[Optional[datetime], Optional[datetime]]:
+    now = datetime.now()
+    start_date = None
+    end_date = None
+
+    if period == "day":
+        target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else now.date()
+        start_date = datetime.combine(target, datetime.min.time())
+        end_date = datetime.combine(target, datetime.max.time())
+    elif period == "week":
+        target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else now.date()
+        start_of_week = target - timedelta(days=target.weekday())
+        start_date = datetime.combine(start_of_week, datetime.min.time())
+        end_date = datetime.combine(start_of_week + timedelta(days=6), datetime.max.time())
+    elif period == "month":
+        target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else now.date()
+        start_date = datetime.combine(target.replace(day=1), datetime.min.time())
+        next_month = target.replace(day=28) + timedelta(days=4)
+        last_day = next_month - timedelta(days=next_month.day)
+        end_date = datetime.combine(last_day, datetime.max.time())
+
+    return start_date, end_date
 
 
 def _normalize_ocr_line(line: str) -> str:
@@ -492,11 +750,11 @@ async def start_learning_session(
         else:
             title = f"{now} 细节练习"
     
-    # 验证 chapter_id：无效值存为 None，避免污染后续数据
-    INVALID_CHAPTER_IDS = {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0", "uncategorized_ch0"}
-    valid_chapter_id = body.chapter_id
-    if valid_chapter_id in INVALID_CHAPTER_IDS:
-        valid_chapter_id = None
+    # 仅保存可映射的有效章节 ID，避免后续统计落入“未分类”
+    valid_chapter_id = _normalize_valid_chapter_id(body.chapter_id)
+    if valid_chapter_id:
+        chapter_map = {chapter.id: chapter for chapter in db.query(Chapter).all()}
+        valid_chapter_id = _resolve_chapter_id_from_map(valid_chapter_id, chapter_map)
 
     # 创建会话记录
     learning_session = LearningSession(
@@ -590,44 +848,47 @@ async def record_question_answer(
     else:
         is_correct = user_ans == correct_ans
 
-    # 创建题目记录
-    question_record = QuestionRecord(
+    now = datetime.now()
+    existing_records = db.query(QuestionRecord).filter(
+        QuestionRecord.session_id == session_id,
+        QuestionRecord.question_index == body.question_index
+    ).order_by(
+        desc(QuestionRecord.answered_at),
+        desc(QuestionRecord.id)
+    ).all()
+
+    updated = bool(existing_records)
+    question_record = existing_records[0] if existing_records else QuestionRecord(
         session_id=session_id,
         question_index=body.question_index,
-        question_type=body.question_type,
-        difficulty=body.difficulty,
-        question_text=body.question_text[:2000],  # 限制长度
-        options=body.options,
-        correct_answer=body.correct_answer,
-        user_answer=body.user_answer,
-        is_correct=is_correct,
-        confidence=body.confidence,
-        explanation=body.explanation[:2000] if body.explanation else None,
-        key_point=body.key_point,
-        answered_at=datetime.now(),
-        time_spent_seconds=body.time_spent_seconds
+        first_viewed_at=now,
     )
-    db.add(question_record)
-    
-    # 更新会话统计（使用服务端重新计算的 is_correct）
-    session.answered_questions += 1
-    if is_correct:
-        session.correct_count += 1
-    else:
-        session.wrong_count += 1
-    
-    # 更新自信度统计
-    if body.confidence == "sure":
-        session.sure_count += 1
-    elif body.confidence == "unsure":
-        session.unsure_count += 1
-    elif body.confidence == "no":
-        session.no_count += 1
-    
-    session.updated_at = datetime.now()
+    if not existing_records:
+        db.add(question_record)
+
+    for stale_record in existing_records[1:]:
+        db.delete(stale_record)
+
+    question_record.question_type = body.question_type
+    question_record.difficulty = body.difficulty
+    question_record.question_text = body.question_text[:2000]
+    question_record.options = _normalize_question_options(body.options)
+    question_record.correct_answer = body.correct_answer
+    question_record.user_answer = body.user_answer
+    question_record.is_correct = is_correct
+    question_record.confidence = body.confidence
+    question_record.explanation = body.explanation[:2000] if body.explanation else None
+    question_record.key_point = body.key_point
+    question_record.answered_at = now
+    question_record.time_spent_seconds = body.time_spent_seconds
+    if not question_record.first_viewed_at:
+        question_record.first_viewed_at = now
+
+    db.flush()
+    _sync_session_question_stats(session, db)
     db.commit()
     
-    return {"success": True, "record_id": question_record.id}
+    return {"success": True, "record_id": question_record.id, "updated": updated}
 
 
 @router.post("/session/{session_id}/complete")
@@ -643,13 +904,15 @@ async def complete_learning_session(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
-    # 更新会话信息
+    _, stats = _sync_session_question_stats(session, db)
+
+    # 更新会话信息；重复提交时保留首次完成时间，避免每日统计跨天漂移
+    already_completed = session.status == SessionStatus.COMPLETED and session.completed_at is not None
     session.status = SessionStatus.COMPLETED
-    session.completed_at = datetime.now()
+    session.completed_at = session.completed_at or datetime.now()
     session.score = body.score
     session.total_questions = body.total_questions
-    # 修复：确保 accuracy 不超过 1.0（防止 correct_count 累积错误）
-    actual_correct = min(session.correct_count, body.total_questions)
+    actual_correct = min(stats["correct_count"], body.total_questions)
     session.accuracy = actual_correct / body.total_questions if body.total_questions > 0 else 0
     
     # 计算总用时
@@ -657,15 +920,16 @@ async def complete_learning_session(
         session.duration_seconds = int((session.completed_at - session.started_at).total_seconds())
     
     # 记录完成活动
-    activity = LearningActivity(
-        session_id=session_id,
-        activity_type=ActivityType.EXAM_SUBMIT if session.session_type == "exam" else ActivityType.DETAIL_PRACTICE_SUBMIT,
-        activity_name="完成测试" if session.session_type == "exam" else "完成细节练习",
-        data={"score": body.score, "correct": session.correct_count, "wrong": session.wrong_count},
-        timestamp=datetime.now(),
-        relative_time_ms=session.duration_seconds * 1000 if session.duration_seconds else 0
-    )
-    db.add(activity)
+    if not already_completed:
+        activity = LearningActivity(
+            session_id=session_id,
+            activity_type=ActivityType.EXAM_SUBMIT if session.session_type == "exam" else ActivityType.DETAIL_PRACTICE_SUBMIT,
+            activity_name="完成测试" if session.session_type == "exam" else "完成细节练习",
+            data={"score": body.score, "correct": stats["correct_count"], "wrong": stats["wrong_count"]},
+            timestamp=datetime.now(),
+            relative_time_ms=session.duration_seconds * 1000 if session.duration_seconds else 0
+        )
+        db.add(activity)
     
     db.commit()
 
@@ -691,59 +955,46 @@ async def complete_learning_session(
 async def update_daily_log(session: LearningSession, db: Session):
     """更新每日学习日志"""
     try:
-        today = date.today()
+        log_date = (session.completed_at or datetime.now()).date()
+        start_of_day = datetime.combine(log_date, datetime.min.time())
+        end_of_day = datetime.combine(log_date, datetime.max.time())
 
-        log = db.query(DailyLearningLog).filter(DailyLearningLog.date == today).first()
-
+        log = db.query(DailyLearningLog).filter(DailyLearningLog.date == log_date).first()
         if not log:
-            log = DailyLearningLog(
-                date=today,
-                first_session_at=session.started_at
-            )
+            log = DailyLearningLog(date=log_date)
             db.add(log)
 
-        # 更新统计
-        log.total_sessions = (log.total_sessions or 0) + 1
-        log.total_questions = (log.total_questions or 0) + (session.total_questions or 0)
-        log.total_correct = (log.total_correct or 0) + (session.correct_count or 0)
-        log.total_wrong = (log.total_wrong or 0) + (session.wrong_count or 0)
-        log.total_duration_seconds = (log.total_duration_seconds or 0) + (session.duration_seconds or 0)
-        log.last_session_at = datetime.now()
+        day_sessions = db.query(LearningSession).filter(
+            LearningSession.completed_at >= start_of_day,
+            LearningSession.completed_at <= end_of_day
+        ).order_by(LearningSession.completed_at.asc()).all()
 
-        # 计算平均分数（简化版，避免复杂的日期查询）
-        # 直接使用当前会话的分数和已有平均分数计算
-        if log.average_score and log.total_sessions > 1:
-            # 加权平均
-            total_score = log.average_score * (log.total_sessions - 1) + (session.score or 0)
-            log.average_score = round(total_score / log.total_sessions, 1)
-        else:
-            log.average_score = session.score or 0
+        unique_records = _load_unique_question_records(
+            db,
+            session_ids=[item.id for item in day_sessions]
+        )
+        record_stats = _build_record_stats(unique_records)
 
-        # 更新会话ID列表
-        if not isinstance(log.session_ids, list):
-            log.session_ids = []
-        log.session_ids.append(session.id)
+        scores = [item.score for item in day_sessions if item.score is not None]
+        started_candidates = [item.started_at for item in day_sessions if item.started_at]
+        completed_candidates = [item.completed_at for item in day_sessions if item.completed_at]
+        knowledge_points = sorted({_display_key_point(record) for record in unique_records})
+        weak_points = sorted({_display_key_point(record) for record in unique_records if not record.is_correct})
 
-        # 更新知识点 - 直接查询 QuestionRecord 而不是通过关系访问
-        knowledge_points = set(log.knowledge_points_covered or [])
-        weak_points = set(log.weak_knowledge_points or [])
-
-        # 从题目记录中提取知识点 - 使用显式查询避免关系加载问题
-        question_records = db.query(QuestionRecord).filter(
-            QuestionRecord.session_id == session.id
-        ).all()
-
-        for record in question_records:
-            if record.key_point:
-                knowledge_points.add(record.key_point)
-                if not record.is_correct:
-                    weak_points.add(record.key_point)
-
-        log.knowledge_points_covered = list(knowledge_points)
-        log.weak_knowledge_points = list(weak_points)
+        log.total_sessions = len(day_sessions)
+        log.total_questions = record_stats["total_questions"]
+        log.total_correct = record_stats["correct_count"]
+        log.total_wrong = record_stats["wrong_count"]
+        log.total_duration_seconds = sum(item.duration_seconds or 0 for item in day_sessions)
+        log.average_score = round(sum(scores) / len(scores), 1) if scores else 0
+        log.first_session_at = min(started_candidates) if started_candidates else session.started_at
+        log.last_session_at = max(completed_candidates) if completed_candidates else session.completed_at
+        log.session_ids = [item.id for item in day_sessions]
+        log.knowledge_points_covered = knowledge_points
+        log.weak_knowledge_points = weak_points
 
         db.commit()
-        print(f"[Tracking] 每日日志更新成功: {today}, 会话数: {log.total_sessions}")
+        print(f"[Tracking] 每日日志更新成功: {log_date}, 会话数: {log.total_sessions}")
     except Exception as e:
         db.rollback()
         print(f"[Tracking] 更新每日日志失败: {e}")
@@ -769,28 +1020,35 @@ async def get_learning_sessions(
     
     total = query.count()
     sessions = query.offset(offset).limit(limit).all()
+    session_ids = [item.id for item in sessions]
+    session_records = _group_records_by_session(
+        _load_unique_question_records(db, session_ids=session_ids)
+    )
+
+    session_items = []
+    for item in sessions:
+        stats = _build_record_stats(session_records.get(item.id, []))
+        total_questions = max(item.total_questions or 0, len(session_records.get(item.id, [])))
+        session_items.append({
+            "id": item.id,
+            "session_type": item.session_type,
+            "title": item.title,
+            "score": item.score,
+            "accuracy": round(stats["correct_count"] / total_questions * 100, 1) if total_questions > 0 else None,
+            "correct_count": stats["correct_count"],
+            "wrong_count": stats["wrong_count"],
+            "total_questions": total_questions,
+            "sure_count": stats["sure_count"],
+            "unsure_count": stats["unsure_count"],
+            "no_count": stats["no_count"],
+            "duration_seconds": item.duration_seconds,
+            "started_at": item.started_at.isoformat() if item.started_at else None,
+            "status": item.status
+        })
     
     return {
         "total": total,
-        "sessions": [
-            {
-                "id": s.id,
-                "session_type": s.session_type,
-                "title": s.title,
-                "score": s.score,
-                "accuracy": round(s.accuracy * 100, 1) if s.accuracy else None,
-                "correct_count": s.correct_count,
-                "wrong_count": s.wrong_count,
-                "total_questions": s.total_questions,
-                "sure_count": s.sure_count,
-                "unsure_count": s.unsure_count,
-                "no_count": s.no_count,
-                "duration_seconds": s.duration_seconds,
-                "started_at": s.started_at.isoformat() if s.started_at else None,
-                "status": s.status
-            }
-            for s in sessions
-        ]
+        "sessions": session_items
     }
 
 
@@ -811,10 +1069,10 @@ async def get_session_detail(
         LearningActivity.session_id == session_id
     ).order_by(LearningActivity.timestamp).all()
     
-    # 获取题目记录
-    questions = db.query(QuestionRecord).filter(
-        QuestionRecord.session_id == session_id
-    ).order_by(QuestionRecord.question_index).all()
+    # 获取题目记录（同一题重复提交时仅保留最新一次）
+    questions = _load_unique_question_records(db, session_ids=[session_id])
+    stats = _build_record_stats(questions)
+    total_questions = max(session.total_questions or 0, len(questions))
     
     return {
         "id": session.id,
@@ -822,14 +1080,14 @@ async def get_session_detail(
         "title": session.title,
         "description": session.description,
         "score": session.score,
-        "accuracy": round(session.accuracy * 100, 1) if session.accuracy else None,
-        "total_questions": session.total_questions,
-        "answered_questions": session.answered_questions,
-        "correct_count": session.correct_count,
-        "wrong_count": session.wrong_count,
-        "sure_count": session.sure_count,
-        "unsure_count": session.unsure_count,
-        "no_count": session.no_count,
+        "accuracy": round(stats["correct_count"] / total_questions * 100, 1) if total_questions > 0 else None,
+        "total_questions": total_questions,
+        "answered_questions": stats["answered_questions"],
+        "correct_count": stats["correct_count"],
+        "wrong_count": stats["wrong_count"],
+        "sure_count": stats["sure_count"],
+        "unsure_count": stats["unsure_count"],
+        "no_count": stats["no_count"],
         "duration_seconds": session.duration_seconds,
         "started_at": session.started_at.isoformat() if session.started_at else None,
         "completed_at": session.completed_at.isoformat() if session.completed_at else None,
@@ -855,7 +1113,7 @@ async def get_session_detail(
                 "user_answer": q.user_answer,
                 "is_correct": q.is_correct,
                 "confidence": q.confidence,
-                "key_point": q.key_point,
+                "key_point": _display_key_point(q),
                 "time_spent_seconds": q.time_spent_seconds,
                 "explanation": q.explanation,
                 "answer_changes": q.answer_changes or []
@@ -878,28 +1136,32 @@ async def get_review_data(
     if not session_ids:
         return {"sessions": []}
 
+    records_by_session = _group_records_by_session(
+        _load_unique_question_records(db, session_ids=session_ids)
+    )
+
     results = []
     for sid in session_ids:
         session = db.query(LearningSession).filter(LearningSession.id == sid).first()
         if not session:
             continue
 
-        questions = db.query(QuestionRecord).filter(
-            QuestionRecord.session_id == sid
-        ).order_by(QuestionRecord.question_index).all()
+        questions = records_by_session.get(sid, [])
+        stats = _build_record_stats(questions)
+        total_questions = max(session.total_questions or 0, len(questions))
 
         results.append({
             "id": session.id,
             "session_type": session.session_type,
             "title": session.title,
             "score": session.score,
-            "accuracy": round(session.accuracy * 100, 1) if session.accuracy else None,
-            "correct_count": session.correct_count,
-            "wrong_count": session.wrong_count,
-            "total_questions": session.total_questions,
-            "sure_count": session.sure_count,
-            "unsure_count": session.unsure_count,
-            "no_count": session.no_count,
+            "accuracy": round(stats["correct_count"] / total_questions * 100, 1) if total_questions > 0 else None,
+            "correct_count": stats["correct_count"],
+            "wrong_count": stats["wrong_count"],
+            "total_questions": total_questions,
+            "sure_count": stats["sure_count"],
+            "unsure_count": stats["unsure_count"],
+            "no_count": stats["no_count"],
             "duration_seconds": session.duration_seconds,
             "started_at": session.started_at.isoformat() if session.started_at else None,
             "completed_at": session.completed_at.isoformat() if session.completed_at else None,
@@ -915,7 +1177,7 @@ async def get_review_data(
                     "user_answer": q.user_answer,
                     "is_correct": q.is_correct,
                     "confidence": q.confidence,
-                    "key_point": q.key_point,
+                    "key_point": _display_key_point(q),
                     "explanation": q.explanation,
                     "time_spent_seconds": q.time_spent_seconds,
                     "answer_changes": q.answer_changes or []
@@ -935,8 +1197,12 @@ async def get_knowledge_archive(
     获取全局知识点归档数据（树状结构）
     按 学科 → 系统/章节 → 知识点 组织，包含所有题目
     """
-    # 获取所有题目记录
-    all_questions = db.query(QuestionRecord).order_by(QuestionRecord.answered_at.desc()).all()
+    # 获取所有题目记录（按 session_id + question_index 去重）
+    all_questions = sorted(
+        _load_unique_question_records(db),
+        key=lambda record: _question_record_sort_key(record),
+        reverse=True
+    )
 
     # 获取session信息用于补充上下文
     session_map = {}
@@ -953,7 +1219,7 @@ async def get_knowledge_archive(
     # 按知识点聚合
     kp_map = {}
     for q in all_questions:
-        kp = q.key_point or "未分类"
+        kp = _display_key_point(q)
         if kp not in kp_map:
             kp_map[kp] = {"total": 0, "correct": 0, "wrong": 0, "questions": []}
         kp_map[kp]["total"] += 1
@@ -1144,181 +1410,133 @@ async def get_stats(
     """
     获取指定时间范围的统计数据（统一数据源）
     """
-    # 计算日期范围
-    now = datetime.now()
-    start_date = None
-    end_date = None
+    start_date, end_date = _resolve_period_bounds(period, date_str)
 
-    if period == "day":
-        target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else now.date()
-        start_date = datetime.combine(target, datetime.min.time())
-        end_date = datetime.combine(target, datetime.max.time())
-    elif period == "week":
-        if date_str:
-            target = datetime.strptime(date_str, "%Y-%m-%d").date()
-        else:
-            target = now.date()
-        start_of_week = target - timedelta(days=target.weekday())
-        start_date = datetime.combine(start_of_week, datetime.min.time())
-        end_date = datetime.combine(start_of_week + timedelta(days=6), datetime.max.time())
-    elif period == "month":
-        if date_str:
-            target = datetime.strptime(date_str, "%Y-%m-%d").date()
-        else:
-            target = now.date()
-        start_date = datetime.combine(target.replace(day=1), datetime.min.time())
-        next_month = target.replace(day=28) + timedelta(days=4)
-        last_day = next_month - timedelta(days=next_month.day)
-        end_date = datetime.combine(last_day, datetime.max.time())
-
-    # 查询sessions
-    query = db.query(LearningSession)
+    session_query = db.query(LearningSession)
     if start_date and end_date:
-        query = query.filter(
+        session_query = session_query.filter(
             LearningSession.started_at >= start_date,
             LearningSession.started_at <= end_date
         )
-    sessions = query.order_by(desc(LearningSession.started_at)).all()
+    sessions = session_query.order_by(desc(LearningSession.started_at)).all()
+    session_ids = [session.id for session in sessions]
+    session_lookup = {session.id: session for session in sessions}
 
-    # 汇总统计
+    question_records = _load_unique_question_records(db, session_ids=session_ids)
+    session_records = _group_records_by_session(question_records)
+    overall_stats = _build_record_stats(question_records)
     total_sessions = len(sessions)
-    total_questions = 0
-    total_correct = 0
-    total_duration = 0
-    total_sure = 0
-    total_unsure = 0
-    total_no = 0
+    total_duration = sum(session.duration_seconds or 0 for session in sessions)
 
-    for s in sessions:
-        total_questions += (s.correct_count or 0) + (s.wrong_count or 0)
-        total_correct += s.correct_count or 0
-        total_duration += s.duration_seconds or 0
-        total_sure += s.sure_count or 0
-        total_unsure += s.unsure_count or 0
-        total_no += s.no_count or 0
-
-    # 从QuestionRecord获取真实的题型和难度分布
-    q_query = db.query(QuestionRecord)
-    if start_date and end_date:
-        session_ids = [s.id for s in sessions]
-        if session_ids:
-            q_query = q_query.filter(QuestionRecord.session_id.in_(session_ids))
-        else:
-            q_query = q_query.filter(False)
-    question_records = q_query.all()
-
-    type_dist = {}
-    diff_dist = {}
-    knowledge_points = {}
-    type_correct = {}
-    diff_correct = {}
-    kp_confidence = {}  # {kp: [scores]}
+    type_dist: Dict[str, int] = {}
+    diff_dist: Dict[str, int] = {}
+    knowledge_points: Dict[str, Dict[str, Any]] = {}
+    type_correct: Dict[str, int] = {}
+    diff_correct: Dict[str, int] = {}
+    kp_confidence: Dict[str, List[float]] = {}
 
     for qr in question_records:
-        # 题型
-        qt = qr.question_type or "A1"
-        type_dist[qt] = type_dist.get(qt, 0) + 1
-        # 难度
-        d = qr.difficulty or "基础"
-        diff_dist[d] = diff_dist.get(d, 0) + 1
-        # 正确数追踪
-        type_correct[qt] = type_correct.get(qt, 0) + (1 if qr.is_correct else 0)
-        diff_correct[d] = diff_correct.get(d, 0) + (1 if qr.is_correct else 0)
-        # 知识点
-        kp = qr.key_point or "未分类"
-        if kp not in knowledge_points:
-            knowledge_points[kp] = {"total": 0, "correct": 0, "wrong": 0}
-        knowledge_points[kp]["total"] += 1
+        question_type = qr.question_type or "A1"
+        difficulty = qr.difficulty or "基础"
+        key_point = _display_key_point(qr)
+
+        type_dist[question_type] = type_dist.get(question_type, 0) + 1
+        diff_dist[difficulty] = diff_dist.get(difficulty, 0) + 1
+        type_correct[question_type] = type_correct.get(question_type, 0) + (1 if qr.is_correct else 0)
+        diff_correct[difficulty] = diff_correct.get(difficulty, 0) + (1 if qr.is_correct else 0)
+
+        if key_point not in knowledge_points:
+            knowledge_points[key_point] = {"total": 0, "correct": 0, "wrong": 0}
+        knowledge_points[key_point]["total"] += 1
         if qr.is_correct:
-            knowledge_points[kp]["correct"] += 1
+            knowledge_points[key_point]["correct"] += 1
         else:
-            knowledge_points[kp]["wrong"] += 1
+            knowledge_points[key_point]["wrong"] += 1
 
         conf_score = 1.0 if qr.confidence == "sure" else (0.5 if qr.confidence == "unsure" else (0.0 if qr.confidence == "no" else None))
         if conf_score is not None:
-            kp_confidence.setdefault(kp, []).append(conf_score)
+            kp_confidence.setdefault(key_point, []).append(conf_score)
 
     total_qr = len(question_records)
 
-    # 按日期聚合趋势
-    daily_map = {}
-    for s in sessions:
-        if not s.started_at:
+    daily_map: Dict[str, Dict[str, int]] = {}
+    for session in sessions:
+        if not session.started_at:
             continue
-        dk = s.started_at.strftime("%Y-%m-%d")
-        if dk not in daily_map:
-            daily_map[dk] = {"questions": 0, "correct": 0, "sessions": 0, "duration": 0}
-        daily_map[dk]["questions"] += (s.correct_count or 0) + (s.wrong_count or 0)
-        daily_map[dk]["correct"] += s.correct_count or 0
-        daily_map[dk]["sessions"] += 1
-        daily_map[dk]["duration"] += s.duration_seconds or 0
+        day_key = session.started_at.strftime("%Y-%m-%d")
+        daily_map.setdefault(day_key, {"questions": 0, "correct": 0, "sessions": 0, "duration": 0})
+        daily_map[day_key]["sessions"] += 1
+        daily_map[day_key]["duration"] += session.duration_seconds or 0
 
-    # 按session_id索引question_records，用于构建每个session的题目级别数据
-    session_questions_map = {}
-    for qr in question_records:
-        if qr.session_id not in session_questions_map:
-            session_questions_map[qr.session_id] = []
-        session_questions_map[qr.session_id].append({
-            "key_point": qr.key_point or "未分类",
-            "is_correct": qr.is_correct,
-            "confidence": qr.confidence,
-            "time_spent_seconds": qr.time_spent_seconds or 0,
-            "answer_changes": qr.answer_changes or [],
-            "question_type": qr.question_type or "A1",
-            "difficulty": qr.difficulty or "基础",
-        })
+    session_questions_map: Dict[str, List[Dict[str, Any]]] = {}
+    for session_id, records in session_records.items():
+        session = session_lookup.get(session_id)
+        if session and session.started_at:
+            day_key = session.started_at.strftime("%Y-%m-%d")
+            daily_map.setdefault(day_key, {"questions": 0, "correct": 0, "sessions": 0, "duration": 0})
+            daily_map[day_key]["questions"] += len(records)
+            daily_map[day_key]["correct"] += sum(1 for record in records if record.is_correct)
 
-    # 构建sessions列表（含分组信息和题目级别数据）
+        session_questions_map[session_id] = [
+            {
+                "key_point": _display_key_point(record),
+                "is_correct": record.is_correct,
+                "confidence": record.confidence,
+                "time_spent_seconds": record.time_spent_seconds or 0,
+                "answer_changes": record.answer_changes or [],
+                "question_type": record.question_type or "A1",
+                "difficulty": record.difficulty or "基础",
+            }
+            for record in records
+        ]
+
     session_list = []
-    for s in sessions:
+    for session in sessions:
+        records = session_records.get(session.id, [])
+        session_stats = _build_record_stats(records)
+        total_questions = max(session.total_questions or 0, len(records))
         session_list.append({
-            "id": s.id,
-            "session_type": s.session_type,
-            "title": s.title,
-            "score": s.score,
-            "accuracy": round(s.accuracy * 100, 1) if s.accuracy else None,
-            "correct_count": s.correct_count,
-            "wrong_count": s.wrong_count,
-            "total_questions": s.total_questions,
-            "sure_count": s.sure_count,
-            "unsure_count": s.unsure_count,
-            "no_count": s.no_count,
-            "duration_seconds": s.duration_seconds,
-            "started_at": s.started_at.isoformat() if s.started_at else None,
-            "completed_at": s.completed_at.isoformat() if s.completed_at else None,
-            "status": s.status,
-            "knowledge_point": s.knowledge_point,
-            "chapter_id": s.chapter_id,
-            "question_details": session_questions_map.get(s.id, []),
+            "id": session.id,
+            "session_type": session.session_type,
+            "title": session.title,
+            "score": session.score,
+            "accuracy": round(session_stats["correct_count"] / total_questions * 100, 1) if total_questions > 0 else None,
+            "correct_count": session_stats["correct_count"],
+            "wrong_count": session_stats["wrong_count"],
+            "total_questions": total_questions,
+            "sure_count": session_stats["sure_count"],
+            "unsure_count": session_stats["unsure_count"],
+            "no_count": session_stats["no_count"],
+            "duration_seconds": session.duration_seconds,
+            "started_at": session.started_at.isoformat() if session.started_at else None,
+            "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+            "status": session.status,
+            "knowledge_point": session.knowledge_point,
+            "chapter_id": session.chapter_id,
+            "question_details": session_questions_map.get(session.id, []),
         })
 
-    # Add avg_confidence to each knowledge point
-    for kp_name in knowledge_points:
-        confs = kp_confidence.get(kp_name, [])
-        # 无自信度数据时默认0（未知），避免被误判为"高自信"
-        knowledge_points[kp_name]["avg_confidence"] = round(sum(confs) / len(confs), 2) if confs else 0.0
-        knowledge_points[kp_name]["has_confidence_data"] = len(confs) > 0
+    for key_point, data in knowledge_points.items():
+        confidences = kp_confidence.get(key_point, [])
+        data["avg_confidence"] = round(sum(confidences) / len(confidences), 2) if confidences else 0.0
+        data["has_confidence_data"] = len(confidences) > 0
 
-    # Week-over-week accuracy delta
     now_date = datetime.now().date()
     this_week_start = now_date - timedelta(days=now_date.weekday())
     last_week_start = this_week_start - timedelta(days=7)
 
-    wow_this = db.query(QuestionRecord).join(
-        LearningSession, QuestionRecord.session_id == LearningSession.id
-    ).filter(
+    wow_this_sessions = db.query(LearningSession).filter(
         LearningSession.started_at >= datetime.combine(this_week_start, datetime.min.time())
     ).all()
-
-    wow_last = db.query(QuestionRecord).join(
-        LearningSession, QuestionRecord.session_id == LearningSession.id
-    ).filter(
+    wow_last_sessions = db.query(LearningSession).filter(
         LearningSession.started_at >= datetime.combine(last_week_start, datetime.min.time()),
         LearningSession.started_at < datetime.combine(this_week_start, datetime.min.time())
     ).all()
+    wow_this_records = _load_unique_question_records(db, session_ids=[session.id for session in wow_this_sessions])
+    wow_last_records = _load_unique_question_records(db, session_ids=[session.id for session in wow_last_sessions])
 
-    this_acc = round(sum(1 for q in wow_this if q.is_correct) / len(wow_this) * 100, 1) if wow_this else None
-    last_acc = round(sum(1 for q in wow_last if q.is_correct) / len(wow_last) * 100, 1) if wow_last else None
+    this_acc = round(sum(1 for q in wow_this_records if q.is_correct) / len(wow_this_records) * 100, 1) if wow_this_records else None
+    last_acc = round(sum(1 for q in wow_last_records if q.is_correct) / len(wow_last_records) * 100, 1) if wow_last_records else None
 
     if this_acc is not None and last_acc is not None:
         delta = round(this_acc - last_acc, 1)
@@ -1328,15 +1546,19 @@ async def get_stats(
     else:
         wow_delta = {"current_accuracy": None, "previous_accuracy": None, "delta": None, "direction": "flat"}
 
-    # Find weakest knowledge point (total >= 3)
     weakest_area = None
-    min_acc = 101
-    for kp_name, kp_data in knowledge_points.items():
-        if kp_data["total"] >= 3:
-            acc = round(kp_data["correct"] / kp_data["total"] * 100, 1) if kp_data["total"] > 0 else 0
-            if acc < min_acc:
-                min_acc = acc
-                weakest_area = {"name": kp_name, "accuracy": acc, "total": kp_data["total"], "correct": kp_data["correct"]}
+    min_acc = 101.0
+    for key_point, data in knowledge_points.items():
+        if data["total"] >= 3:
+            accuracy = round(data["correct"] / data["total"] * 100, 1) if data["total"] > 0 else 0
+            if accuracy < min_acc:
+                min_acc = accuracy
+                weakest_area = {
+                    "name": key_point,
+                    "accuracy": accuracy,
+                    "total": data["total"],
+                    "correct": data["correct"]
+                }
 
     return {
         "period": period,
@@ -1344,29 +1566,29 @@ async def get_stats(
         "end_date": end_date.isoformat() if end_date else None,
         "summary": {
             "total_sessions": total_sessions,
-            "total_questions": total_questions,
-            "total_correct": total_correct,
-            "avg_accuracy": round(total_correct / total_questions * 100, 1) if total_questions > 0 else 0,
+            "total_questions": overall_stats["total_questions"],
+            "total_correct": overall_stats["correct_count"],
+            "avg_accuracy": round(overall_stats["correct_count"] / overall_stats["total_questions"] * 100, 1) if overall_stats["total_questions"] > 0 else 0,
             "total_duration": total_duration,
-            "sure_count": total_sure,
-            "unsure_count": total_unsure,
-            "no_count": total_no,
+            "sure_count": overall_stats["sure_count"],
+            "unsure_count": overall_stats["unsure_count"],
+            "no_count": overall_stats["no_count"],
         },
         "type_distribution": {
-            k: {
-                "count": v,
-                "pct": round(v / total_qr * 100, 1) if total_qr > 0 else 0,
-                "correct": type_correct.get(k, 0),
-                "accuracy": round(type_correct.get(k, 0) / v * 100, 1) if v > 0 else 0
-            } for k, v in type_dist.items()
+            key: {
+                "count": value,
+                "pct": round(value / total_qr * 100, 1) if total_qr > 0 else 0,
+                "correct": type_correct.get(key, 0),
+                "accuracy": round(type_correct.get(key, 0) / value * 100, 1) if value > 0 else 0
+            } for key, value in type_dist.items()
         },
         "difficulty_distribution": {
-            k: {
-                "count": v,
-                "pct": round(v / total_qr * 100, 1) if total_qr > 0 else 0,
-                "correct": diff_correct.get(k, 0),
-                "accuracy": round(diff_correct.get(k, 0) / v * 100, 1) if v > 0 else 0
-            } for k, v in diff_dist.items()
+            key: {
+                "count": value,
+                "pct": round(value / total_qr * 100, 1) if total_qr > 0 else 0,
+                "correct": diff_correct.get(key, 0),
+                "accuracy": round(diff_correct.get(key, 0) / value * 100, 1) if value > 0 else 0
+            } for key, value in diff_dist.items()
         },
         "knowledge_points": knowledge_points,
         "daily_trend": daily_map,
@@ -1651,51 +1873,55 @@ async def get_knowledge_tree(
     """
     Build hierarchical knowledge tree: book → chapter → key_point
     """
-    from models import Chapter
-
-    # Period filtering (reuse same logic as get_stats)
-    now = datetime.now()
-    start_date = None
-    end_date = None
-
-    if period == "day":
-        target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else now.date()
-        start_date = datetime.combine(target, datetime.min.time())
-        end_date = datetime.combine(target, datetime.max.time())
-    elif period == "week":
-        target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else now.date()
-        start_of_week = target - timedelta(days=target.weekday())
-        start_date = datetime.combine(start_of_week, datetime.min.time())
-        end_date = datetime.combine(start_of_week + timedelta(days=6), datetime.max.time())
-    elif period == "month":
-        target = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else now.date()
-        start_date = datetime.combine(target.replace(day=1), datetime.min.time())
-        next_month = target.replace(day=28) + timedelta(days=4)
-        last_day = next_month - timedelta(days=next_month.day)
-        end_date = datetime.combine(last_day, datetime.max.time())
-
-    # Get all chapters for lookup
+    start_date, end_date = _resolve_period_bounds(period, date_str)
     chapters = db.query(Chapter).all()
     chapter_map = {ch.id: ch for ch in chapters}
-
-    # Query QuestionRecord joined with LearningSession
-    query = db.query(QuestionRecord, LearningSession.chapter_id).join(
-        LearningSession, QuestionRecord.session_id == LearningSession.id
-    )
+    session_query = db.query(LearningSession)
     if start_date and end_date:
-        query = query.filter(
+        session_query = session_query.filter(
             LearningSession.started_at >= start_date,
             LearningSession.started_at <= end_date
         )
-    rows = query.all()
+    sessions = session_query.all()
+    session_lookup = {session.id: session for session in sessions}
+    records = _load_unique_question_records(db, session_ids=[session.id for session in sessions])
+    wrong_answer_chapter_lookup = _load_wrong_answer_chapter_lookup(db, records)
+
+    # 第一轮：为每条记录解析 chapter_id（session → WrongAnswerV2 回退）
+    record_chapter: Dict[Tuple[str, int], Optional[str]] = {}
+    for qr in records:
+        session = session_lookup.get(qr.session_id)
+        chapter_id = None
+        if session:
+            chapter_id = _resolve_chapter_id_from_map(session.chapter_id, chapter_map)
+        if not chapter_id:
+            fallback_chapter_id = wrong_answer_chapter_lookup.get((qr.session_id, qr.question_index))
+            chapter_id = _resolve_chapter_id_from_map(fallback_chapter_id, chapter_map)
+        record_chapter[(qr.session_id, qr.question_index)] = chapter_id
+
+    # 第二轮：同 session 多数投票回退（答对的题没进错题本，用同 session 其他题的章节）
+    session_chapter_votes: Dict[str, Dict[str, int]] = {}
+    for (sid, _qi), ch_id in record_chapter.items():
+        if ch_id:
+            session_chapter_votes.setdefault(sid, {})
+            session_chapter_votes[sid][ch_id] = session_chapter_votes[sid].get(ch_id, 0) + 1
+
+    for key, ch_id in record_chapter.items():
+        if ch_id:
+            continue
+        sid = key[0]
+        votes = session_chapter_votes.get(sid)
+        if votes:
+            record_chapter[key] = max(votes, key=votes.get)
 
     # Build tree: {book: {chapter_title: {key_point: stats}}}
-    tree = {}
-    for qr, ch_id in rows:
-        ch = chapter_map.get(ch_id)
+    tree: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+    for qr in records:
+        chapter_id = record_chapter.get((qr.session_id, qr.question_index))
+        ch = chapter_map.get(chapter_id) if chapter_id else None
         book = ch.book if ch else "未分类"
         ch_title = f"{ch.chapter_number} {ch.chapter_title}" if ch else "未关联章节"
-        kp = qr.key_point or "未标注知识点"
+        kp = _display_key_point(qr)
 
         tree.setdefault(book, {}).setdefault(ch_title, {}).setdefault(kp, {
             "total": 0, "correct": 0, "wrong": 0, "error_types": {}

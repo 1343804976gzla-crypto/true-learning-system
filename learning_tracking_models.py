@@ -17,6 +17,17 @@ import hashlib
 from models import Base, engine, SessionLocal
 
 
+INVALID_CHAPTER_IDS = {
+    "",
+    "0",
+    "unknown_ch0",
+    "未知_ch0",
+    "无法识别_ch0",
+    "未分类_ch0",
+    "uncategorized_ch0",
+}
+
+
 def make_fingerprint(text: str) -> str:
     """生成题目指纹，用于去重"""
     return hashlib.md5(text.strip().encode('utf-8')).hexdigest()
