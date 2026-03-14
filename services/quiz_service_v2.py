@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import copy
 import os
 import re
 import hashlib
@@ -83,6 +84,17 @@ class QuizService:
             self.topic_overlap_threshold = max(0.1, min(1.0, float(topic_threshold_raw)))
         except ValueError:
             self.topic_overlap_threshold = 0.3
+
+        chapter_cache_ttl_raw = (os.getenv("QUIZ_CHAPTER_CACHE_TTL_SECONDS") or "300").strip()
+        try:
+            self.chapter_cache_ttl_seconds = max(30, int(chapter_cache_ttl_raw))
+        except ValueError:
+            self.chapter_cache_ttl_seconds = 300
+
+        self._chapter_rows_cache: Optional[List[Dict[str, str]]] = None
+        self._chapter_books_cache: List[str] = []
+        self._chapter_catalog_cache: Dict[str, str] = {}
+        self._chapter_cache_expire_at: Optional[datetime] = None
 
         print(f"[QuizService] 缓存系统: {'启用' if self.cache_enabled else '禁用'} (TTL={self.cache_ttl_seconds}秒)")
         print(f"[QuizService] 分段缓存: {'启用' if self.segment_cache_enabled else '禁用'}")
@@ -197,20 +209,109 @@ class QuizService:
         segment_hash = hashlib.md5(segment_content.encode('utf-8')).hexdigest()
         return f"segment_{segment_hash}_{num_questions}"
 
+    def _build_cached_result_subset(self, result: Dict, num_questions: int) -> Dict:
+        """鍩轰簬宸茬紦瀛樼殑鏁村嵎缁撴灉锛岀敓鎴愬皬棰樿姹傜殑瀛愰泦銆?"""
+        cloned = copy.deepcopy(result)
+        questions = list(cloned.get("questions", []))[:num_questions]
+
+        for index, question in enumerate(questions, 1):
+            question["id"] = index
+
+        knowledge_points = []
+        for question in questions:
+            key_point = (question.get("key_point") or "").strip()
+            if key_point and key_point not in knowledge_points:
+                knowledge_points.append(key_point)
+
+        difficulty_distribution = {}
+        original_distribution = cloned.get("difficulty_distribution")
+        if isinstance(original_distribution, dict):
+            for difficulty in original_distribution.keys():
+                difficulty_distribution[difficulty] = 0
+        for difficulty in ("基础", "提高", "难题"):
+            difficulty_distribution.setdefault(difficulty, 0)
+
+        for question in questions:
+            difficulty = question.get("difficulty", "基础")
+            difficulty_distribution[difficulty] = difficulty_distribution.get(difficulty, 0) + 1
+
+        summary = cloned.get("summary")
+        if not isinstance(summary, dict):
+            summary = {}
+        summary["coverage"] = f"覆盖 {len(knowledge_points)} 个知识点"
+
+        cloned["total_questions"] = len(questions)
+        cloned["questions"] = questions
+        cloned["knowledge_points"] = knowledge_points
+        cloned["difficulty_distribution"] = difficulty_distribution
+        cloned["summary"] = summary
+        return cloned
+
     def _get_from_cache(self, cache_key: str) -> Optional[Dict]:
         """从缓存获取"""
         if not self.cache_enabled:
             return None
 
+        now = datetime.now()
+        key_prefix, _, key_suffix = cache_key.rpartition("_")
+        requested_questions: Optional[int] = None
+        if key_prefix and key_suffix:
+            try:
+                requested_questions = int(key_suffix)
+            except ValueError:
+                requested_questions = None
+
         if cache_key in self._cache:
             result, expire_time = self._cache[cache_key]
-            if datetime.now() < expire_time:
+            if now < expire_time:
                 print(f"[QuizService] ✅ 缓存命中: {cache_key[:32]}...")
-                return result
+                if requested_questions is not None and isinstance(result, dict):
+                    return self._build_cached_result_subset(result, requested_questions)
+                return copy.deepcopy(result)
             else:
                 # 过期，删除
                 del self._cache[cache_key]
                 print(f"[QuizService] ⏰ 缓存过期: {cache_key[:32]}...")
+
+        if requested_questions is None:
+            return None
+
+        compatible_key = None
+        compatible_result = None
+        compatible_expire_time = None
+        compatible_questions = None
+
+        for existing_key, (existing_result, expire_time) in list(self._cache.items()):
+            if not existing_key.startswith(f"{key_prefix}_"):
+                continue
+
+            if now >= expire_time:
+                del self._cache[existing_key]
+                continue
+
+            _, _, existing_suffix = existing_key.rpartition("_")
+            try:
+                existing_questions = int(existing_suffix)
+            except ValueError:
+                continue
+
+            if existing_questions < requested_questions:
+                continue
+
+            if compatible_questions is None or existing_questions < compatible_questions:
+                compatible_key = existing_key
+                compatible_result = existing_result
+                compatible_expire_time = expire_time
+                compatible_questions = existing_questions
+
+        if compatible_key and compatible_result is not None and compatible_expire_time is not None:
+            print(
+                f"[QuizService] compatible cache hit: {compatible_key[:32]}... "
+                f"({compatible_questions}->{requested_questions})"
+            )
+            subset_result = self._build_cached_result_subset(compatible_result, requested_questions)
+            self._cache[cache_key] = (subset_result, compatible_expire_time)
+            return copy.deepcopy(subset_result)
 
         return None
 
@@ -397,24 +498,79 @@ class QuizService:
         return "", ""
 
     def _extract_book_hint(self, content: str) -> str:
-        from models import get_db, Chapter
-
         text = (content or "").strip()
         if not text:
             return ""
 
-        db = next(get_db())
-        try:
-            books = [b[0] for b in db.query(Chapter.book).distinct().all() if b and b[0]]
-        finally:
-            db.close()
-
-        books = [b for b in books if b not in {"\u672a\u5206\u7c7b", "unknown"}]
-        books.sort(key=len, reverse=True)
-        for b in books:
+        self._load_real_chapter_rows()
+        for b in self._chapter_books_cache:
             if b in text:
                 return b
         return ""
+
+    def _load_real_chapter_rows(self) -> List[Dict[str, str]]:
+        now = datetime.now()
+        if (
+            self._chapter_rows_cache is not None
+            and self._chapter_cache_expire_at is not None
+            and now < self._chapter_cache_expire_at
+        ):
+            return self._chapter_rows_cache
+
+        from models import get_db, Chapter
+
+        db = next(get_db())
+        try:
+            rows = (
+                db.query(
+                    Chapter.id,
+                    Chapter.book,
+                    Chapter.chapter_number,
+                    Chapter.chapter_title,
+                )
+                .order_by(Chapter.book, Chapter.chapter_number)
+                .all()
+            )
+        finally:
+            db.close()
+
+        real_rows: List[Dict[str, str]] = []
+        for ch_id, ch_book, ch_num, ch_title in rows:
+            if self._is_placeholder_chapter(
+                chapter_id=ch_id,
+                book=ch_book,
+                chapter_title=ch_title,
+                chapter_number=ch_num,
+            ):
+                continue
+            real_rows.append(
+                {
+                    "id": ch_id,
+                    "book": ch_book,
+                    "chapter_number": ch_num,
+                    "chapter_title": ch_title,
+                }
+            )
+
+        self._chapter_rows_cache = real_rows
+        self._chapter_books_cache = sorted(
+            {
+                row["book"]
+                for row in real_rows
+                if row.get("book") and row["book"] not in {"\u672a\u5206\u7c7b", "unknown"}
+            },
+            key=len,
+            reverse=True,
+        )
+        self._chapter_catalog_cache = {}
+        self._chapter_cache_expire_at = now + timedelta(seconds=self.chapter_cache_ttl_seconds)
+        return real_rows
+
+    def _chapter_rows_for_book(self, book: str = "") -> List[Dict[str, str]]:
+        rows = self._load_real_chapter_rows()
+        if not book:
+            return rows
+        return [row for row in rows if row["book"] == book]
 
     def _is_placeholder_chapter(
         self,
@@ -444,126 +600,98 @@ class QuizService:
         chapter_number: str = "",
         confidence: str = "medium",
     ) -> Optional[Dict[str, str]]:
-        from models import get_db, Chapter
+        rows = self._load_real_chapter_rows()
 
-        def _pick_best(candidates: List[Any]) -> Optional[Any]:
-            real_candidates = [
-                ch for ch in candidates
-                if not self._is_placeholder_chapter(
-                    chapter_id=getattr(ch, "id", ""),
-                    book=getattr(ch, "book", ""),
-                    chapter_title=getattr(ch, "chapter_title", ""),
-                    chapter_number=getattr(ch, "chapter_number", ""),
-                )
-            ]
-            if not real_candidates:
+        def _pick_best(candidates: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+            if not candidates:
                 return None
-            real_candidates.sort(
+            candidates.sort(
                 key=lambda x: (
-                    len(getattr(x, "chapter_title", "") or ""),
-                    getattr(x, "chapter_number", ""),
-                    getattr(x, "id", ""),
+                    len(x.get("chapter_title", "") or ""),
+                    x.get("chapter_number", ""),
+                    x.get("id", ""),
                 )
             )
-            return real_candidates[0]
+            return candidates[0]
 
-        def _pack(ch, conf: str) -> Dict[str, str]:
+        def _pack(ch: Dict[str, str], conf: str) -> Dict[str, str]:
             return {
-                "book": ch.book,
-                "chapter_id": ch.id,
-                "chapter_title": ch.chapter_title,
+                "book": ch["book"],
+                "chapter_id": ch["id"],
+                "chapter_title": ch["chapter_title"],
                 "confidence": conf if conf in {"high", "medium", "low"} else "medium",
             }
 
-        db = next(get_db())
-        try:
-            # 1) direct id lookup
-            if chapter_id and not self._is_placeholder_chapter(chapter_id=chapter_id):
-                ch = _pick_best(
-                    db.query(Chapter).filter(Chapter.id == chapter_id).all()
-                )
+        if chapter_id and not self._is_placeholder_chapter(chapter_id=chapter_id):
+            ch = _pick_best([row for row in rows if row["id"] == chapter_id])
+            if ch:
+                return _pack(ch, confidence)
+
+            m = re.match(r"^(.+_ch)0+([0-9]+)$", chapter_id)
+            if m:
+                normalized = f"{m.group(1)}{int(m.group(2))}"
+                ch = _pick_best([row for row in rows if row["id"] == normalized])
                 if ch:
                     return _pack(ch, confidence)
 
-                # normalize ids like physiology_ch06 -> physiology_ch6
-                m = re.match(r"^(.+_ch)0+([0-9]+)$", chapter_id)
-                if m:
-                    normalized = f"{m.group(1)}{int(m.group(2))}"
-                    ch = _pick_best(
-                        db.query(Chapter).filter(Chapter.id == normalized).all()
-                    )
-                    if ch:
-                        return _pack(ch, confidence)
+        title_token = chapter_title[:8] if chapter_title else ""
 
-            # 2) book + number + title (best precision when all hints are present)
-            if book and chapter_number and chapter_title:
-                num = str(chapter_number).strip()
-                num_candidates = [num]
-                if num.isdigit():
-                    num_candidates.append(str(int(num)))
-                else:
-                    parsed = self._chinese_numeral_to_int(num)
-                    if parsed is not None:
-                        num_candidates.append(str(parsed))
+        if book and chapter_number and chapter_title:
+            num = str(chapter_number).strip()
+            num_candidates = [num]
+            if num.isdigit():
+                num_candidates.append(str(int(num)))
+            else:
+                parsed = self._chinese_numeral_to_int(num)
+                if parsed is not None:
+                    num_candidates.append(str(parsed))
 
-                for cand in dict.fromkeys(num_candidates):
-                    ch = _pick_best((
-                        db.query(Chapter)
-                        .filter(
-                            Chapter.book == book,
-                            Chapter.chapter_number == cand,
-                            Chapter.chapter_title.contains(chapter_title[:8]),
-                        )
-                        .all()
-                    ))
-                    if ch:
-                        return _pack(ch, "high")
-
-            # 3) book + title fuzzy (prefer title before number for higher precision)
-            if book and chapter_title:
-                ch = _pick_best((
-                    db.query(Chapter)
-                    .filter(
-                        Chapter.book == book,
-                        Chapter.chapter_title.contains(chapter_title[:8])
-                    )
-                    .all()
-                ))
-                if ch:
-                    return _pack(ch, "medium")
-
-            # 4) book + chapter number
-            if book and chapter_number:
-                num = str(chapter_number).strip()
-                num_candidates = [num]
-                if num.isdigit():
-                    num_candidates.append(str(int(num)))
-                else:
-                    parsed = self._chinese_numeral_to_int(num)
-                    if parsed is not None:
-                        num_candidates.append(str(parsed))
-
-                for cand in dict.fromkeys(num_candidates):
-                    matches = (
-                        db.query(Chapter)
-                        .filter(Chapter.book == book, Chapter.chapter_number == cand)
-                        .all()
-                    )
-                    ch = _pick_best(matches)
-                    if ch:
-                        return _pack(ch, "high")
-
-            # 5) title-only fuzzy
-            if chapter_title:
+            for cand in dict.fromkeys(num_candidates):
                 ch = _pick_best(
-                    db.query(Chapter)
-                    .filter(Chapter.chapter_title.contains(chapter_title[:8]))
-                    .all()
+                    [
+                        row for row in rows
+                        if row["book"] == book
+                        and row["chapter_number"] == cand
+                        and title_token in row["chapter_title"]
+                    ]
                 )
                 if ch:
-                    return _pack(ch, "low")
-        finally:
-            db.close()
+                    return _pack(ch, "high")
+
+        if book and chapter_title:
+            ch = _pick_best(
+                [
+                    row for row in rows
+                    if row["book"] == book and title_token in row["chapter_title"]
+                ]
+            )
+            if ch:
+                return _pack(ch, "medium")
+
+        if book and chapter_number:
+            num = str(chapter_number).strip()
+            num_candidates = [num]
+            if num.isdigit():
+                num_candidates.append(str(int(num)))
+            else:
+                parsed = self._chinese_numeral_to_int(num)
+                if parsed is not None:
+                    num_candidates.append(str(parsed))
+
+            for cand in dict.fromkeys(num_candidates):
+                ch = _pick_best(
+                    [
+                        row for row in rows
+                        if row["book"] == book and row["chapter_number"] == cand
+                    ]
+                )
+                if ch:
+                    return _pack(ch, "high")
+
+        if chapter_title:
+            ch = _pick_best([row for row in rows if title_token in row["chapter_title"]])
+            if ch:
+                return _pack(ch, "low")
 
         return None
 
@@ -652,6 +780,55 @@ class QuizService:
         2. 若识别到科目，优先返回该科目的真实章节（chapter_id + title）
         3. 若未识别到，也返回完整真实章节目录，避免 AI 因缺少 chapter_id 只能输出占位值
         """
+        matched_book = self._extract_book_hint(content) if content else ""
+        cache_key = matched_book or "__all__"
+        cached_catalog = self._chapter_catalog_cache.get(cache_key)
+        if (
+            cached_catalog is not None
+            and self._chapter_cache_expire_at is not None
+            and datetime.now() < self._chapter_cache_expire_at
+        ):
+            return cached_catalog
+
+        if matched_book:
+            chapters = self._chapter_rows_for_book(matched_book)
+            if chapters:
+                lines = ["\u79d1\u76ee\uff1a{}\uff0c\u53ef\u9009\u7ae0\u8282\uff1a".format(matched_book)]
+                for row in chapters:
+                    lines.append(
+                        "  - {}(\u7b2c{}\u7ae0 {})".format(
+                            row["id"],
+                            row["chapter_number"],
+                            row["chapter_title"],
+                        )
+                    )
+                catalog = "\n".join(lines)
+                self._chapter_catalog_cache[cache_key] = catalog
+                return catalog
+
+        chapters = self._chapter_rows_for_book()
+        if chapters:
+            lines = ["\u6240\u6709\u53ef\u9009\u7ae0\u8282\uff1a"]
+            current_book = None
+            for row in chapters:
+                if row["book"] != current_book:
+                    current_book = row["book"]
+                    lines.append("\u3010{}\u3011".format(current_book))
+                lines.append(
+                    "  - {}(\u7b2c{}\u7ae0 {})".format(
+                        row["id"],
+                        row["chapter_number"],
+                        row["chapter_title"],
+                    )
+                )
+            catalog = "\n".join(lines)
+            self._chapter_catalog_cache[cache_key] = catalog
+            return catalog
+
+        fallback_catalog = "\u53ef\u9009\u7ae0\u8282\uff1a\u751f\u7406\u5b66\u3001\u751f\u7269\u5316\u5b66\u3001\u75c5\u7406\u5b66\u3001\u5185\u79d1\u5b66\u3001\u5916\u79d1\u5b66"
+        self._chapter_catalog_cache[cache_key] = fallback_catalog
+        return fallback_catalog
+
         from models import get_db, Chapter
         db = next(get_db())
         try:
