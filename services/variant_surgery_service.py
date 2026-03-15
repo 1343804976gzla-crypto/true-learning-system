@@ -8,6 +8,7 @@
 from datetime import datetime
 from typing import Dict, Any, Optional
 from services.ai_client import get_ai_client
+from utils.data_contracts import canonicalize_variant_data
 
 
 async def generate_variant(wa) -> dict:
@@ -129,7 +130,7 @@ async def evaluate_rationale(
     """
     ai = get_ai_client()
 
-    variant = wa.variant_data or {}
+    variant = canonicalize_variant_data(wa.variant_data) or {}
     variant_q = variant.get("variant_question", "")
     variant_opts = variant.get("variant_options", {})
     variant_ans = variant.get("variant_answer", "")
@@ -234,7 +235,7 @@ def build_rescue_report(wa, retry) -> str:
             orig_opts += f"- {k}. {v}{marker}\n"
 
     # 变式题信息
-    variant = wa.variant_data or {}
+    variant = canonicalize_variant_data(wa.variant_data) or {}
     var_q = variant.get("variant_question", "（无变式题）")
     var_opts_text = ""
     var_opts = variant.get("variant_options", {})

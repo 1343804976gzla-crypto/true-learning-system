@@ -3,7 +3,17 @@
 {% block title %}整卷考试 - 医学考研{% endblock %}
 
 {% block content %}
-<div class="mb-6">
+<div class="quiz-immersive-page">
+    <div class="quiz-immersive-bg" aria-hidden="true">
+        <video class="quiz-immersive-video" autoplay muted loop playsinline preload="metadata">
+            <source src="https://ik.imagekit.io/lrigu76hy/tailark/dna-video.mp4?updatedAt=1745736251477" type="video/mp4">
+        </video>
+        <div class="quiz-immersive-overlay"></div>
+        <div class="quiz-immersive-glow"></div>
+        <div class="quiz-immersive-grid"></div>
+    </div>
+    <div class="quiz-immersive-content">
+<div class="quiz-hero-panel mb-6">
     <div class="flex items-center text-sm text-gray-500 mb-2">
         <a href="/" class="hover:text-blue-500">仪表盘</a>
         <span class="mx-2">/</span>
@@ -108,7 +118,19 @@
 
 <!-- 加载状态 -->
 <div id="loadingState" class="hidden bg-white rounded-lg shadow p-12 text-center">
-    <div class="animate-spin w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+    <div class="tls-loader-wrapper mb-5" aria-hidden="true">
+        <span class="tls-loader-letter" style="--loader-letter-index: 0;">G</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 1;">e</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 2;">n</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 3;">e</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 4;">r</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 5;">a</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 6;">t</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 7;">i</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 8;">n</span>
+        <span class="tls-loader-letter" style="--loader-letter-index: 9;">g</span>
+        <div class="tls-loader"></div>
+    </div>
     <p class="text-gray-600 text-lg">DeepSeek正在分析整段内容...</p>
     <p class="text-sm text-gray-400 mt-2">一次性生成整套试卷，题目之间有辨析、对比、变式</p>
     <p class="text-sm text-gray-400">预计需要30-90秒</p>
@@ -214,6 +236,8 @@
         <button onclick="location.reload()" class="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600">再做一套</button>
         <button onclick="endStudySession()" class="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 font-bold">✓ 结束学习</button>
     </div>
+</div>
+</div>
 </div>
 {% endblock %}
 
@@ -690,4 +714,6 @@
         }
     });
 </script>
+    </div>
+</div>
 {% endblock %}

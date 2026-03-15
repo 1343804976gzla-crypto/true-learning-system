@@ -3,20 +3,40 @@
 处理错题记录、复习、固定10道题练习
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 from datetime import date, datetime, timedelta
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from api_contracts import (
+    LegacyQuizStatsResponse,
+    LegacyWrongAnswerListResponse,
+    LegacyWrongAnswerReviewResponse,
+    QuizSessionStartResponse,
+    QuizSessionSubmitResponse,
+)
 from models import get_db, WrongAnswer, QuizSession, ConceptMastery, Chapter, TestRecord
 from schemas import QuizResponse, QuizSubmitRequest, QuizResultResponse
 from utils.answer import answers_match
+from utils.data_contracts import (
+    canonicalize_quiz_answers,
+    canonicalize_quiz_questions,
+    coerce_confidence,
+    normalize_option_map,
+)
 
 router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 
 
-@router.post("/start/{chapter_id}")
+def _normalize_legacy_question_payload(item: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(item or {})
+    payload["options"] = normalize_option_map(payload.get("options"))
+    return payload
+
+
+@router.post("/start/{chapter_id}", response_model=QuizSessionStartResponse)
 async def start_quiz(
     chapter_id: str,
     mode: str = "practice",  # 'practice', 'wrong_answer_review', 'repeat'
@@ -107,10 +127,12 @@ async def start_quiz(
         })
     
     # 创建测验会话
+    normalized_questions = canonicalize_quiz_questions(questions)
+
     session = QuizSession(
         session_type=mode,
         chapter_id=chapter_id,
-        questions=questions,
+        questions=normalized_questions,
         answers=[],
         total_questions=10,
         correct_count=0,
@@ -119,15 +141,17 @@ async def start_quiz(
     db.add(session)
     db.commit()
     
+    normalized_questions = [_normalize_legacy_question_payload(question) for question in normalized_questions]
+
     return {
         "session_id": session.id,
         "mode": mode,
         "total_questions": 10,
-        "questions": questions
+        "questions": normalized_questions
     }
 
 
-@router.post("/submit/{session_id}")
+@router.post("/submit/{session_id}", response_model=QuizSessionSubmitResponse)
 async def submit_quiz(
     session_id: int,
     data: QuizSubmitRequest,
@@ -153,12 +177,13 @@ async def submit_quiz(
         if is_correct:
             correct_count += 1
         
+        normalized_confidence = coerce_confidence(answer.confidence, default="unsure")
         answer_record = {
             "question_index": idx,
             "user_answer": answer.user_answer,
             "is_correct": is_correct,
             "time_spent": answer.time_spent,
-            "confidence": answer.confidence
+            "confidence": normalized_confidence
         }
         answers.append(answer_record)
         
@@ -195,7 +220,7 @@ async def submit_quiz(
                 db.add(wrong_answer)
     
     # 更新会话
-    session.answers = answers
+    session.answers = canonicalize_quiz_answers(answers)
     session.correct_count = correct_count
     session.score = int(correct_count / 10 * 100)
     session.completed_at = datetime.now()
@@ -210,7 +235,7 @@ async def submit_quiz(
     }
 
 
-@router.get("/wrong-answers/{chapter_id}")
+@router.get("/wrong-answers/{chapter_id}", response_model=LegacyWrongAnswerListResponse)
 async def get_wrong_answers(
     chapter_id: str,
     include_mastered: bool = False,
@@ -236,7 +261,7 @@ async def get_wrong_answers(
                 "id": wa.id,
                 "concept_id": wa.concept_id,
                 "question": wa.question,
-                "options": wa.options,
+                "options": normalize_option_map(wa.options),
                 "correct_answer": wa.correct_answer,
                 "user_answer": wa.user_answer,
                 "explanation": wa.explanation,
@@ -252,7 +277,7 @@ async def get_wrong_answers(
     }
 
 
-@router.post("/wrong-answers/{wrong_id}/review")
+@router.post("/wrong-answers/{wrong_id}/review", response_model=LegacyWrongAnswerReviewResponse)
 async def review_wrong_answer(
     wrong_id: int,
     is_correct: bool,  # 这次是否答对
@@ -298,7 +323,7 @@ async def review_wrong_answer(
     }
 
 
-@router.get("/stats/{chapter_id}")
+@router.get("/stats/{chapter_id}", response_model=LegacyQuizStatsResponse)
 async def get_quiz_stats(
     chapter_id: str,
     db: Session = Depends(get_db)

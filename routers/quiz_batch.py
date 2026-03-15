@@ -3,18 +3,33 @@
 支持：选择题目数量(5/10/15/20)，一次性生成整套试卷
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Body
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict, Any, Tuple
 import json
 import uuid
 import hashlib
 
+from fastapi import APIRouter, Depends, HTTPException, Body
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from api_contracts import (
+    BatchExamConfirmChapterResponse,
+    BatchExamDetailResponse,
+    BatchExamGenerateResponse,
+    BatchExamSessionResponse,
+    BatchExamSubmitResponse,
+    BatchVariationResponse,
+)
 from models import get_db, QuizSession, WrongAnswer, ConceptMastery, Chapter
 from learning_tracking_models import WrongAnswerV2, make_fingerprint, INVALID_CHAPTER_IDS
 from services.quiz_service_v2 import get_quiz_service
+from utils.data_contracts import (
+    canonicalize_quiz_answers,
+    canonicalize_quiz_questions,
+    coerce_confidence,
+    normalize_option_map,
+)
 
 router = APIRouter(prefix="/api/quiz/batch", tags=["batch_quiz"])
 
@@ -48,7 +63,7 @@ def _get_question_key_point(question: Dict[str, Any], index: int) -> str:
 
 
 def _severity_from_confidence(confidence: str) -> str:
-    normalized = str(confidence or "").strip().lower()
+    normalized = coerce_confidence(confidence, default="unsure")
     if normalized == "sure":
         return "critical"
     if normalized in {"unsure", "no"}:
@@ -93,10 +108,10 @@ def _build_fuzzy_option_cache(
         if question_index < 0 or question_index >= len(questions):
             continue
 
-        conf = str(
-            confidence_map.get(str(question_index), confidence_map.get(question_index, ""))
-            or ""
-        ).strip().lower()
+        conf = coerce_confidence(
+            confidence_map.get(str(question_index), confidence_map.get(question_index, "")),
+            default="unsure",
+        )
         if conf != "unsure":
             continue
 
@@ -229,7 +244,7 @@ class ConfirmChapterRequest(BaseModel):
     chapter_id: str
 
 
-@router.post("/confirm-chapter/{exam_id}")
+@router.post("/confirm-chapter/{exam_id}", response_model=BatchExamConfirmChapterResponse)
 async def confirm_chapter(exam_id: str, request: ConfirmChapterRequest):
     """用户确认/修正AI预测的章节归属，更新缓存"""
     exam = _exam_cache.get(exam_id)
@@ -240,7 +255,7 @@ async def confirm_chapter(exam_id: str, request: ConfirmChapterRequest):
     print(f"[Exam] 章节确认: exam={exam_id}, chapter={confirmed_chapter_id or '未确认'}")
     return {"success": True, "chapter_id": confirmed_chapter_id}
 
-@router.post("/generate/{chapter_id}")
+@router.post("/generate/{chapter_id}", response_model=BatchExamGenerateResponse)
 async def generate_exam(
     chapter_id: str,
     request: GenerateRequest,
@@ -267,10 +282,11 @@ async def generate_exam(
         )
 
         exam_id = str(uuid.uuid4())
+        normalized_generated_questions = canonicalize_quiz_questions(result["questions"])
         _exam_cache[exam_id] = {
             "chapter_id": _normalize_confirmed_chapter_id(chapter_id),
             "chapter_prediction": result.get("chapter_prediction"),
-            "questions": result["questions"],
+            "questions": normalized_generated_questions,
             "created_at": datetime.now(),
             "num_questions": num_questions,
             "uploaded_content": uploaded_content  # 保存原始内容用于变式题生成
@@ -278,13 +294,13 @@ async def generate_exam(
 
         questions_for_student = []
         knowledge_points = []
-        for q in result["questions"]:
+        for q in normalized_generated_questions:
             questions_for_student.append({
-                "id": q["id"],
+                "id": str(q["id"]),
                 "type": q["type"],
                 "difficulty": q["difficulty"],
                 "question": q["question"],
-                "options": q["options"],
+                "options": normalize_option_map(q.get("options")),
                 "key_point": q.get("key_point", ""),
                 "correct_answer": q.get("correct_answer", ""),
                 "explanation": q.get("explanation", "")
@@ -301,11 +317,11 @@ async def generate_exam(
             "exam_id": exam_id,
             "paper_title": result["paper_title"],
             "total_questions": result["total_questions"],
-            "difficulty_distribution": result["difficulty_distribution"],
-            "chapter_prediction": chapter_pred,
+            "difficulty_distribution": result.get("difficulty_distribution") or {},
+            "chapter_prediction": chapter_pred if isinstance(chapter_pred, dict) else {},
             "questions": questions_for_student,
             "knowledge_points": knowledge_points,
-            "summary": result["summary"]
+            "summary": result.get("summary") or {}
         }
         
     except Exception as e:
@@ -324,7 +340,7 @@ async def generate_exam(
             )
         raise HTTPException(status_code=500, detail=f"生成试卷失败: {str(e)}")
 
-@router.post("/submit/{exam_id}")
+@router.post("/submit/{exam_id}", response_model=BatchExamSubmitResponse)
 async def submit_exam(
     exam_id: str,
     request: SubmitRequest,
@@ -336,7 +352,10 @@ async def submit_exam(
         raise HTTPException(status_code=404, detail="试卷已过期或不存在")
 
     answers = request.answers
-    confidence = request.confidence or {}
+    confidence = {
+        str(key): coerce_confidence(value, default="unsure")
+        for key, value in (request.confidence or {}).items()
+    }
     fuzzy_options = request.fuzzy_options or {}
     questions = exam.get("questions", [])
     num_questions = exam.get("num_questions", 10)
@@ -402,13 +421,22 @@ async def submit_exam(
 
     print(f"[Exam] 最终章节ID: {session_chapter_id} (原始: {chapter_id})")
 
+    normalized_questions = canonicalize_quiz_questions(questions)
+    normalized_answers = canonicalize_quiz_answers([
+        {
+            "question_index": i,
+            "user_answer": answers[i],
+            "is_correct": result["details"][i]["is_correct"],
+            "confidence": result["details"][i].get("confidence"),
+        }
+        for i in range(num_questions)
+    ])
+
     quiz_session = QuizSession(
         session_type=f"exam_{num_questions}",
         chapter_id=session_chapter_id,
-        questions=questions,
-        answers=[{"question_index": i, "user_answer": answers[i], 
-                 "is_correct": result["details"][i]["is_correct"]} 
-                for i in range(num_questions)],
+        questions=normalized_questions,
+        answers=normalized_answers,
         total_questions=num_questions,
         correct_count=result["correct_count"],
         score=result["score"],
@@ -506,7 +534,7 @@ async def submit_exam(
                 wrong = WrongAnswerV2(
                     question_fingerprint=fingerprint,
                     question_text=question_text,
-                    options=question.get("options", {}),
+                    options=normalize_option_map(question.get("options")),
                     correct_answer=question.get("correct_answer", ""),
                     explanation=question.get("explanation", ""),
                     key_point=question.get("key_point", ""),
@@ -540,7 +568,7 @@ async def submit_exam(
     print(f"[Exam] 批改完成: {result['score']}分")
     return result
 
-@router.get("/session/{exam_id}")
+@router.get("/session/{exam_id}", response_model=BatchExamSessionResponse)
 async def get_exam(exam_id: str):
     """获取试卷（用于页面刷新恢复）"""
     exam = _exam_cache.get(exam_id)
@@ -550,11 +578,11 @@ async def get_exam(exam_id: str):
     questions = []
     for q in exam["questions"]:
         questions.append({
-            "id": q["id"],
+            "id": str(q["id"]),
             "type": q["type"],
             "difficulty": q["difficulty"],
             "question": q["question"],
-            "options": q["options"]
+            "options": normalize_option_map(q.get("options"))
         })
 
     return {
@@ -563,7 +591,7 @@ async def get_exam(exam_id: str):
         "num_questions": exam["num_questions"]
     }
 
-@router.get("/detail/{exam_id}")
+@router.get("/detail/{exam_id}", response_model=BatchExamDetailResponse)
 async def get_exam_for_detail(exam_id: str, db: Session = Depends(get_db)):
     """获取试卷用于细节练习（保留完整数据包括答案）"""
     exam = _exam_cache.get(exam_id)
@@ -575,11 +603,11 @@ async def get_exam_for_detail(exam_id: str, db: Session = Depends(get_db)):
     questions = []
     for q in exam["questions"]:
         questions.append({
-            "id": q["id"],
+            "id": str(q["id"]),
             "type": q["type"],
             "difficulty": q["difficulty"],
             "question": q["question"],
-            "options": q["options"],
+            "options": normalize_option_map(q.get("options")),
             "key_point": q.get("key_point", ""),
             "correct_answer": q.get("correct_answer", ""),
             "explanation": q.get("explanation", "")
@@ -589,16 +617,16 @@ async def get_exam_for_detail(exam_id: str, db: Session = Depends(get_db)):
 
     return {
         "exam_id": exam_id,
-        "chapter_id": exam.get("chapter_id", ""),
+        "chapter_id": exam.get("chapter_id") or "",
         "questions": questions,
         "knowledge_points": knowledge_points,
         "knowledge_point_stats": knowledge_point_stats,
         "fuzzy_options": exam.get("fuzzy_options", {}),
         "num_questions": exam["num_questions"],
-        "uploadedContent": exam.get("uploaded_content", "")  # 传递原始内容给前端
+        "uploadedContent": exam.get("uploaded_content") or ""  # 传递原始内容给前端
     }
 
-@router.post("/generate-variations")
+@router.post("/generate-variations", response_model=BatchVariationResponse)
 async def generate_variation_questions(
     request: GenerateVariationRequest,
     db: Session = Depends(get_db)

@@ -15,12 +15,38 @@ import io
 import math
 import re
 
+from api_contracts import (
+    BooksResponse,
+    ExternalImportConfirmResponse,
+    ExternalImportParseResponse,
+    MarkdownExportResponse,
+    RecognizeChaptersResponse,
+    WrongAnswerDashboardResponse,
+    WrongAnswerDetailResponse,
+    WrongAnswerEmptyListResponse,
+    WrongAnswerMutationResponse,
+    WrongAnswerRetryBatchResponse,
+    WrongAnswerRetryResponse,
+    WrongAnswerSeverityListResponse,
+    WrongAnswerStatsResponse,
+    WrongAnswerSyncResponse,
+    WrongAnswerTimelineListResponse,
+    WrongAnswerVariantGenerateResponse,
+    WrongAnswerVariantJudgeResponse,
+    WrongAnswerChapterListResponse,
+)
 from services.content_parser_v2 import get_content_parser
 
 from models import get_db, Chapter
 from learning_tracking_models import (
     QuestionRecord, LearningSession, WrongAnswerV2, WrongAnswerRetry,
     make_fingerprint, INVALID_CHAPTER_IDS
+)
+from utils.data_contracts import (
+    canonicalize_ai_evaluation,
+    canonicalize_linked_record_ids,
+    canonicalize_variant_data,
+    coerce_confidence,
 )
 
 router = APIRouter(prefix="/api/wrong-answers", tags=["wrong_answers_v2"])
@@ -78,6 +104,10 @@ def _trend_description(direction: str) -> str:
     return mapping.get(direction, "趋势待观察")
 
 
+def _normalize_confidence_value(value: Optional[str]) -> str:
+    return coerce_confidence(value, default="unsure")
+
+
 # ========== Pydantic Models ==========
 
 class RetryRequest(BaseModel):
@@ -128,6 +158,7 @@ def compute_severity(error_count: int, confidences: list, correctness: list) -> 
     """
     # Check critical: any record where sure + wrong
     for conf, correct in zip(confidences, correctness):
+        conf = _normalize_confidence_value(conf)
         if conf == "sure" and not correct:
             return "critical"
 
@@ -137,6 +168,7 @@ def compute_severity(error_count: int, confidences: list, correctness: list) -> 
 
     # Check landmine: unsure/no but correct
     for conf, correct in zip(confidences, correctness):
+        conf = _normalize_confidence_value(conf)
         if conf in ("unsure", "no") and correct:
             return "landmine"
 
@@ -248,7 +280,7 @@ def _resolve_chapter_id(db: Session, chapter_name: Optional[str], book_name: Opt
 
 # ========== POST /sync ==========
 
-@router.post("/sync")
+@router.post("/sync", response_model=WrongAnswerSyncResponse)
 async def sync_wrong_answers(db: Session = Depends(get_db)):
     """
     全量同步：扫描 QuestionRecord，按指纹分组，upsert WrongAnswerV2
@@ -288,7 +320,7 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
         g["encounter_count"] += 1
         if not qr.is_correct:
             g["error_count"] += 1
-        g["confidences"].append(qr.confidence or "")
+        g["confidences"].append(_normalize_confidence_value(qr.confidence))
         g["correctness"].append(qr.is_correct)
         if qr.answered_at:
             g["timestamps"].append(qr.answered_at)
@@ -312,7 +344,7 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
         if existing:
             existing.error_count = g["error_count"]
             existing.encounter_count = g["encounter_count"]
-            existing.linked_record_ids = g["record_ids"]
+            existing.linked_record_ids = canonicalize_linked_record_ids(g["record_ids"])
             # severity 只升不降
             severity_order = {"normal": 0, "landmine": 1, "stubborn": 2, "critical": 3}
             if severity_order.get(severity, 0) > severity_order.get(existing.severity_tag, 0):
@@ -321,6 +353,7 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
                 existing.first_wrong_at = sorted_ts[0]
                 existing.last_wrong_at = sorted_ts[-1]
             # 更新快照
+            existing.options = _normalize_option_map(g["options"] or {})
             existing.explanation = g["explanation"]
             existing.key_point = g["key_point"]
             # chapter_id: 只补齐，不覆盖已识别的章节（避免冲掉AI分类结果）
@@ -332,7 +365,7 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
             wa = WrongAnswerV2(
                 question_fingerprint=fp,
                 question_text=g["question_text"],
-                options=g["options"],
+                options=_normalize_option_map(g["options"] or {}),
                 correct_answer=g["correct_answer"],
                 explanation=g["explanation"],
                 key_point=g["key_point"],
@@ -342,7 +375,7 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
                 error_count=g["error_count"],
                 encounter_count=g["encounter_count"],
                 severity_tag=severity,
-                linked_record_ids=g["record_ids"],
+                linked_record_ids=canonicalize_linked_record_ids(g["record_ids"]),
                 first_wrong_at=sorted_ts[0] if sorted_ts else datetime.now(),
                 last_wrong_at=sorted_ts[-1] if sorted_ts else datetime.now(),
             )
@@ -356,7 +389,7 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
 
 # ========== POST /import/parse ==========
 
-@router.post("/import/parse")
+@router.post("/import/parse", response_model=ExternalImportParseResponse)
 async def parse_external_wrong_questions(
     text: Optional[str] = Form(default=None),
     file: Optional[UploadFile] = File(default=None),
@@ -468,7 +501,7 @@ async def parse_external_wrong_questions(
 
 # ========== POST /import/confirm ==========
 
-@router.post("/import/confirm")
+@router.post("/import/confirm", response_model=ExternalImportConfirmResponse)
 async def confirm_external_wrong_import(
     body: ExternalImportConfirmRequest,
     db: Session = Depends(get_db)
@@ -561,7 +594,7 @@ async def confirm_external_wrong_import(
         wa = WrongAnswerV2(
             question_fingerprint=it["fingerprint"],
             question_text=it["question_text"],
-            options=it["options"],
+            options=_normalize_option_map(it["options"] or {}),
             correct_answer=it["correct_answer"],
             explanation=it["explanation"] or None,
             key_point=it["key_point"] or it["chapter_name"] or None,
@@ -573,7 +606,7 @@ async def confirm_external_wrong_import(
             retry_count=0,
             severity_tag=severity,
             mastery_status="active",
-            linked_record_ids=[],
+            linked_record_ids=canonicalize_linked_record_ids([]),
             sm2_ef=2.5,
             sm2_interval=0,
             sm2_repetitions=0,
@@ -600,7 +633,7 @@ async def confirm_external_wrong_import(
 
 # ========== GET /stats ==========
 
-@router.get("/stats")
+@router.get("/stats", response_model=WrongAnswerStatsResponse)
 async def get_wrong_answer_stats(db: Session = Depends(get_db)):
     """统计概览"""
     active = db.query(WrongAnswerV2).filter(WrongAnswerV2.mastery_status == "active")
@@ -646,7 +679,7 @@ async def get_wrong_answer_stats(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/dashboard")
+@router.get("/dashboard", response_model=WrongAnswerDashboardResponse)
 async def get_wrong_answer_dashboard(db: Session = Depends(get_db)):
     """错题本数据看板"""
     today_value = date.today()
@@ -904,7 +937,13 @@ async def get_wrong_answer_dashboard(db: Session = Depends(get_db)):
 
 # ========== GET /list ==========
 
-@router.get("/list")
+@router.get(
+    "/list",
+    response_model=WrongAnswerSeverityListResponse
+    | WrongAnswerChapterListResponse
+    | WrongAnswerTimelineListResponse
+    | WrongAnswerEmptyListResponse,
+)
 async def get_wrong_answer_list(
     view: str = "severity",  # severity | chapter | timeline
     severity: Optional[str] = None,
@@ -1053,7 +1092,7 @@ def _serialize_item(wa: WrongAnswerV2) -> dict:
 
 # ========== GET /{id} — 单题详情 ==========
 
-@router.get("/{wrong_id:int}")
+@router.get("/{wrong_id:int}", response_model=WrongAnswerDetailResponse)
 async def get_wrong_answer_detail(wrong_id: int, db: Session = Depends(get_db)):
     """手术台用：完整题目 + 历史记录 + 重做记录"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
@@ -1073,7 +1112,7 @@ async def get_wrong_answer_detail(wrong_id: int, db: Session = Depends(get_db)):
             history.append({
                 "user_answer": qr.user_answer,
                 "is_correct": qr.is_correct,
-                "confidence": qr.confidence,
+                "confidence": _normalize_confidence_value(qr.confidence),
                 "time_spent_seconds": qr.time_spent_seconds,
                 "answered_at": qr.answered_at.isoformat() if qr.answered_at else None,
                 "session_title": sess.title if sess else None,
@@ -1087,7 +1126,7 @@ async def get_wrong_answer_detail(wrong_id: int, db: Session = Depends(get_db)):
     return {
         "id": wa.id,
         "question_text": wa.question_text,
-        "options": wa.options,
+        "options": wa.options or {},
         "correct_answer": wa.correct_answer,
         "explanation": wa.explanation,
         "key_point": wa.key_point,
@@ -1112,7 +1151,7 @@ async def get_wrong_answer_detail(wrong_id: int, db: Session = Depends(get_db)):
             {
                 "user_answer": r.user_answer,
                 "is_correct": r.is_correct,
-                "confidence": r.confidence,
+                "confidence": _normalize_confidence_value(r.confidence),
                 "time_spent_seconds": r.time_spent_seconds,
                 "retried_at": r.retried_at.isoformat() if r.retried_at else None,
             }
@@ -1123,7 +1162,7 @@ async def get_wrong_answer_detail(wrong_id: int, db: Session = Depends(get_db)):
 
 # ========== POST /{id}/retry ==========
 
-@router.post("/{wrong_id:int}/retry")
+@router.post("/{wrong_id:int}/retry", response_model=WrongAnswerRetryResponse)
 async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(get_db)):
     """提交重做结果（统一入口：原题/变式，含 SM-2 更新）"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
@@ -1131,18 +1170,21 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
         raise HTTPException(status_code=404, detail="错题不存在")
 
     # 判定对错：变式题用 variant_answer，原题用 correct_answer
-    if body.is_variant and wa.variant_data:
-        correct_raw = wa.variant_data.get("variant_answer") or ""
+    variant_data = canonicalize_variant_data(wa.variant_data) or {}
+    if body.is_variant and variant_data:
+        correct_raw = variant_data.get("variant_answer") or ""
     else:
         correct_raw = wa.correct_answer or ""
     is_correct = _answers_match(body.user_answer, correct_raw)
+
+    confidence = _normalize_confidence_value(body.confidence)
 
     # 创建重做记录
     retry = WrongAnswerRetry(
         wrong_answer_id=wrong_id,
         user_answer=body.user_answer,
         is_correct=is_correct,
-        confidence=body.confidence,
+        confidence=confidence,
         time_spent_seconds=body.time_spent_seconds,
         retried_at=datetime.now(),
         rationale_text=body.recall_text or None,
@@ -1154,24 +1196,24 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
     # 更新错题统计
     wa.retry_count += 1
     wa.last_retry_correct = is_correct
-    wa.last_retry_confidence = body.confidence
+    wa.last_retry_confidence = confidence
     wa.last_retried_at = datetime.now()
     wa.updated_at = datetime.now()
 
     if not is_correct:
         wa.error_count += 1
         if wa.severity_tag not in ("critical",):
-            if body.confidence == "sure":
+            if confidence == "sure":
                 wa.severity_tag = "critical"
             elif wa.error_count >= 2 and wa.severity_tag not in ("critical", "stubborn"):
                 wa.severity_tag = "stubborn"
 
     # 地雷排除：答对+确定 → 降级为 normal
-    if is_correct and body.confidence == "sure" and wa.severity_tag == "landmine":
+    if is_correct and confidence == "sure" and wa.severity_tag == "landmine":
         wa.severity_tag = "normal"
 
     # SM-2 更新（含跳过回忆/跳过自证的降档惩罚）
-    quality = quality_from_result(is_correct, body.confidence)
+    quality = quality_from_result(is_correct, confidence)
     if body.skip_recall:
         quality = max(0, quality - 1)
     if body.skipped_rationale:
@@ -1179,7 +1221,7 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
     sm2_update(wa, quality)
     auto_archived = wa.mastery_status == "archived"
 
-    can_archive = (is_correct and body.confidence == "sure") and not auto_archived
+    can_archive = (is_correct and confidence == "sure") and not auto_archived
 
     db.commit()
 
@@ -1205,13 +1247,13 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
         "sm2_repetitions": wa.sm2_repetitions,
         "next_review_date": wa.next_review_date.isoformat() if wa.next_review_date else None,
         # 变式信息
-        "variant_answer": wa.variant_data.get("variant_answer") if body.is_variant and wa.variant_data else None,
-        "variant_explanation": wa.variant_data.get("variant_explanation") if body.is_variant and wa.variant_data else None,
+        "variant_answer": variant_data.get("variant_answer") if body.is_variant and variant_data else None,
+        "variant_explanation": variant_data.get("variant_explanation") if body.is_variant and variant_data else None,
         "previous_attempts": [
             {
                 "user_answer": r.user_answer,
                 "is_correct": r.is_correct,
-                "confidence": r.confidence,
+                "confidence": _normalize_confidence_value(r.confidence),
                 "retried_at": r.retried_at.isoformat() if r.retried_at else None,
             }
             for r in previous[:5]
@@ -1221,7 +1263,7 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
 
 # ========== POST /{id}/archive + /unarchive ==========
 
-@router.post("/{wrong_id:int}/archive")
+@router.post("/{wrong_id:int}/archive", response_model=WrongAnswerMutationResponse)
 async def archive_wrong_answer(wrong_id: int, db: Session = Depends(get_db)):
     """归档错题"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
@@ -1234,7 +1276,7 @@ async def archive_wrong_answer(wrong_id: int, db: Session = Depends(get_db)):
     return {"success": True, "id": wrong_id, "status": "archived"}
 
 
-@router.post("/{wrong_id:int}/unarchive")
+@router.post("/{wrong_id:int}/unarchive", response_model=WrongAnswerMutationResponse)
 async def unarchive_wrong_answer(wrong_id: int, db: Session = Depends(get_db)):
     """恢复错题"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
@@ -1249,7 +1291,7 @@ async def unarchive_wrong_answer(wrong_id: int, db: Session = Depends(get_db)):
 
 # ========== GET /retry-batch ==========
 
-@router.get("/retry-batch/next")
+@router.get("/retry-batch/next", response_model=WrongAnswerRetryBatchResponse)
 async def get_retry_batch(
     count: int = 5,
     severity: Optional[str] = None,
@@ -1276,7 +1318,7 @@ async def get_retry_batch(
             {
                 "id": wa.id,
                 "question_text": wa.question_text,
-                "options": wa.options,
+                "options": wa.options or {},
                 "question_type": wa.question_type,
                 "difficulty": wa.difficulty,
                 "severity_tag": wa.severity_tag,
@@ -1291,7 +1333,7 @@ async def get_retry_batch(
 
 # ========== GET /export ==========
 
-@router.get("/export")
+@router.get("/export", response_model=MarkdownExportResponse)
 async def export_wrong_answers(
     status: str = "active",
     db: Session = Depends(get_db)
@@ -1364,7 +1406,7 @@ async def export_wrong_answers(
 
 # ========== GET /books ==========
 
-@router.get("/books")
+@router.get("/books", response_model=BooksResponse)
 async def get_available_books(db: Session = Depends(get_db)):
     """获取有错题的书籍列表"""
     chapter_ids = db.query(WrongAnswerV2.chapter_id).filter(
@@ -1385,7 +1427,7 @@ async def get_available_books(db: Session = Depends(get_db)):
 
 # ========== Variant Surgery Endpoints ==========
 
-@router.post("/{wrong_id:int}/variant/generate")
+@router.post("/{wrong_id:int}/variant/generate", response_model=WrongAnswerVariantGenerateResponse)
 async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)):
     """生成变式题（所有错题均可）"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
@@ -1393,18 +1435,19 @@ async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="错题不存在")
 
     # 缓存策略：24h内复用
-    if wa.variant_data and wa.variant_data.get("generated_at"):
+    cached_variant = canonicalize_variant_data(wa.variant_data)
+    if cached_variant and cached_variant.get("generated_at"):
         from datetime import datetime as dt
         try:
-            gen_time = dt.fromisoformat(wa.variant_data["generated_at"])
+            gen_time = dt.fromisoformat(cached_variant["generated_at"])
             if (datetime.now() - gen_time).total_seconds() < 86400:
                 # 返回缓存
                 return {
-                    "variant_question": wa.variant_data["variant_question"],
-                    "variant_options": wa.variant_data["variant_options"],
-                    "variant_answer": wa.variant_data.get("variant_answer", ""),
-                    "transform_type": wa.variant_data.get("transform_type", ""),
-                    "core_knowledge": wa.variant_data.get("core_knowledge", ""),
+                    "variant_question": cached_variant["variant_question"],
+                    "variant_options": cached_variant["variant_options"],
+                    "variant_answer": cached_variant.get("variant_answer", ""),
+                    "transform_type": cached_variant.get("transform_type", ""),
+                    "core_knowledge": cached_variant.get("core_knowledge", ""),
                     "cached": True,
                 }
         except (ValueError, KeyError):
@@ -1414,23 +1457,25 @@ async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)
     from services.variant_surgery_service import generate_variant
     try:
         variant = await generate_variant(wa)
-        wa.variant_data = variant
+        wa.variant_data = canonicalize_variant_data(variant, fallback_generated_at=datetime.now())
         wa.updated_at = datetime.now()
         db.commit()
 
+        stored_variant = canonicalize_variant_data(wa.variant_data) or {}
+
         return {
-            "variant_question": variant["variant_question"],
-            "variant_options": variant["variant_options"],
-            "variant_answer": variant.get("variant_answer", ""),
-            "transform_type": variant.get("transform_type", ""),
-            "core_knowledge": variant.get("core_knowledge", ""),
+            "variant_question": stored_variant["variant_question"],
+            "variant_options": stored_variant["variant_options"],
+            "variant_answer": stored_variant.get("variant_answer", ""),
+            "transform_type": stored_variant.get("transform_type", ""),
+            "core_knowledge": stored_variant.get("core_knowledge", ""),
             "cached": False,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"变式生成失败: {str(e)}")
 
 
-@router.post("/{wrong_id:int}/variant/judge")
+@router.post("/{wrong_id:int}/variant/judge", response_model=WrongAnswerVariantJudgeResponse)
 async def judge_variant_answer(
     wrong_id: int, body: VariantJudgeRequest, db: Session = Depends(get_db)
 ):
@@ -1438,21 +1483,26 @@ async def judge_variant_answer(
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
     if not wa:
         raise HTTPException(status_code=404, detail="错题不存在")
-    if not wa.variant_data:
+    variant_data = canonicalize_variant_data(wa.variant_data) or {}
+    if not variant_data:
         raise HTTPException(status_code=400, detail="尚未生成变式题")
 
-    is_correct = _answers_match(body.user_answer, wa.variant_data.get("variant_answer") or "")
+    is_correct = _answers_match(body.user_answer, variant_data.get("variant_answer") or "")
 
     # AI评估推理
     from services.variant_surgery_service import evaluate_rationale
-    ai_eval = await evaluate_rationale(wa, body.user_answer, body.rationale_text, is_correct)
+    ai_eval = canonicalize_ai_evaluation(
+        await evaluate_rationale(wa, body.user_answer, body.rationale_text, is_correct)
+    ) or {}
 
     # 创建重做记录
+    confidence = _normalize_confidence_value(body.confidence)
+
     retry = WrongAnswerRetry(
         wrong_answer_id=wrong_id,
         user_answer=body.user_answer,
         is_correct=is_correct,
-        confidence=body.confidence,
+        confidence=confidence,
         time_spent_seconds=body.time_spent_seconds,
         retried_at=datetime.now(),
         is_variant=True,
@@ -1464,7 +1514,7 @@ async def judge_variant_answer(
     # 更新错题统计
     wa.retry_count += 1
     wa.last_retry_correct = is_correct
-    wa.last_retry_confidence = body.confidence
+    wa.last_retry_confidence = confidence
     wa.last_retried_at = datetime.now()
     wa.updated_at = datetime.now()
 
@@ -1476,14 +1526,14 @@ async def judge_variant_answer(
 
     if verdict == "lucky_guess":
         wa.severity_tag = "landmine"
-    elif not is_correct and body.confidence == "sure" and wa.severity_tag != "critical":
+    elif not is_correct and confidence == "sure" and wa.severity_tag != "critical":
         # 答错且自信 → critical
         wa.severity_tag = "critical"
     # 注意：不再根据 verdict 增加 error_count
     # error_count 应该只在答错时增加，而 verdict 是推理评估
 
     # SM-2 更新
-    quality = quality_from_result(is_correct, body.confidence)
+    quality = quality_from_result(is_correct, confidence)
     sm2_update(wa, quality)
     auto_archived = wa.mastery_status == "archived"
 
@@ -1493,8 +1543,8 @@ async def judge_variant_answer(
 
     return {
         "is_correct": is_correct,
-        "variant_answer": wa.variant_data.get("variant_answer"),
-        "variant_explanation": wa.variant_data.get("variant_explanation"),
+        "variant_answer": variant_data.get("variant_answer"),
+        "variant_explanation": variant_data.get("variant_explanation"),
         "verdict": verdict,
         "reasoning_score": ai_eval.get("reasoning_score", 0),
         "diagnosis": ai_eval.get("diagnosis", ""),
@@ -1512,7 +1562,7 @@ async def judge_variant_answer(
     }
 
 
-@router.post("/{wrong_id:int}/variant/rescue-report")
+@router.post("/{wrong_id:int}/variant/rescue-report", response_model=MarkdownExportResponse)
 async def get_rescue_report(wrong_id: int, db: Session = Depends(get_db)):
     """生成深水区求助报告"""
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
@@ -1534,7 +1584,7 @@ async def get_rescue_report(wrong_id: int, db: Session = Depends(get_db)):
     return {"content": content, "format": "markdown"}
 
 
-@router.post("/recognize-chapters")
+@router.post("/recognize-chapters", response_model=RecognizeChaptersResponse)
 async def recognize_chapters_for_wrong_answers(
     batch_size: int = Query(default=20, ge=1, le=100),
     process_all: bool = Query(default=False),

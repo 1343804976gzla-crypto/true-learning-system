@@ -2,17 +2,23 @@
 上传历史记录路由
 """
 
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
 from datetime import date, timedelta
 from typing import List, Optional
 
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy.orm import Session
+
+from api_contracts import (
+    HistoryLearningStatsResponse,
+    HistoryTimelineResponse,
+    HistoryUploadResponse,
+)
 from models import get_db, DailyUpload, Chapter
 
 router = APIRouter(prefix="/api/history", tags=["history"])
 
 
-@router.get("/uploads")
+@router.get("/uploads", response_model=HistoryUploadResponse)
 async def get_upload_history(
     days: int = 30,
     db: Session = Depends(get_db)
@@ -52,7 +58,7 @@ async def get_upload_history(
     }
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=HistoryLearningStatsResponse)
 async def get_learning_stats(
     db: Session = Depends(get_db)
 ):
@@ -91,7 +97,7 @@ async def get_learning_stats(
     }
 
 
-@router.get("/timeline")
+@router.get("/timeline", response_model=HistoryTimelineResponse)
 async def get_learning_timeline(
     days: int = 30,
     db: Session = Depends(get_db)

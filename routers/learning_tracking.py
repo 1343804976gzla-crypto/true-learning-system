@@ -7,17 +7,38 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from datetime import datetime, date, timedelta
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from pathlib import Path
 import os
 import re
 import uuid
 
+from api_contracts import (
+    ActivityRecordedResponse,
+    KnowledgeArchiveResponse,
+    KnowledgeTreeResponse,
+    MarkdownExportResponse,
+    OcrPlanBoardResponse,
+    QuestionRecordedResponse,
+    SessionCompletedResponse,
+    StartSessionResponse,
+    TrackingDailyLogsResponse,
+    TrackingProgressBoardResponse,
+    TrackingReviewDataResponse,
+    TrackingSessionDetailResponse,
+    TrackingSessionListResponse,
+    TrackingStatsResponse,
+)
 from models import get_db, Chapter
 from learning_tracking_models import (
     LearningSession, LearningActivity, QuestionRecord,
     DailyLearningLog, LearningInsight, SessionStatus, ActivityType,
     WrongAnswerV2, make_fingerprint, INVALID_CHAPTER_IDS
+)
+from utils.data_contracts import (
+    canonicalize_answer_changes,
+    canonicalize_learning_activity_data,
+    coerce_confidence,
 )
 
 router = APIRouter(prefix="/api/tracking", tags=["learning_tracking"])
@@ -50,6 +71,7 @@ class RecordQuestionRequest(BaseModel):
     explanation: Optional[str] = None
     key_point: Optional[str] = None
     time_spent_seconds: int = 0
+    answer_changes: Optional[List[Any]] = None
 
 class CompleteSessionRequest(BaseModel):
     score: int
@@ -192,6 +214,10 @@ def _normalize_question_options(options: Any) -> Dict[str, str]:
     return {key: normalized[key] for key in ["A", "B", "C", "D", "E"] if key in normalized}
 
 
+def _normalize_confidence_value(value: Optional[str]) -> str:
+    return coerce_confidence(value, default="unsure")
+
+
 def _build_question_record_fingerprint(record: QuestionRecord) -> str:
     return make_fingerprint((record.question_text or "").strip())
 
@@ -279,7 +305,7 @@ def _build_record_stats(records: List[QuestionRecord]) -> Dict[str, int]:
         else:
             stats["wrong_count"] += 1
 
-        confidence = (record.confidence or "").strip()
+        confidence = _normalize_confidence_value(record.confidence)
         if confidence == "sure":
             stats["sure_count"] += 1
         elif confidence == "unsure":
@@ -730,7 +756,7 @@ def _build_master_plan(plan_year: int) -> Dict[str, Any]:
     }
 
 
-@router.post("/session/start")
+@router.post("/session/start", response_model=StartSessionResponse)
 async def start_learning_session(
     request: Request,
     body: StartSessionRequest,
@@ -777,7 +803,7 @@ async def start_learning_session(
         session_id=session_id,
         activity_type=ActivityType.EXAM_START if body.session_type == "exam" else ActivityType.DETAIL_PRACTICE_START,
         activity_name="开始学习" if body.session_type == "exam" else "开始细节练习",
-        data={"chapter_id": body.chapter_id, "knowledge_point": body.knowledge_point},
+        data=canonicalize_learning_activity_data({"chapter_id": body.chapter_id, "knowledge_point": body.knowledge_point}),
         timestamp=datetime.now(),
         relative_time_ms=0
     )
@@ -789,12 +815,12 @@ async def start_learning_session(
     
     return {
         "session_id": session_id,
-        "started_at": learning_session.started_at,
+        "started_at": learning_session.started_at.isoformat() if learning_session.started_at else None,
         "message": "学习会话已开始"
     }
 
 
-@router.post("/session/{session_id}/activity")
+@router.post("/session/{session_id}/activity", response_model=ActivityRecordedResponse)
 async def record_activity(
     session_id: str,
     body: RecordActivityRequest,
@@ -816,7 +842,7 @@ async def record_activity(
         session_id=session_id,
         activity_type=body.activity_type,
         activity_name=body.activity_name,
-        data=body.data,
+        data=canonicalize_learning_activity_data(body.data),
         timestamp=datetime.now(),
         relative_time_ms=relative_ms
     )
@@ -826,7 +852,7 @@ async def record_activity(
     return {"success": True, "activity_id": activity.id}
 
 
-@router.post("/session/{session_id}/question")
+@router.post("/session/{session_id}/question", response_model=QuestionRecordedResponse)
 async def record_question_answer(
     session_id: str,
     body: RecordQuestionRequest,
@@ -876,9 +902,10 @@ async def record_question_answer(
     question_record.correct_answer = body.correct_answer
     question_record.user_answer = body.user_answer
     question_record.is_correct = is_correct
-    question_record.confidence = body.confidence
+    question_record.confidence = _normalize_confidence_value(body.confidence)
     question_record.explanation = body.explanation[:2000] if body.explanation else None
     question_record.key_point = body.key_point
+    question_record.answer_changes = canonicalize_answer_changes(body.answer_changes)
     question_record.answered_at = now
     question_record.time_spent_seconds = body.time_spent_seconds
     if not question_record.first_viewed_at:
@@ -891,7 +918,7 @@ async def record_question_answer(
     return {"success": True, "record_id": question_record.id, "updated": updated}
 
 
-@router.post("/session/{session_id}/complete")
+@router.post("/session/{session_id}/complete", response_model=SessionCompletedResponse)
 async def complete_learning_session(
     session_id: str,
     body: CompleteSessionRequest,
@@ -925,7 +952,7 @@ async def complete_learning_session(
             session_id=session_id,
             activity_type=ActivityType.EXAM_SUBMIT if session.session_type == "exam" else ActivityType.DETAIL_PRACTICE_SUBMIT,
             activity_name="完成测试" if session.session_type == "exam" else "完成细节练习",
-            data={"score": body.score, "correct": stats["correct_count"], "wrong": stats["wrong_count"]},
+            data=canonicalize_learning_activity_data({"score": body.score, "correct": stats["correct_count"], "wrong": stats["wrong_count"]}),
             timestamp=datetime.now(),
             relative_time_ms=session.duration_seconds * 1000 if session.duration_seconds else 0
         )
@@ -1003,7 +1030,7 @@ async def update_daily_log(session: LearningSession, db: Session):
         # 不影响主流程，不抛出异常
 
 
-@router.get("/sessions")
+@router.get("/sessions", response_model=TrackingSessionListResponse)
 async def get_learning_sessions(
     limit: int = 20,
     offset: int = 0,
@@ -1052,7 +1079,7 @@ async def get_learning_sessions(
     }
 
 
-@router.get("/session/{session_id}")
+@router.get("/session/{session_id}", response_model=TrackingSessionDetailResponse)
 async def get_session_detail(
     session_id: str,
     db: Session = Depends(get_db)
@@ -1096,9 +1123,9 @@ async def get_session_detail(
             {
                 "type": a.activity_type,
                 "name": a.activity_name,
-                "data": a.data,
+                "data": a.data or {},
                 "timestamp": a.timestamp.isoformat() if a.timestamp else None,
-                "relative_time_ms": a.relative_time_ms
+                "relative_time_ms": a.relative_time_ms or 0
             }
             for a in activities
         ],
@@ -1108,13 +1135,13 @@ async def get_session_detail(
                 "type": q.question_type,
                 "difficulty": q.difficulty,
                 "question": q.question_text,
-                "options": q.options,
+                "options": q.options or {},
                 "correct_answer": q.correct_answer,
                 "user_answer": q.user_answer,
                 "is_correct": q.is_correct,
-                "confidence": q.confidence,
+                "confidence": _normalize_confidence_value(q.confidence),
                 "key_point": _display_key_point(q),
-                "time_spent_seconds": q.time_spent_seconds,
+                "time_spent_seconds": q.time_spent_seconds or 0,
                 "explanation": q.explanation,
                 "answer_changes": q.answer_changes or []
             }
@@ -1123,7 +1150,7 @@ async def get_session_detail(
     }
 
 
-@router.get("/review-data")
+@router.get("/review-data", response_model=TrackingReviewDataResponse)
 async def get_review_data(
     ids: str = "",
     db: Session = Depends(get_db)
@@ -1172,14 +1199,14 @@ async def get_review_data(
                     "type": q.question_type,
                     "difficulty": q.difficulty,
                     "question": q.question_text,
-                    "options": q.options,
+                    "options": q.options or {},
                     "correct_answer": q.correct_answer,
                     "user_answer": q.user_answer,
                     "is_correct": q.is_correct,
-                    "confidence": q.confidence,
+                    "confidence": _normalize_confidence_value(q.confidence),
                     "key_point": _display_key_point(q),
                     "explanation": q.explanation,
-                    "time_spent_seconds": q.time_spent_seconds,
+                    "time_spent_seconds": q.time_spent_seconds or 0,
                     "answer_changes": q.answer_changes or []
                 }
                 for q in questions
@@ -1189,7 +1216,7 @@ async def get_review_data(
     return {"sessions": results}
 
 
-@router.get("/knowledge-archive")
+@router.get("/knowledge-archive", response_model=KnowledgeArchiveResponse)
 async def get_knowledge_archive(
     db: Session = Depends(get_db)
 ):
@@ -1231,11 +1258,11 @@ async def get_knowledge_archive(
         sess_info = session_map.get(q.session_id, {})
         kp_map[kp]["questions"].append({
             "question": q.question_text,
-            "options": q.options,
+            "options": _normalize_question_options(q.options),
             "correct_answer": q.correct_answer,
             "user_answer": q.user_answer,
             "is_correct": q.is_correct,
-            "confidence": q.confidence,
+            "confidence": _normalize_confidence_value(q.confidence),
             "difficulty": q.difficulty,
             "question_type": q.question_type,
             "explanation": q.explanation,
@@ -1271,7 +1298,7 @@ async def get_knowledge_archive(
     }
 
 
-@router.get("/daily-logs")
+@router.get("/daily-logs", response_model=TrackingDailyLogsResponse)
 async def get_daily_logs(
     days: int = 30,
     db: Session = Depends(get_db)
@@ -1295,14 +1322,14 @@ async def get_daily_logs(
                 "average_score": log.average_score,
                 "duration_minutes": log.total_duration_seconds // 60,
                 "knowledge_points": len(log.knowledge_points_covered or []),
-                "weak_points": log.weak_knowledge_points
+                "weak_points": log.weak_knowledge_points or []
             }
             for log in logs
         ]
     }
 
 
-@router.get("/export/{session_id}")
+@router.get("/export/{session_id}", response_model=Union[TrackingSessionDetailResponse, MarkdownExportResponse])
 async def export_session_report(
     session_id: str,
     format: str = "text",  # 'text', 'json', 'markdown'
@@ -1401,7 +1428,7 @@ async def export_session_report(
         return {"content": "\n".join(text_lines), "format": "text"}
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=TrackingStatsResponse)
 async def get_stats(
     period: str = "all",  # 'day', 'week', 'month', 'all'
     date_str: Optional[str] = None,  # 具体日期 YYYY-MM-DD
@@ -1437,7 +1464,8 @@ async def get_stats(
 
     for qr in question_records:
         question_type = qr.question_type or "A1"
-        difficulty = qr.difficulty or "基础"
+        _valid_difficulties = {"基础", "提高", "难题"}
+        difficulty = qr.difficulty if qr.difficulty in _valid_difficulties else "基础"
         key_point = _display_key_point(qr)
 
         type_dist[question_type] = type_dist.get(question_type, 0) + 1
@@ -1453,7 +1481,8 @@ async def get_stats(
         else:
             knowledge_points[key_point]["wrong"] += 1
 
-        conf_score = 1.0 if qr.confidence == "sure" else (0.5 if qr.confidence == "unsure" else (0.0 if qr.confidence == "no" else None))
+        normalized_confidence = _normalize_confidence_value(qr.confidence)
+        conf_score = 1.0 if normalized_confidence == "sure" else (0.5 if normalized_confidence == "unsure" else 0.0)
         if conf_score is not None:
             kp_confidence.setdefault(key_point, []).append(conf_score)
 
@@ -1481,7 +1510,7 @@ async def get_stats(
             {
                 "key_point": _display_key_point(record),
                 "is_correct": record.is_correct,
-                "confidence": record.confidence,
+                "confidence": _normalize_confidence_value(record.confidence),
                 "time_spent_seconds": record.time_spent_seconds or 0,
                 "answer_changes": record.answer_changes or [],
                 "question_type": record.question_type or "A1",
@@ -1598,7 +1627,7 @@ async def get_stats(
     }
 
 
-@router.get("/ocr-plan-board")
+@router.get("/ocr-plan-board", response_model=OcrPlanBoardResponse)
 async def get_ocr_plan_board(
     plan_dir: Optional[str] = Query(default=None, description="OCR计划目录路径（可选）"),
     plan_year: Optional[int] = Query(default=None, description="整体规划年份（默认当前年）")
@@ -1704,7 +1733,7 @@ async def get_ocr_plan_board(
     }
 
 
-@router.get("/progress-board")
+@router.get("/progress-board", response_model=TrackingProgressBoardResponse)
 async def get_progress_board(
     period: str = "all",
     date_str: Optional[str] = None,
@@ -1864,7 +1893,7 @@ async def get_progress_board(
     }
 
 
-@router.get("/knowledge-tree")
+@router.get("/knowledge-tree", response_model=KnowledgeTreeResponse)
 async def get_knowledge_tree(
     period: str = "all",
     date_str: Optional[str] = None,
@@ -1967,7 +1996,7 @@ async def get_knowledge_tree(
     return {"tree": result}
 
 
-@router.get("/export-markdown")
+@router.get("/export-markdown", response_model=MarkdownExportResponse)
 async def export_markdown_report(
     period: str = "all",
     date_str: Optional[str] = None,

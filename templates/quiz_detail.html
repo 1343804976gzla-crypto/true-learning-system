@@ -3,7 +3,17 @@
 {% block title %}细节强化练习{% endblock %}
 
 {% block content %}
-<div class="mb-6">
+<div class="quiz-immersive-page">
+    <div class="quiz-immersive-bg" aria-hidden="true">
+        <video class="quiz-immersive-video" autoplay muted loop playsinline preload="metadata">
+            <source src="https://ik.imagekit.io/lrigu76hy/tailark/dna-video.mp4?updatedAt=1745736251477" type="video/mp4">
+        </video>
+        <div class="quiz-immersive-overlay"></div>
+        <div class="quiz-immersive-glow"></div>
+        <div class="quiz-immersive-grid"></div>
+    </div>
+    <div class="quiz-immersive-content">
+<div class="quiz-hero-panel mb-6">
     <div class="flex items-center text-sm text-gray-500 mb-2">
         <a href="/" class="hover:text-blue-500">仪表盘</a>
         <span class="mx-2">/</span>
@@ -108,6 +118,8 @@
             <button type="button" onclick="endStudySession()" class="bg-emerald-600 text-white px-6 py-3 rounded-lg hover:bg-emerald-700 font-bold">✅ 结束学习</button>
         </div>
     </div>
+</div>
+</div>
 </div>
 {% endblock %}
 
@@ -507,7 +519,19 @@
         const container = document.getElementById('questionsContainer');
         container.innerHTML =
             '<div class="text-center p-8">' +
-            '<div class="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>' +
+            '<div class="tls-loader-wrapper tls-loader-wrapper--compact mb-5" aria-hidden="true">' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 0;">G</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 1;">e</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 2;">n</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 3;">e</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 4;">r</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 5;">a</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 6;">t</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 7;">i</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 8;">n</span>' +
+            '<span class="tls-loader-letter" style="--loader-letter-index: 9;">g</span>' +
+            '<div class="tls-loader"></div>' +
+            '</div>' +
             '<div class="text-lg">DeepSeek 正在生成变式题...</div>' +
             '<div class="text-sm text-gray-400 mt-2">基于同一知识点，生成 5 道不同角度的变式</div>' +
             '</div>';
@@ -1111,4 +1135,6 @@
         }
     })();
 </script>
+    </div>
+</div>
 {% endblock %}

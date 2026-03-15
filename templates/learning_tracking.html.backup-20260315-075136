@@ -1,0 +1,934 @@
+{% extends "base.html" %}
+
+{% block title %}学习轨迹 - 战略指挥舱{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center text-sm text-gray-500 mb-2">
+        <a href="/" class="hover:text-blue-500">仪表盘</a>
+        <span class="mx-2">/</span>
+        <span>学习轨迹</span>
+    </div>
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold">📊 学习轨迹战略指挥舱</h1>
+            <p class="text-gray-500">从宏观到微观，精准定位你的薄弱环节</p>
+        </div>
+        <div class="flex space-x-2">
+            <button onclick="exportMarkdown()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">📝 导出Markdown</button>
+            <button onclick="loadAllData()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">🔄 刷新数据</button>
+        </div>
+    </div>
+</div>
+
+<!-- 日期范围选择器 -->
+<div class="bg-white rounded-lg shadow p-4 mb-6">
+    <div class="flex items-center justify-between">
+        <div class="flex space-x-1">
+            <button onclick="setPeriod('day')" id="tab-day" class="px-4 py-2 rounded text-sm font-medium transition hover:bg-gray-100 text-gray-600">今日</button>
+            <button onclick="setPeriod('week')" id="tab-week" class="px-4 py-2 rounded text-sm font-medium transition hover:bg-gray-100 text-gray-600">本周</button>
+            <button onclick="setPeriod('month')" id="tab-month" class="px-4 py-2 rounded text-sm font-medium transition hover:bg-gray-100 text-gray-600">本月</button>
+            <button onclick="setPeriod('all')" id="tab-all" class="px-4 py-2 rounded text-sm font-medium bg-blue-500 text-white">全部</button>
+        </div>
+        <div class="flex items-center space-x-2">
+            <button onclick="navigateDate(-1)" id="btnPrevDate" class="hidden text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100">← 上一</button>
+            <span id="dateRangeLabel" class="text-sm text-gray-500"></span>
+            <button onclick="navigateDate(1)" id="btnNextDate" class="hidden text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100">下一 →</button>
+        </div>
+    </div>
+</div>
+
+<!-- 第一层：北极星指标 -->
+<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
+        <div class="text-sm text-gray-500">做题数</div>
+        <div id="totalQuestions" class="text-3xl font-bold text-green-600">0</div>
+        <div class="text-xs text-gray-400 mt-1">累计题目</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
+        <div class="text-sm text-gray-500">学习时长</div>
+        <div id="totalDuration" class="text-3xl font-bold text-blue-600">0h</div>
+        <div class="text-xs text-gray-400 mt-1">累计时间</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
+        <div class="text-sm text-gray-500">平均正确率</div>
+        <div id="avgAccuracy" class="text-3xl font-bold text-purple-600">0%</div>
+        <div id="wowDelta" class="text-xs mt-1 font-medium text-gray-400"></div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-orange-500">
+        <div class="text-sm text-gray-500">学习次数</div>
+        <div id="totalSessions" class="text-3xl font-bold text-orange-600">0</div>
+        <div class="text-xs text-gray-400 mt-1">累计会话</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-red-500">
+        <div class="text-sm text-gray-500">⚠️ 最薄弱知识点</div>
+        <div id="weakestName" class="text-lg font-bold text-red-600 truncate" title="">-</div>
+        <div id="weakestAccuracy" class="text-xs text-red-400 mt-1">-</div>
+    </div>
+</div>
+
+<!-- 第二层：学习趋势 -->
+<div class="bg-white rounded-lg shadow p-6 mb-6">
+    <h3 class="font-bold text-lg mb-4">📈 学习趋势（近14天）</h3>
+    <div style="position:relative;height:300px;">
+        <canvas id="trendChartCanvas"></canvas>
+    </div>
+</div>
+
+<!-- 第三层：痛点剖析 -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="font-bold text-lg mb-4">🎯 题型正确率</h3>
+        <div style="position:relative;height:260px;">
+            <canvas id="typeRadarCanvas"></canvas>
+        </div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="font-bold text-lg mb-4">🧠 知识点诊断象限</h3>
+        <div id="confidenceQuadrantList" class="space-y-3 max-h-[340px] overflow-y-auto text-sm">
+            <span class="text-gray-400">加载中...</span>
+        </div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="font-bold text-lg mb-4">📊 难度通过率</h3>
+        <div style="position:relative;height:260px;">
+            <canvas id="diffBarCanvas"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- 第四层：知识树 -->
+<div id="knowledgeTreeSection" class="bg-white rounded-lg shadow mb-6">
+    <div class="px-6 py-4 border-b flex justify-between items-center">
+        <h3 class="font-bold text-lg">🌳 大纲知识点追踪</h3>
+        <div class="flex items-center space-x-3">
+            <button onclick="exportKnowledgeTreeMd()" class="text-green-600 hover:text-green-800 text-sm">📝 导出Markdown</button>
+            <button onclick="toggleTreeSection()" id="treeToggleBtn" class="text-blue-600 hover:text-blue-800 text-sm">收起 ▲</button>
+        </div>
+    </div>
+    <div id="knowledgeTreeContent" class="p-4">
+        <div id="knowledgeTree" class="text-sm">加载中...</div>
+    </div>
+</div>
+
+<!-- 学习记录列表 -->
+<div class="bg-white rounded-lg shadow">
+    <div class="px-6 py-4 border-b flex justify-between items-center">
+        <h3 class="font-bold text-lg">📚 学习记录</h3>
+        <div class="flex items-center space-x-3">
+            <button onclick="toggleAllCards()" id="expandAllBtn" class="text-blue-600 hover:text-blue-800 text-sm">展开全部 ▼</button>
+        </div>
+    </div>
+    <div id="sessionsList" class="space-y-0">
+        <div class="p-8 text-center text-gray-500">加载中...</div>
+    </div>
+</div>
+
+<!-- 详情模态框 -->
+<div id="detailModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto">
+    <div class="min-h-screen px-4 text-center">
+        <div class="inline-block w-full max-w-4xl my-8 text-left align-middle bg-white rounded-lg shadow-xl">
+            <div class="px-6 py-4 border-b flex justify-between items-center">
+                <h3 id="modalTitle" class="font-bold text-xl">学习详情</h3>
+                <div class="flex space-x-3">
+                    <button onclick="exportReport('text')" class="text-blue-600 hover:text-blue-800 text-sm">📋 导出文本</button>
+                    <button onclick="exportReport('markdown')" class="text-blue-600 hover:text-blue-800 text-sm">📝 导出Markdown</button>
+                    <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                </div>
+            </div>
+            <div id="modalContent" class="p-6 max-h-[70vh] overflow-y-auto"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+    // ========== 安全工具函数 ==========
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function handleFetchError(error, userMessage, showAlert = true) {
+        console.error('API Error:', error);
+        const message = userMessage || '操作失败，请稍后重试';
+        if (showAlert) alert(message);
+        return message;
+    }
+
+    async function safeFetch(url, options = {}, errorMessage = '请求失败') {
+        try {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            handleFetchError(error, errorMessage);
+            throw error;
+        }
+    }
+
+// ========== Global State ==========
+var currentPeriod = 'all';
+var currentDateStr = null;
+var currentSessionId = null;
+var allExamsExpanded = false;
+var statsData = null;
+var trendChart = null, radarChart = null, scatterChart = null, diffChart = null;
+
+document.addEventListener('DOMContentLoaded', function() { loadAllData(); });
+
+// ========== Period Controls ==========
+function setPeriod(p) {
+    currentPeriod = p;
+    currentDateStr = null;
+    ['day','week','month','all'].forEach(function(k) {
+        var btn = document.getElementById('tab-' + k);
+        if (k === p) { btn.className = 'px-4 py-2 rounded text-sm font-medium bg-blue-500 text-white'; }
+        else { btn.className = 'px-4 py-2 rounded text-sm font-medium transition hover:bg-gray-100 text-gray-600'; }
+    });
+    var showNav = (p !== 'all');
+    document.getElementById('btnPrevDate').classList.toggle('hidden', !showNav);
+    document.getElementById('btnNextDate').classList.toggle('hidden', !showNav);
+    loadAllData();
+}
+
+function navigateDate(dir) {
+    var base = currentDateStr ? new Date(currentDateStr) : new Date();
+    if (currentPeriod === 'day') base.setDate(base.getDate() + dir);
+    else if (currentPeriod === 'week') base.setDate(base.getDate() + dir * 7);
+    else if (currentPeriod === 'month') base.setMonth(base.getMonth() + dir);
+    currentDateStr = base.toISOString().slice(0, 10);
+    loadAllData();
+}
+
+function updateDateLabel(data) {
+    var label = '';
+    if (data.start_date && data.end_date) {
+        label = data.start_date.slice(0, 10) + ' ~ ' + data.end_date.slice(0, 10);
+    } else { label = '\u5168\u90e8\u6570\u636e'; }
+    document.getElementById('dateRangeLabel').textContent = label;
+}
+
+// ========== Main Data Load ==========
+async function loadAllData() {
+    try {
+        var url = '/api/tracking/stats?period=' + currentPeriod;
+        if (currentDateStr) url += '&date_str=' + currentDateStr;
+        statsData = await safeFetch(url, {}, '操作失败');
+        updateDateLabel(statsData);
+        renderSummary(statsData);
+        renderTrendChart(statsData.daily_trend);
+        renderTypeRadar(statsData.type_distribution);
+        renderConfidenceScatter(statsData.knowledge_points);
+        renderDifficultyBar(statsData.difficulty_distribution);
+        renderGroupedSessions(statsData.sessions);
+        loadKnowledgeTree();
+    } catch (e) { console.error('loadAllData error:', e); }
+}
+
+// ========== Layer 1: North Star Metrics ==========
+function renderSummary(data) {
+    var s = data.summary;
+    document.getElementById('totalQuestions').textContent = s.total_questions;
+    var dur = s.total_duration;
+    document.getElementById('totalDuration').textContent = dur >= 3600 ? Math.round(dur / 360) / 10 + 'h' : Math.round(dur / 60) + 'min';
+    document.getElementById('avgAccuracy').textContent = s.avg_accuracy + '%';
+    document.getElementById('totalSessions').textContent = s.total_sessions;
+
+    var wowEl = document.getElementById('wowDelta');
+    if (data.wow_delta && data.wow_delta.delta !== null) {
+        var d = data.wow_delta.delta;
+        var arrow = d > 0 ? '\u2191' : (d < 0 ? '\u2193' : '\u2192');
+        var color = d > 0 ? 'text-green-600' : (d < 0 ? 'text-red-600' : 'text-gray-400');
+        wowEl.className = 'text-xs mt-1 font-medium ' + color;
+        wowEl.textContent = '\u5468\u73af\u6bd4 ' + arrow + ' ' + Math.abs(d) + '%';
+    } else { wowEl.textContent = ''; }
+
+    if (data.weakest_area) {
+        document.getElementById('weakestName').textContent = data.weakest_area.name;
+        document.getElementById('weakestName').title = data.weakest_area.name;
+        document.getElementById('weakestAccuracy').textContent = '\u6b63\u786e\u7387 ' + data.weakest_area.accuracy + '% (' + data.weakest_area.correct + '/' + data.weakest_area.total + ')';
+    } else {
+        document.getElementById('weakestName').textContent = '\u6682\u65e0';
+        document.getElementById('weakestAccuracy').textContent = '\u505a\u9898\u22653\u624d\u4f1a\u663e\u793a';
+    }
+}
+
+// ========== Layer 2: Trend Chart (Chart.js dual axis) ==========
+function renderTrendChart(dailyTrend) {
+    var ctx = document.getElementById('trendChartCanvas').getContext('2d');
+    if (trendChart) trendChart.destroy();
+    var dates = [];
+    var now = new Date();
+    for (var i = 13; i >= 0; i--) {
+        var d = new Date(now);
+        d.setDate(d.getDate() - i);
+        dates.push(d.toISOString().slice(0, 10));
+    }
+    var counts = dates.map(function(dk) { return dailyTrend[dk] ? dailyTrend[dk].questions : 0; });
+    var accs = dates.map(function(dk) {
+        if (!dailyTrend[dk] || dailyTrend[dk].questions === 0) return null;
+        return Math.round(dailyTrend[dk].correct / dailyTrend[dk].questions * 100);
+    });
+    var labels = dates.map(function(dk) { return dk.slice(5); });
+
+    trendChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                { label: '\u505a\u9898\u6570', data: counts, backgroundColor: 'rgba(59,130,246,0.6)', borderRadius: 4, yAxisID: 'y', order: 2 },
+                { label: '\u6b63\u786e\u7387%', data: accs, type: 'line', borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.3, pointRadius: 3, yAxisID: 'y1', order: 1, spanGaps: true }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y: { beginAtZero: true, position: 'left', title: { display: true, text: '\u505a\u9898\u6570' } },
+                y1: { beginAtZero: true, max: 100, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '\u6b63\u786e\u7387%' } }
+            }
+        }
+    });
+}
+
+// ========== Layer 3 Chart 1: Type Radar ==========
+function renderTypeRadar(typeDist) {
+    var ctx = document.getElementById('typeRadarCanvas').getContext('2d');
+    if (radarChart) radarChart.destroy();
+    var typeLabels = Object.keys(typeDist);
+    if (typeLabels.length === 0) typeLabels = ['A1','A2','A3/A4','X'];
+    var typeAccs = typeLabels.map(function(t) { return typeDist[t] ? typeDist[t].accuracy : 0; });
+
+    radarChart = new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: typeLabels,
+            datasets: [{ label: '\u6b63\u786e\u7387%', data: typeAccs, backgroundColor: 'rgba(99,102,241,0.2)', borderColor: '#6366f1', pointBackgroundColor: '#6366f1', pointRadius: 4 }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { r: { beginAtZero: true, max: 100, ticks: { stepSize: 20 } } },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+// ========== Layer 3 Chart 2: Confidence Quadrant List ==========
+function renderConfidenceScatter(kpData) {
+    var container = document.getElementById('confidenceQuadrantList');
+    // Classify each knowledge point into quadrants
+    var quadrants = {
+        danger: { label: '\u26a0\ufe0f \u81f4\u547d\u76f2\u533a', desc: '\u81ea\u4fe1\u9ad8\u4f46\u6b63\u786e\u7387\u4f4e', color: 'yellow', items: [] },
+        mastered: { label: '\u2705 \u5df2\u638c\u63e1', desc: '\u81ea\u4fe1\u9ad8\u4e14\u6b63\u786e\u7387\u9ad8', color: 'green', items: [] },
+        gap: { label: '\u274c \u77e5\u8bc6\u7f3a\u53e3', desc: '\u81ea\u4fe1\u4f4e\u4e14\u6b63\u786e\u7387\u4f4e', color: 'red', items: [] },
+        lucky: { label: '\ud83c\udf40 \u8fd0\u6c14/\u4e0d\u7a33\u5b9a', desc: '\u81ea\u4fe1\u4f4e\u4f46\u6b63\u786e\u7387\u9ad8', color: 'blue', items: [] }
+    };
+    for (var kp in kpData) {
+        var v = kpData[kp];
+        if (v.total === 0) continue; // 没做过题的不参与分类
+        var acc = v.total > 0 ? Math.round(v.correct / v.total * 100) : 0;
+        var hasConf = v.has_confidence_data !== false && v.avg_confidence != null;
+        var conf = hasConf ? Math.round(v.avg_confidence * 100) : 0;
+        var item = { name: kp, acc: acc, conf: conf, total: v.total, correct: v.correct };
+        if (acc >= 50 && conf >= 50) quadrants.mastered.items.push(item);
+        else if (acc < 50 && conf >= 50) quadrants.danger.items.push(item);
+        else if (acc < 50 && conf < 50) quadrants.gap.items.push(item);
+        else quadrants.lucky.items.push(item);
+    }
+    // Sort each quadrant: worst accuracy first
+    var order = ['danger', 'gap', 'lucky', 'mastered'];
+    order.forEach(function(k) { quadrants[k].items.sort(function(a, b) { return a.acc - b.acc; }); });
+
+    var html = '';
+    var colorMap = { yellow: { bg: 'bg-yellow-50', border: 'border-yellow-400', text: 'text-yellow-700', badge: 'bg-yellow-100 text-yellow-800' },
+                     red: { bg: 'bg-red-50', border: 'border-red-400', text: 'text-red-700', badge: 'bg-red-100 text-red-800' },
+                     blue: { bg: 'bg-blue-50', border: 'border-blue-400', text: 'text-blue-700', badge: 'bg-blue-100 text-blue-800' },
+                     green: { bg: 'bg-green-50', border: 'border-green-400', text: 'text-green-700', badge: 'bg-green-100 text-green-800' } };
+
+    var hasAny = false;
+    order.forEach(function(k) {
+        var q = quadrants[k];
+        if (q.items.length === 0) return;
+        hasAny = true;
+        var c = colorMap[q.color];
+        html += '<div class="' + c.bg + ' border-l-4 ' + c.border + ' rounded p-2">';
+        html += '<div class="font-bold ' + c.text + ' mb-1">' + q.label + ' <span class="font-normal text-xs">(' + q.desc + ')</span></div>';
+        q.items.forEach(function(item) {
+            var accColor = item.acc >= 80 ? 'text-green-600' : (item.acc >= 60 ? 'text-yellow-600' : 'text-red-600');
+            html += '<div class="flex items-center justify-between py-0.5">';
+            html += '<span class="truncate flex-1 mr-2" title="' + item.name + '">' + item.name + '</span>';
+            html += '<span class="' + accColor + ' font-bold flex-shrink-0">' + item.acc + '%</span>';
+            html += '<span class="text-gray-400 ml-2 flex-shrink-0 w-10 text-right">' + item.correct + '/' + item.total + '</span>';
+            html += '</div>';
+        });
+        html += '</div>';
+    });
+
+    if (!hasAny) html = '<span class="text-gray-400">\u6682\u65e0\u6570\u636e</span>';
+    container.innerHTML = html;
+}
+
+// ========== Layer 3 Chart 3: Difficulty Bar ==========
+function renderDifficultyBar(diffDist) {
+    var ctx = document.getElementById('diffBarCanvas').getContext('2d');
+    if (diffChart) diffChart.destroy();
+    var order = ['\u57fa\u7840', '\u63d0\u9ad8', '\u96be\u9898'];
+    var labels = [], accs = [], colors = [];
+    order.forEach(function(d) {
+        if (diffDist[d]) {
+            labels.push(d);
+            accs.push(diffDist[d].accuracy);
+            colors.push(d === '\u57fa\u7840' ? 'rgba(34,197,94,0.7)' : (d === '\u63d0\u9ad8' ? 'rgba(234,179,8,0.7)' : 'rgba(239,68,68,0.7)'));
+        }
+    });
+    for (var k in diffDist) {
+        if (order.indexOf(k) < 0) { labels.push(k); accs.push(diffDist[k].accuracy); colors.push('rgba(107,114,128,0.7)'); }
+    }
+
+    diffChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: labels, datasets: [{ label: '\u901a\u8fc7\u7387%', data: accs, backgroundColor: colors, borderRadius: 6 }] },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: '\u6b63\u786e\u7387%' } } },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+// ========== Layer 4: Knowledge Tree ==========
+var knowledgeTreeData = null;
+var treeCollapsed = {};
+
+async function loadKnowledgeTree() {
+    try {
+        var url = '/api/tracking/knowledge-tree?period=' + currentPeriod;
+        if (currentDateStr) url += '&date_str=' + currentDateStr;
+        var data = await safeFetch(url, {}, '请求失败');
+        knowledgeTreeData = data.tree || [];
+        renderKnowledgeTree();
+    } catch (e) {
+        document.getElementById('knowledgeTree').innerHTML = '<span class="text-gray-400">\u52a0\u8f7d\u77e5\u8bc6\u6811\u5931\u8d25</span>';
+    }
+}
+
+function renderKnowledgeTree() {
+    var container = document.getElementById('knowledgeTree');
+    if (!knowledgeTreeData || knowledgeTreeData.length === 0) {
+        container.innerHTML = '<span class="text-gray-400">\u6682\u65e0\u6570\u636e\uff0c\u5b8c\u6210\u6d4b\u8bd5\u540e\u81ea\u52a8\u751f\u6210</span>';
+        return;
+    }
+    var html = '';
+    knowledgeTreeData.forEach(function(book, bi) {
+        var bookId = 'book-' + bi;
+        var bookOpen = !treeCollapsed[bookId];
+        var bookAccColor = book.accuracy >= 80 ? 'text-green-600' : (book.accuracy >= 60 ? 'text-yellow-600' : 'text-red-600');
+        html += '<div class="border rounded-lg mb-2">';
+        html += '<div class="p-3 bg-gray-50 cursor-pointer hover:bg-gray-100 flex justify-between items-center" onclick="toggleTreeNode(\'' + bookId + '\')">';
+        html += '<div class="flex items-center space-x-2"><span class="text-lg">\ud83d\udcda</span><span class="font-bold">' + book.name + '</span></div>';
+        html += '<div class="flex items-center space-x-3 text-sm"><span class="' + bookAccColor + ' font-bold">' + book.accuracy + '%</span><span class="text-gray-400">' + book.correct + '/' + book.total + '</span><span class="text-gray-400">' + (bookOpen ? '\u25b2' : '\u25bc') + '</span></div>';
+        html += '</div>';
+        if (bookOpen) {
+            html += '<div class="pl-4">';
+            (book.chapters || []).forEach(function(ch, ci) {
+                var chId = bookId + '-ch-' + ci;
+                var chOpen = !treeCollapsed[chId];
+                var chAccColor = ch.accuracy >= 80 ? 'text-green-600' : (ch.accuracy >= 60 ? 'text-yellow-600' : 'text-red-600');
+                html += '<div class="border-t">';
+                html += '<div class="p-2 pl-4 cursor-pointer hover:bg-gray-50 flex justify-between items-center" onclick="toggleTreeNode(\'' + chId + '\')">';
+                html += '<div class="flex items-center space-x-2"><span>\ud83d\udcd6</span><span class="font-medium text-sm">' + ch.name + '</span></div>';
+                html += '<div class="flex items-center space-x-3 text-xs"><span class="' + chAccColor + ' font-bold">' + ch.accuracy + '%</span><span class="text-gray-400">' + ch.correct + '/' + ch.total + '</span><span class="text-gray-400">' + (chOpen ? '\u25b2' : '\u25bc') + '</span></div>';
+                html += '</div>';
+                if (chOpen && ch.key_points) {
+                    html += '<div class="pl-8 pb-2">';
+                    ch.key_points.forEach(function(kp) {
+                        var kpAccColor = kp.accuracy >= 80 ? 'text-green-600' : (kp.accuracy >= 60 ? 'text-yellow-600' : 'text-red-600');
+                        var kpBarColor = kp.accuracy >= 80 ? 'bg-green-500' : (kp.accuracy >= 60 ? 'bg-yellow-500' : 'bg-red-500');
+                        html += '<div class="flex items-center justify-between py-1 text-xs border-t border-dashed">';
+                        html += '<div class="flex items-center space-x-2 flex-1 min-w-0"><span>\ud83d\udcc4</span><span class="truncate" title="' + kp.name + '">' + kp.name + '</span></div>';
+                        html += '<div class="flex items-center space-x-2 ml-2 flex-shrink-0">';
+                        html += '<div class="w-20 bg-gray-200 rounded-full h-1.5"><div class="' + kpBarColor + ' h-1.5 rounded-full" style="width:' + kp.accuracy + '%"></div></div>';
+                        html += '<span class="' + kpAccColor + ' font-bold w-10 text-right">' + kp.accuracy + '%</span>';
+                        html += '<span class="text-gray-400 w-10 text-right">' + kp.correct + '/' + kp.total + '</span>';
+                        if (kp.dominant_error_type) html += '<span class="bg-red-100 text-red-600 px-1 rounded">' + kp.dominant_error_type + '</span>';
+                        html += '</div></div>';
+                    });
+                    html += '</div>';
+                }
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        html += '</div>';
+    });
+    container.innerHTML = html;
+}
+
+function toggleTreeNode(id) {
+    treeCollapsed[id] = !treeCollapsed[id];
+    renderKnowledgeTree();
+}
+
+function toggleTreeSection() {
+    var content = document.getElementById('knowledgeTreeContent');
+    var btn = document.getElementById('treeToggleBtn');
+    if (content.classList.contains('hidden')) {
+        content.classList.remove('hidden');
+        btn.textContent = '\u6536\u8d77 \u25b2';
+    } else {
+        content.classList.add('hidden');
+        btn.textContent = '\u5c55\u5f00 \u25bc';
+    }
+}
+
+function exportKnowledgeTreeMd() {
+    if (!knowledgeTreeData || knowledgeTreeData.length === 0) { alert('\u6682\u65e0\u6570\u636e'); return; }
+    var md = '# \u5927\u7eb2\u77e5\u8bc6\u70b9\u8ffd\u8e2a\n\n';
+    knowledgeTreeData.forEach(function(book) {
+        md += '## \ud83d\udcda ' + book.name + ' (\u6b63\u786e\u7387: ' + book.accuracy + '%, ' + book.correct + '/' + book.total + ')\n\n';
+        (book.chapters || []).forEach(function(ch) {
+            md += '### \ud83d\udcd6 ' + ch.name + ' (\u6b63\u786e\u7387: ' + ch.accuracy + '%, ' + ch.correct + '/' + ch.total + ')\n\n';
+            md += '| \u77e5\u8bc6\u70b9 | \u6b63\u786e\u7387 | \u5bf9/\u603b | \u8584\u5f31\u9898\u578b |\n|--------|--------|-------|----------|\n';
+            (ch.key_points || []).forEach(function(kp) {
+                md += '| ' + kp.name + ' | ' + kp.accuracy + '% | ' + kp.correct + '/' + kp.total + ' | ' + (kp.dominant_error_type || '-') + ' |\n';
+            });
+            md += '\n';
+        });
+    });
+    navigator.clipboard.writeText(md).then(function() { alert('\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f'); });
+}
+
+// ========== Utility Functions ==========
+function getConfidenceLabel(c) { return c === 'sure' ? '\u786e\u5b9a' : (c === 'unsure' ? '\u6a21\u7cca' : (c === 'no' ? '\u4e0d\u4f1a' : '\u672a\u77e5')); }
+function getConfidenceColor(c) { return c === 'sure' ? 'text-green-600' : (c === 'unsure' ? 'text-yellow-600' : 'text-red-600'); }
+
+function getObjectiveAssessment(avgTime, changes) {
+    var ch = changes ? (typeof changes === 'number' ? changes : changes.length) : 0;
+    if (avgTime < 20 && ch === 0) return { label: '\u6d41\u7545', color: 'text-green-600', desc: '\u7b54\u9898\u5feb\u901f\u4e14\u65e0\u4fee\u6539' };
+    if (avgTime < 40 && ch <= 1) return { label: '\u6b63\u5e38', color: 'text-blue-600', desc: '\u7b54\u9898\u8282\u594f\u6b63\u5e38' };
+    if (avgTime >= 60 || ch >= 2) return { label: '\u72b9\u8c6b', color: 'text-red-600', desc: '\u8017\u65f6\u957f\u6216\u591a\u6b21\u4fee\u6539' };
+    return { label: '\u4e00\u822c', color: 'text-yellow-600', desc: '\u6709\u4e00\u5b9a\u72b9\u8c6b' };
+}
+
+function aggregateKnowledgePoints(group) {
+    var kpMap = {};
+    var allQuestions = [];
+    var sources = [];
+    if (group.exam) sources.push(group.exam);
+    if (group.details) sources = sources.concat(group.details);
+
+    sources.forEach(function(src) {
+        var qds = src.question_details || [];
+        qds.forEach(function(qd) {
+            var kp = qd.key_point || '\u672a\u5206\u7c7b';
+            if (!kpMap[kp]) kpMap[kp] = { total: 0, correct: 0, wrong: 0, confidences: [], times: [], changes: 0 };
+            kpMap[kp].total++;
+            if (qd.is_correct) kpMap[kp].correct++; else kpMap[kp].wrong++;
+            if (qd.confidence) kpMap[kp].confidences.push(qd.confidence);
+            if (qd.time_spent_seconds) kpMap[kp].times.push(qd.time_spent_seconds);
+            kpMap[kp].changes += (qd.answer_changes || []).length;
+            allQuestions.push(qd);
+        });
+    });
+    return { kpMap: kpMap, allQuestions: allQuestions };
+}
+
+// ========== Session Grouping & Rendering ==========
+function renderGroupedSessions(sessions) {
+    var container = document.getElementById('sessionsList');
+    container.innerHTML = '';
+    if (!sessions || sessions.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-gray-500">\u6682\u65e0\u5b66\u4e60\u8bb0\u5f55</div>';
+        return;
+    }
+    var groups = [];
+    var examMap = {};
+    sessions.forEach(function(s) {
+        if (s.session_type === 'exam') {
+            var g = { exam: s, details: [] };
+            groups.push(g);
+            if (s.chapter_id) examMap[s.chapter_id + '_' + (s.started_at || '').slice(0, 10)] = g;
+        }
+    });
+    var orphanDetails = [];
+    sessions.forEach(function(s) {
+        if (s.session_type === 'detail_practice') {
+            var key = (s.chapter_id || '') + '_' + (s.started_at || '').slice(0, 10);
+            if (examMap[key]) { examMap[key].details.push(s); }
+            else { orphanDetails.push(s); }
+        }
+    });
+    if (orphanDetails.length > 0) groups.push({ exam: null, details: orphanDetails });
+
+    groups.forEach(function(group, gi) {
+        if (group.exam) { renderExamCard(container, group, gi); }
+        else { renderStandaloneDetails(container, group); }
+    });
+}
+
+// ========== Exam Card Rendering ==========
+function renderExamCard(container, group, gi) {
+    var s = group.exam;
+    var mergedCorrect = s.correct_count || 0;
+    var mergedTotal = (s.correct_count || 0) + (s.wrong_count || 0);
+    var mergedDuration = s.duration_seconds || 0;
+    group.details.forEach(function(dp) {
+        mergedCorrect += dp.correct_count || 0;
+        mergedTotal += (dp.correct_count || 0) + (dp.wrong_count || 0);
+        mergedDuration += dp.duration_seconds || 0;
+    });
+    var mergedAccuracy = mergedTotal > 0 ? Math.round(mergedCorrect / mergedTotal * 1000) / 10 : 0;
+    var durationMin = mergedDuration > 0 ? Math.round(mergedDuration / 60) : 0;
+    var accColor = mergedAccuracy >= 80 ? '#22c55e' : (mergedAccuracy >= 60 ? '#eab308' : '#ef4444');
+    var accBg = mergedAccuracy >= 80 ? 'bg-green-500' : (mergedAccuracy >= 60 ? 'bg-yellow-500' : 'bg-red-500');
+
+    var wrapper = document.createElement('div');
+    wrapper.className = 'border-b last:border-b-0';
+
+    var card = document.createElement('div');
+    card.className = 'p-5 cursor-pointer hover:bg-gray-50 transition';
+    card.onclick = function() { toggleCardPanel(gi); };
+    card.innerHTML =
+        '<div class="flex items-center justify-between mb-3">' +
+            '<div class="flex items-center space-x-2">' +
+                '<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium">\u6574\u5377\u6d4b\u8bd5</span>' +
+                (s.status === 'completed' ? '<span class="text-green-500 text-xs">\u2713 \u5df2\u5b8c\u6210</span>' : '<span class="text-yellow-500 text-xs">\u8fdb\u884c\u4e2d</span>') +
+            '</div>' +
+            '<span class="text-xs text-gray-400">' + (s.started_at ? new Date(s.started_at).toLocaleString('zh-CN') : '') + '</span>' +
+        '</div>' +
+        '<div class="font-bold text-lg mb-3">' + s.title + '</div>' +
+        '<div class="flex items-center mb-2">' +
+            '<span class="text-sm text-gray-500 w-24">\u6574\u4f53\u6b63\u786e\u7387</span>' +
+            '<div class="flex-1 mx-3 bg-gray-200 rounded-full h-4 relative">' +
+                '<div class="' + accBg + ' h-4 rounded-full transition-all" style="width:' + mergedAccuracy + '%"></div>' +
+                '<span class="absolute inset-0 flex items-center justify-center text-xs font-bold ' + (mergedAccuracy > 50 ? 'text-white' : 'text-gray-700') + '">' + mergedAccuracy + '%</span>' +
+            '</div>' +
+            '<span class="text-sm font-bold w-20 text-right" style="color:' + accColor + '">' + mergedCorrect + '/' + mergedTotal + '</span>' +
+        '</div>' +
+        '<div class="flex items-center justify-between">' +
+            '<span class="text-sm text-gray-400">\u505a\u9898\u7528\u65f6\uff1a' + durationMin + '\u5206\u949f' + (group.details.length > 0 ? ' \u00b7 \u542b' + group.details.length + '\u4e2a\u7ec6\u8282\u7ec3\u4e60' : '') + '</span>' +
+            '<span class="text-blue-500 text-sm card-toggle-hint" data-gi="' + gi + '">\u70b9\u51fb\u5c55\u5f00\u77e5\u8bc6\u70b9\u8be6\u60c5\u4e0e\u7edf\u8ba1 \u25bc</span>' +
+        '</div>';
+    wrapper.appendChild(card);
+
+    var panel = document.createElement('div');
+    panel.id = 'card-panel-' + gi;
+    panel.className = 'hidden border-t bg-gray-50';
+    panel.innerHTML = buildExpandedPanel(group, gi);
+    wrapper.appendChild(panel);
+
+    container.appendChild(wrapper);
+}
+
+// ========== Expanded Panel ==========
+function buildExpandedPanel(group, gi) {
+    var agg = aggregateKnowledgePoints(group);
+    var kpMap = agg.kpMap;
+    var allQuestions = agg.allQuestions;
+    var kpKeys = Object.keys(kpMap).sort(function(a, b) { return kpMap[b].wrong - kpMap[a].wrong; });
+
+    // Module A: Knowledge Point Details
+    var moduleA = '<div class="p-5 border-b">' +
+        '<h4 class="font-bold text-base mb-3">\ud83c\udfaf \u77e5\u8bc6\u70b9\u638c\u63e1\u660e\u7ec6</h4>' +
+        '<div class="space-y-2">';
+    kpKeys.forEach(function(kp) {
+        var v = kpMap[kp];
+        var acc = v.total > 0 ? Math.round(v.correct / v.total * 100) : 0;
+        var accBarColor = acc >= 80 ? 'bg-green-500' : (acc >= 60 ? 'bg-yellow-500' : 'bg-red-500');
+        var confCounts = { sure: 0, unsure: 0, no: 0 };
+        v.confidences.forEach(function(c) { if (confCounts[c] !== undefined) confCounts[c]++; });
+        var dominantConf = 'sure';
+        if (confCounts.unsure > confCounts[dominantConf]) dominantConf = 'unsure';
+        if (confCounts.no > confCounts[dominantConf]) dominantConf = 'no';
+        if (v.confidences.length === 0) dominantConf = '';
+        var avgTime = v.times.length > 0 ? v.times.reduce(function(a, b) { return a + b; }, 0) / v.times.length : 0;
+        var obj = getObjectiveAssessment(avgTime, v.changes);
+
+        moduleA += '<div class="bg-white rounded-lg p-3 border">' +
+            '<div class="flex items-center justify-between mb-2">' +
+                '<span class="font-medium text-sm truncate" style="max-width:40%" title="' + kp + '">' + kp + '</span>' +
+                '<div class="flex items-center space-x-3 text-xs">' +
+                    '<span class="' + (acc >= 80 ? 'text-green-600' : (acc >= 60 ? 'text-yellow-600' : 'text-red-600')) + ' font-bold">\u6b63\u786e\u7387 ' + acc + '%</span>' +
+                    (dominantConf ? '<span class="' + getConfidenceColor(dominantConf) + '">\u4e3b\u89c2\uff1a' + getConfidenceLabel(dominantConf) + '</span>' : '') +
+                    '<span class="' + obj.color + '">\u5ba2\u89c2\uff1a' + obj.label + '</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="flex items-center">' +
+                '<div class="flex-1 bg-gray-200 rounded-full h-2 mr-2">' +
+                    '<div class="' + accBarColor + ' h-2 rounded-full" style="width:' + acc + '%"></div>' +
+                '</div>' +
+                '<span class="text-xs text-gray-400 w-16 text-right">' + v.correct + '/' + v.total + '</span>' +
+            '</div>' +
+            '<div class="text-xs text-gray-400 mt-1">' + obj.desc + '</div>' +
+        '</div>';
+    });
+    moduleA += '</div></div>';
+
+    var moduleB = buildModuleB(kpMap, kpKeys, allQuestions, gi);
+
+    var examId = group.exam ? group.exam.id : null;
+    var detailIds = group.details.map(function(d) { return d.id; });
+    var allIds = examId ? [examId].concat(detailIds) : detailIds;
+    var ctaHtml = '<div class="p-5 text-center border-t">' +
+        '<a href="/session-review?ids=' + encodeURIComponent(allIds.join(',')) + '" target="_blank" ' +
+        'class="inline-block bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-3 rounded-lg font-bold text-lg hover:from-blue-600 hover:to-purple-700 transition shadow-lg">' +
+        '\ud83d\udd0d \u8fdb\u5165\u6c89\u6d78\u5f0f\u590d\u76d8</a>' +
+        '<p class="text-xs text-gray-400 mt-2">\u5728\u65b0\u7a97\u53e3\u4e2d\u67e5\u770b\u5b8c\u6574\u9898\u76ee\u3001\u89e3\u6790\u4e0e\u5bfc\u51fa</p>' +
+        '</div>';
+
+    return moduleA + moduleB + ctaHtml;
+}
+
+// ========== Module B: Quadrant + Bar Charts in Expanded Panel ==========
+function buildModuleB(kpMap, kpKeys, allQuestions, gi) {
+    if (kpKeys.length === 0) return '';
+
+    var html = '<div class="p-5">' +
+        '<h4 class="font-bold text-base mb-4">\ud83d\udcca \u6570\u636e\u7edf\u8ba1</h4>' +
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-6">';
+
+    // Chart 1: Quadrant List
+    html += '<div class="bg-white rounded-lg border p-4">' +
+        '<div class="text-sm font-bold mb-3 text-center">\u77e5\u8bc6\u76f2\u533a\u56db\u8c61\u9650</div>' +
+        '<div class="space-y-2 max-h-[280px] overflow-y-auto">';
+
+    var quadLocal = { danger: [], gap: [], lucky: [], mastered: [] };
+    kpKeys.forEach(function(kp) {
+        var v = kpMap[kp];
+        if (v.total === 0) return; // 没做过题的不参与分类
+        var acc = v.correct / v.total * 100;
+        var subjScore = 0; // 无自信度数据默认0
+        if (v.confidences.length > 0) {
+            var confSum = 0;
+            v.confidences.forEach(function(c) {
+                if (c === 'sure') confSum += 100;
+                else if (c === 'unsure') confSum += 50;
+                else confSum += 0;
+            });
+            subjScore = confSum / v.confidences.length;
+        }
+        var avgTime = v.times.length > 0 ? v.times.reduce(function(a, b) { return a + b; }, 0) / v.times.length : 30;
+        var objScore = Math.max(0, Math.min(100, 100 - (avgTime - 10) * 2 - v.changes * 20));
+        var compositeConf = subjScore * 0.6 + objScore * 0.4;
+        var item = { name: kp, acc: Math.round(acc), conf: Math.round(compositeConf), correct: v.correct, total: v.total };
+        if (acc >= 50 && compositeConf >= 50) quadLocal.mastered.push(item);
+        else if (acc < 50 && compositeConf >= 50) quadLocal.danger.push(item);
+        else if (acc < 50 && compositeConf < 50) quadLocal.gap.push(item);
+        else quadLocal.lucky.push(item);
+    });
+
+    var qOrder = [
+        { key: 'danger', label: '\u26a0\ufe0f \u81f4\u547d\u76f2\u533a', bg: 'bg-yellow-50', border: 'border-yellow-400', text: 'text-yellow-700' },
+        { key: 'gap', label: '\u274c \u77e5\u8bc6\u7f3a\u53e3', bg: 'bg-red-50', border: 'border-red-400', text: 'text-red-700' },
+        { key: 'lucky', label: '\ud83c\udf40 \u8fd0\u6c14/\u4e0d\u7a33\u5b9a', bg: 'bg-blue-50', border: 'border-blue-400', text: 'text-blue-700' },
+        { key: 'mastered', label: '\u2705 \u638c\u63e1\u826f\u597d', bg: 'bg-green-50', border: 'border-green-400', text: 'text-green-700' }
+    ];
+    qOrder.forEach(function(q) {
+        var items = quadLocal[q.key];
+        if (items.length === 0) return;
+        items.sort(function(a, b) { return a.acc - b.acc; });
+        html += '<div class="' + q.bg + ' border-l-4 ' + q.border + ' rounded p-2 text-xs">';
+        html += '<div class="font-bold ' + q.text + ' mb-1">' + q.label + '</div>';
+        items.forEach(function(item) {
+            var accColor = item.acc >= 80 ? 'text-green-600' : (item.acc >= 60 ? 'text-yellow-600' : 'text-red-600');
+            html += '<div class="flex items-center justify-between py-0.5">' +
+                '<span class="truncate flex-1 mr-2" title="' + item.name + '">' + item.name + '</span>' +
+                '<span class="' + accColor + ' font-bold flex-shrink-0">' + item.acc + '%</span>' +
+                '<span class="text-gray-400 ml-2 flex-shrink-0">' + item.correct + '/' + item.total + '</span>' +
+            '</div>';
+        });
+        html += '</div>';
+    });
+
+    html += '</div></div>';
+
+    // Chart 2: Bar chart
+    html += '<div class="bg-white rounded-lg border p-4">' +
+        '<div class="text-sm font-bold mb-3 text-center">\u677f\u5757\u638c\u63e1\u5ea6</div>' +
+        '<div class="space-y-3">';
+
+    kpKeys.forEach(function(kp) {
+        var v = kpMap[kp];
+        var acc = v.total > 0 ? Math.round(v.correct / v.total * 100) : 0;
+        var barColor = acc >= 80 ? 'bg-green-500' : (acc >= 60 ? 'bg-yellow-500' : 'bg-red-500');
+        var shortName = kp.length > 12 ? kp.substring(0, 12) + '..' : kp;
+
+        html += '<div>' +
+            '<div class="flex justify-between text-xs mb-1">' +
+                '<span class="truncate" style="max-width:60%" title="' + kp + '">' + shortName + '</span>' +
+                '<span class="font-bold ' + (acc >= 80 ? 'text-green-600' : (acc >= 60 ? 'text-yellow-600' : 'text-red-600')) + '">' + acc + '%</span>' +
+            '</div>' +
+            '<div class="bg-gray-200 rounded-full h-3">' +
+                '<div class="' + barColor + ' h-3 rounded-full transition-all" style="width:' + acc + '%"></div>' +
+            '</div>' +
+        '</div>';
+    });
+
+    html += '</div></div>';
+    html += '</div></div>';
+    return html;
+}
+
+// ========== Standalone Details Rendering ==========
+function renderStandaloneDetails(container, group) {
+    group.details.forEach(function(dp) {
+        var dpDate = dp.started_at ? new Date(dp.started_at).toLocaleString('zh-CN') : '-';
+        var dpDur = dp.duration_seconds ? Math.round(dp.duration_seconds / 60) + '\u5206\u949f' : '-';
+        var acc = dp.accuracy || 0;
+        var accBg = acc >= 80 ? 'bg-green-500' : (acc >= 60 ? 'bg-yellow-500' : 'bg-red-500');
+
+        var wrapper = document.createElement('div');
+        wrapper.className = 'border-b last:border-b-0 p-5 cursor-pointer hover:bg-gray-50 transition';
+        wrapper.onclick = function() { showDetail(dp.id); };
+        wrapper.innerHTML =
+            '<div class="flex items-center justify-between mb-2">' +
+                '<div class="flex items-center space-x-2">' +
+                    '<span class="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium">\u7ec6\u8282\u7ec3\u4e60</span>' +
+                '</div>' +
+                '<span class="text-xs text-gray-400">' + dpDate + '</span>' +
+            '</div>' +
+            '<div class="font-medium mb-2">' + (dp.knowledge_point || dp.title) + '</div>' +
+            '<div class="flex items-center">' +
+                '<span class="text-sm text-gray-500 w-24">\u6b63\u786e\u7387</span>' +
+                '<div class="flex-1 mx-3 bg-gray-200 rounded-full h-3 relative">' +
+                    '<div class="' + accBg + ' h-3 rounded-full" style="width:' + acc + '%"></div>' +
+                '</div>' +
+                '<span class="text-sm font-bold w-20 text-right">' + acc + '% (' + (dp.correct_count || 0) + '/' + ((dp.correct_count || 0) + (dp.wrong_count || 0)) + ')</span>' +
+            '</div>' +
+            '<div class="text-sm text-gray-400 mt-1">\u7528\u65f6\uff1a' + dpDur + '</div>';
+        container.appendChild(wrapper);
+    });
+}
+
+// ========== Card Panel Toggle ==========
+function toggleCardPanel(gi) {
+    var panel = document.getElementById('card-panel-' + gi);
+    var hint = document.querySelector('.card-toggle-hint[data-gi="' + gi + '"]');
+    if (!panel) return;
+    if (panel.classList.contains('hidden')) {
+        panel.classList.remove('hidden');
+        if (hint) hint.textContent = '\u70b9\u51fb\u6536\u8d77 \u25b2';
+    } else {
+        panel.classList.add('hidden');
+        if (hint) hint.textContent = '\u70b9\u51fb\u5c55\u5f00\u77e5\u8bc6\u70b9\u8be6\u60c5\u4e0e\u7edf\u8ba1 \u25bc';
+    }
+}
+
+function toggleAllCards() {
+    allExamsExpanded = !allExamsExpanded;
+    var btn = document.getElementById('expandAllBtn');
+    btn.textContent = allExamsExpanded ? '\u6536\u8d77\u5168\u90e8 \u25b2' : '\u5c55\u5f00\u5168\u90e8 \u25bc';
+
+    document.querySelectorAll('[id^="card-panel-"]').forEach(function(el) {
+        el.classList.toggle('hidden', !allExamsExpanded);
+    });
+    document.querySelectorAll('.card-toggle-hint').forEach(function(hint) {
+        hint.textContent = allExamsExpanded ? '\u70b9\u51fb\u6536\u8d77 \u25b2' : '\u70b9\u51fb\u5c55\u5f00\u77e5\u8bc6\u70b9\u8be6\u60c5\u4e0e\u7edf\u8ba1 \u25bc';
+    });
+}
+
+// ========== Detail Modal ==========
+async function showDetail(sessionId) {
+    currentSessionId = sessionId;
+    try {
+        var data = await safeFetch('/api/tracking/session/' + sessionId, {}, '请求失败');
+
+        document.getElementById('modalTitle').textContent = data.title || '\u5b66\u4e60\u8be6\u60c5';
+
+        var html = '';
+
+        var durMin = data.duration_seconds ? Math.floor(data.duration_seconds / 60) : 0;
+        var durSec = data.duration_seconds ? (data.duration_seconds % 60) : 0;
+        html += '<div class="mb-6">' +
+            '<h4 class="font-bold mb-2">\u57fa\u672c\u4fe1\u606f</h4>' +
+            '<div class="grid grid-cols-2 gap-4 text-sm bg-gray-50 p-4 rounded">' +
+            '<div><span class="text-gray-500">\u7c7b\u578b\uff1a</span>' + (data.session_type === 'exam' ? '\u6574\u5377\u6d4b\u8bd5' : '\u7ec6\u8282\u7ec3\u4e60') + '</div>' +
+            '<div><span class="text-gray-500">\u5f97\u5206\uff1a</span><span class="font-bold text-blue-600">' + (data.score || 0) + ' \u5206</span></div>' +
+            '<div><span class="text-gray-500">\u6b63\u786e\u7387\uff1a</span><span class="font-bold ' + ((data.accuracy || 0) >= 60 ? 'text-green-600' : 'text-red-600') + '">' + (data.accuracy || 0) + '%</span></div>' +
+            '<div><span class="text-gray-500">\u7528\u65f6\uff1a</span>' + durMin + '\u5206' + durSec + '\u79d2</div>' +
+            '</div></div>';
+
+        if (data.sure_count || data.unsure_count || data.no_count) {
+            html += '<div class="mb-6">' +
+                '<h4 class="font-bold mb-2">\u81ea\u4fe1\u5ea6\u5206\u5e03</h4>' +
+                '<div class="grid grid-cols-3 gap-2">' +
+                '<div class="text-center p-3 bg-green-50 rounded"><div class="text-2xl font-bold text-green-600">' + (data.sure_count || 0) + '</div><div class="text-sm text-green-600">\u786e\u5b9a \u2713</div></div>' +
+                '<div class="text-center p-3 bg-yellow-50 rounded"><div class="text-2xl font-bold text-yellow-600">' + (data.unsure_count || 0) + '</div><div class="text-sm text-yellow-600">\u6a21\u7cca ?</div></div>' +
+                '<div class="text-center p-3 bg-red-50 rounded"><div class="text-2xl font-bold text-red-600">' + (data.no_count || 0) + '</div><div class="text-sm text-red-600">\u4e0d\u4f1a \u2717</div></div>' +
+                '</div></div>';
+        }
+
+        if (data.questions && data.questions.length > 0) {
+            html += '<div><h4 class="font-bold mb-2">\u9898\u76ee\u8be6\u60c5</h4><div class="space-y-3">';
+            data.questions.forEach(function(q, i) {
+                var status = q.is_correct ?
+                    '<span class="text-green-600 font-bold">\u2713 \u6b63\u786e</span>' :
+                    '<span class="text-red-600 font-bold">\u2717 \u9519\u8bef</span>';
+                var confMap = {'sure': '\u2713 \u786e\u5b9a', 'unsure': '? \u6a21\u7cca', 'no': '\u2717 \u4e0d\u4f1a'};
+                var conf = confMap[q.confidence] || '\u25cb \u672a\u6807\u8bb0';
+
+                html += '<div class="p-4 bg-gray-50 rounded border-l-4 ' + (q.is_correct ? 'border-green-500' : 'border-red-500') + '">' +
+                    '<div class="flex justify-between mb-2">' +
+                    '<span class="font-medium">\u7b2c ' + (i + 1) + ' \u9898 [' + (q.type || 'A1') + '] ' + conf + '</span>' + status + '</div>' +
+                    '<p class="text-sm mb-2">' + escapeHtml(q.question) + '</p>' +
+                    '<div class="text-sm">' +
+                    '<span class="' + (q.is_correct ? 'text-green-600' : 'text-red-600') + '">\u4f60\u7684\u7b54\u6848\uff1a' + escapeHtml(q.user_answer) + '</span>' +
+                    ' | <span class="text-green-600">\u6b63\u786e\u7b54\u6848\uff1a' + q.correct_answer + '</span>' +
+                    (q.key_point ? ' | \u77e5\u8bc6\u70b9\uff1a' + q.key_point : '') +
+                    '</div></div>';
+            });
+            html += '</div></div>';
+        }
+
+        document.getElementById('modalContent').innerHTML = html;
+        document.getElementById('detailModal').classList.remove('hidden');
+    } catch (error) {
+        alert('\u52a0\u8f7d\u8be6\u60c5\u5931\u8d25');
+    }
+}
+
+function closeModal() {
+    document.getElementById('detailModal').classList.add('hidden');
+    currentSessionId = null;
+}
+
+// ========== Export Functions ==========
+async function exportReport(format) {
+    if (!currentSessionId) return;
+    try {
+        var data = await safeFetch('/api/tracking/export/' + currentSessionId + '?format=' + format, {}, '请求失败');
+        navigator.clipboard.writeText(data.content).then(function() {
+            alert('\u2713 \u62a5\u544a\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\uff01');
+        });
+    } catch (error) {
+        alert('\u5bfc\u51fa\u5931\u8d25');
+    }
+}
+
+async function exportMarkdown() {
+    try {
+        var url = '/api/tracking/export-markdown?period=' + currentPeriod;
+        if (currentDateStr) url += '&date_str=' + currentDateStr;
+
+        var data = await safeFetch(url, {}, '请求失败');
+        navigator.clipboard.writeText(data.content).then(function() {
+            alert('\u2713 Markdown\u62a5\u544a\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\uff01');
+        });
+    } catch (error) {
+        alert('\u5bfc\u51fa\u5931\u8d25');
+    }
+}
+
+// Click outside modal to close
+document.getElementById('detailModal').addEventListener('click', function(e) {
+    if (e.target === this) { closeModal(); }
+});
+</script>
+{% endblock %}

@@ -20,6 +20,7 @@ from datetime import datetime
 from models import get_db
 from learning_tracking_models import WrongAnswerV2, WrongAnswerRetry
 from services.fusion_service import get_fusion_service, FusionService
+from utils.data_contracts import canonicalize_fusion_data, canonicalize_parent_ids
 
 router = APIRouter(prefix="/api/fusion", tags=["fusion"])
 
@@ -256,18 +257,18 @@ async def create_fusion_question(
         retry_count=0,
         severity_tag="critical",  # 融合题默认为critical，答错惩罚重
         mastery_status="active",  # 融合题需要重新学习
-        parent_ids=sorted(request.parent_ids),
+        parent_ids=canonicalize_parent_ids(request.parent_ids),
         is_fusion=True,
         fusion_level=fusion_level,
         sm2_penalty_factor=penalty,
-        fusion_data={
+        fusion_data=canonicalize_fusion_data({
             "expected_key_points": result.get("expected_key_points", []),
             "scoring_criteria": result.get("scoring_criteria", {}),
             "difficulty_level": result.get("difficulty_level", f"L{fusion_level}"),
             "parent_key_points": result.get("parent_key_points", []),
             "judgement_pending": True,
             "user_answer_cache": None
-        },
+        }),
         sm2_ef=2.5,
         sm2_interval=0,
         sm2_repetitions=0,
@@ -308,10 +309,10 @@ async def submit_fusion_answer(
         raise HTTPException(status_code=404, detail="融合题不存在")
 
     # 缓存用户答案
-    fusion_data = fusion.fusion_data or {}
+    fusion_data = canonicalize_fusion_data(fusion.fusion_data)
     fusion_data["user_answer_cache"] = request.user_answer
     fusion_data["judgement_pending"] = True
-    fusion.fusion_data = fusion_data
+    fusion.fusion_data = canonicalize_fusion_data(fusion_data)
     flag_modified(fusion, "fusion_data")
 
     db.commit()
@@ -343,7 +344,7 @@ async def judge_fusion_answer(
         raise HTTPException(status_code=404, detail="融合题不存在")
 
     # 获取缓存的答案
-    fusion_data = fusion.fusion_data or {}
+    fusion_data = canonicalize_fusion_data(fusion.fusion_data)
     user_answer = fusion_data.get("user_answer_cache")
 
     if not user_answer:
@@ -361,9 +362,10 @@ async def judge_fusion_answer(
         "verdict": result["verdict"],
         "score": result["score"],
         "feedback": result["feedback"],
-        "weak_links": result["weak_links"]
+        "weak_links": result["weak_links"],
+        "judged_at": datetime.now().isoformat(),
     }
-    fusion.fusion_data = fusion_data
+    fusion.fusion_data = canonicalize_fusion_data(fusion_data)
     flag_modified(fusion, "fusion_data")
 
     # 更新统计
@@ -410,7 +412,7 @@ async def diagnose_fusion_error(
         raise HTTPException(status_code=404, detail="融合题不存在")
 
     # 获取缓存的答案
-    fusion_data = fusion.fusion_data or {}
+    fusion_data = canonicalize_fusion_data(fusion.fusion_data)
     user_answer = fusion_data.get("user_answer_cache", request.user_answer)
 
     # 调用 AI 诊断
@@ -441,9 +443,10 @@ async def diagnose_fusion_error(
         "affected_parent_ids": affected_ids,
         "reflection": request.reflection,
         "analysis": result.get("analysis", ""),
+        "recommendation": result.get("recommendation", ""),
         "created_at": datetime.now().isoformat()
     })
-    fusion.fusion_data = fusion_data
+    fusion.fusion_data = canonicalize_fusion_data(fusion_data)
     flag_modified(fusion, "fusion_data")
 
     db.commit()

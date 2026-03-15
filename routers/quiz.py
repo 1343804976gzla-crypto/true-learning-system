@@ -4,19 +4,45 @@
 重点优化: AI出题并行化
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import func
-from datetime import date, datetime, timedelta
-from typing import List, Optional
 import asyncio
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from api_contracts import (
+    LegacyQuizStatsResponse,
+    LegacyWrongAnswerListResponse,
+    LegacyWrongAnswerReviewResponse,
+    QuizSessionStartResponse,
+    QuizSessionSubmitResponse,
+)
 from models import get_db, WrongAnswer, QuizSession, ConceptMastery, Chapter, TestRecord
 from schemas import QuizSubmitRequest, GeneratedQuiz, QuizSubmission, QuizResult, QuizOption
 from services.quiz_service import get_quiz_service
 from utils.answer import answers_match
+from utils.data_contracts import (
+    canonicalize_string_list,
+    canonicalize_quiz_answers,
+    canonicalize_quiz_questions,
+    coerce_confidence,
+    normalize_option_map,
+)
 
 router = APIRouter(prefix="/api/quiz", tags=["quiz"])
+
+
+def _normalize_legacy_question_payload(item: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(item or {})
+    payload["options"] = normalize_option_map(payload.get("options"))
+    return payload
+
+
+def _to_quiz_option_payload(options: Any) -> Dict[str, str]:
+    normalized = normalize_option_map(options)
+    return {key: normalized.get(key, "") for key in ("A", "B", "C", "D")}
 
 
 @router.post("/generate/{concept_id}", response_model=GeneratedQuiz)
@@ -52,11 +78,12 @@ async def generate_quiz(
         }
     
     # 保存到数据库
+    normalized_options = normalize_option_map(quiz_data.get("options"))
     test_record = TestRecord(
         concept_id=concept_id,
         test_type="ai_quiz",
         ai_question=quiz_data["question"],
-        ai_options=quiz_data.get("options", {}),
+        ai_options=normalized_options,
         ai_correct_answer=quiz_data.get("correct_answer", "A"),
         ai_explanation=quiz_data.get("explanation", "")
     )
@@ -69,7 +96,7 @@ async def generate_quiz(
         concept_id=concept_id,
         concept_name=concept.name,
         question=quiz_data["question"],
-        options=QuizOption(**quiz_data.get("options", {"A": "", "B": "", "C": "", "D": ""}))
+        options=QuizOption(**_to_quiz_option_payload(normalized_options))
     )
 
 
@@ -87,14 +114,16 @@ async def submit_answer(
         raise HTTPException(status_code=404, detail="测试记录不存在")
     
     # AI批改
+    normalized_confidence = coerce_confidence(data.confidence, default="unsure")
+    normalized_options = normalize_option_map(test.ai_options)
     quiz_service = get_quiz_service()
     try:
         grading_result = await quiz_service.grade_answer(
             question=test.ai_question,
-            options=test.ai_options,
+            options=normalized_options,
             correct_answer=test.ai_correct_answer,
             user_answer=data.user_answer,
-            confidence=data.confidence
+            confidence=normalized_confidence
         )
     except Exception as e:
         print(f"AI批改失败: {e}")
@@ -109,11 +138,13 @@ async def submit_answer(
         }
     
     # 更新测试记录
+    normalized_weak_points = canonicalize_string_list(grading_result.get("weak_points"))
     test.user_answer = data.user_answer
-    test.confidence = data.confidence
+    test.confidence = normalized_confidence
+    test.ai_options = normalized_options
     test.is_correct = grading_result["is_correct"]
     test.ai_feedback = grading_result.get("feedback", "")
-    test.weak_points = grading_result.get("weak_points", [])
+    test.weak_points = normalized_weak_points
     test.score = grading_result.get("score", 0)
     
     # 更新知识点掌握度
@@ -137,7 +168,6 @@ async def submit_answer(
     
     # 如果答错，记录到错题本
     if not grading_result["is_correct"]:
-        import json
         existing = db.query(WrongAnswer).filter(
             WrongAnswer.concept_id == test.concept_id,
             WrongAnswer.question == test.ai_question
@@ -147,12 +177,12 @@ async def submit_answer(
             wrong = WrongAnswer(
                 concept_id=test.concept_id,
                 question=test.ai_question,
-                options=json.dumps(test.ai_options) if test.ai_options else "{}",
+                options=normalized_options,
                 correct_answer=test.ai_correct_answer,
                 user_answer=data.user_answer,
                 explanation=test.ai_explanation,
                 error_type="unknown",
-                weak_points=grading_result.get("weak_points", []),
+                weak_points=normalized_weak_points,
                 review_count=1,
                 last_reviewed=datetime.now(),
                 next_review=date.today() + timedelta(days=1),
@@ -172,21 +202,21 @@ async def submit_answer(
         concept_id=test.concept_id,
         concept_name=concept.name if concept else "",
         question=test.ai_question,
-        options=QuizOption(**test.ai_options) if test.ai_options else QuizOption(A="", B="", C="", D=""),
+        options=QuizOption(**_to_quiz_option_payload(normalized_options)),
         correct_answer=test.ai_correct_answer,
         ai_explanation=test.ai_explanation or "",
         user_answer=data.user_answer,
         is_correct=grading_result["is_correct"],
-        confidence=data.confidence,
+        confidence=normalized_confidence,
         ai_feedback=grading_result.get("feedback", ""),
-        weak_points=grading_result.get("weak_points", []),
+        weak_points=normalized_weak_points,
         score=grading_result.get("score", 0),
         suggestion=grading_result.get("suggestion", ""),
         next_review=concept.next_review if concept else None
     )
 
 
-@router.post("/start/{chapter_id}")
+@router.post("/start/{chapter_id}", response_model=QuizSessionStartResponse)
 async def start_quiz(
     chapter_id: str,
     mode: str = "practice",  # 'practice', 'wrong_answer_review', 'repeat'
@@ -211,7 +241,7 @@ async def start_quiz(
                 "question_id": f"wrong_{wa.id}",
                 "concept_id": wa.concept_id,
                 "question": wa.question,
-                "options": wa.options if isinstance(wa.options, dict) else {"A": "", "B": "", "C": "", "D": ""},
+                "options": normalize_option_map(wa.options),
                 "correct_answer": wa.correct_answer,
                 "explanation": wa.explanation or "暂无解析",
                 "is_wrong_answer": True,
@@ -235,7 +265,7 @@ async def start_quiz(
                     "question_id": f"repeat_{concept.concept_id}",
                     "concept_id": concept.concept_id,
                     "question": test_record.ai_question,
-                    "options": test_record.ai_options if test_record.ai_options else {"A": "", "B": "", "C": "", "D": ""},
+                    "options": normalize_option_map(test_record.ai_options),
                     "correct_answer": test_record.ai_correct_answer or "A",
                     "explanation": test_record.ai_explanation or "暂无解析",
                     "is_wrong_answer": False
@@ -294,7 +324,7 @@ async def start_quiz(
                     concept_id=concept.concept_id,
                     test_type="ai_quiz",
                     ai_question=quiz_data["question"],
-                    ai_options=quiz_data.get("options", {}),
+                    ai_options=normalize_option_map(quiz_data.get("options")),
                     ai_correct_answer=quiz_data.get("correct_answer", "A"),
                     ai_explanation=quiz_data.get("explanation", "")
                 )
@@ -304,7 +334,7 @@ async def start_quiz(
                     "question_id": f"practice_{concept.concept_id}",
                     "concept_id": concept.concept_id,
                     "question": quiz_data["question"],
-                    "options": quiz_data.get("options", {"A": "", "B": "", "C": "", "D": ""}),
+                    "options": normalize_option_map(quiz_data.get("options")),
                     "correct_answer": quiz_data.get("correct_answer", "A"),
                     "explanation": quiz_data.get("explanation", "暂无解析"),
                     "is_wrong_answer": False
@@ -329,10 +359,12 @@ async def start_quiz(
     questions = questions[:10]
     
     # 创建测验会话
+    normalized_questions = canonicalize_quiz_questions(questions)
+
     session = QuizSession(
         session_type=mode,
         chapter_id=chapter_id,
-        questions=questions,
+        questions=normalized_questions,
         answers=[],
         total_questions=10,
         correct_count=0,
@@ -342,15 +374,17 @@ async def start_quiz(
     db.commit()
     db.refresh(session)
     
+    normalized_questions = [_normalize_legacy_question_payload(question) for question in normalized_questions]
+
     return {
         "session_id": session.id,
         "mode": mode,
         "total_questions": 10,
-        "questions": questions
+        "questions": normalized_questions
     }
 
 
-@router.post("/submit/{session_id}")
+@router.post("/submit/{session_id}", response_model=QuizSessionSubmitResponse)
 async def submit_quiz(
     session_id: int,
     data: QuizSubmitRequest,
@@ -359,8 +393,6 @@ async def submit_quiz(
     """
     提交测验答案
     """
-    import json
-    
     session = db.query(QuizSession).filter(QuizSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="测验会话不存在")
@@ -379,16 +411,19 @@ async def submit_quiz(
         if not question.get("concept_id"):
             continue
         
+        normalized_options = normalize_option_map(question.get("options"))
+        
         is_correct = answers_match(answer.user_answer, question.get("correct_answer") or "")
         if is_correct:
             correct_count += 1
         
+        normalized_confidence = coerce_confidence(answer.confidence, default="unsure")
         answer_record = {
             "question_index": idx,
             "user_answer": answer.user_answer,
             "is_correct": is_correct,
             "time_spent": answer.time_spent,
-            "confidence": answer.confidence
+            "confidence": normalized_confidence
         }
         answers.append(answer_record)
         
@@ -410,7 +445,7 @@ async def submit_quiz(
                 wrong_answer = WrongAnswer(
                     concept_id=question["concept_id"],
                     question=question["question"],
-                    options=json.dumps(question.get("options", {})) if isinstance(question.get("options"), dict) else question.get("options", "{}"),
+                    options=normalized_options,
                     correct_answer=question.get("correct_answer", "A"),
                     user_answer=answer.user_answer,
                     explanation=question.get("explanation", ""),
@@ -425,7 +460,8 @@ async def submit_quiz(
                 db.add(wrong_answer)
     
     # 更新会话
-    session.answers = answers
+    normalized_answers = canonicalize_quiz_answers(answers)
+    session.answers = normalized_answers
     session.correct_count = correct_count
     session.score = int(correct_count / 10 * 100)
     session.completed_at = datetime.now()
@@ -436,11 +472,11 @@ async def submit_quiz(
         "score": session.score,
         "correct_count": correct_count,
         "wrong_count": 10 - correct_count,
-        "answers": answers
+        "answers": normalized_answers
     }
 
 
-@router.get("/wrong-answers/{chapter_id}")
+@router.get("/wrong-answers/{chapter_id}", response_model=LegacyWrongAnswerListResponse)
 async def get_wrong_answers(
     chapter_id: str,
     include_mastered: bool = False,
@@ -466,7 +502,7 @@ async def get_wrong_answers(
                 "id": wa.id,
                 "concept_id": wa.concept_id,
                 "question": wa.question,
-                "options": wa.options if isinstance(wa.options, dict) else {"A": "", "B": "", "C": "", "D": ""},
+                "options": normalize_option_map(wa.options),
                 "correct_answer": wa.correct_answer,
                 "user_answer": wa.user_answer,
                 "explanation": wa.explanation,
@@ -482,7 +518,7 @@ async def get_wrong_answers(
     }
 
 
-@router.post("/wrong-answers/{wrong_id}/review")
+@router.post("/wrong-answers/{wrong_id}/review", response_model=LegacyWrongAnswerReviewResponse)
 async def review_wrong_answer(
     wrong_id: int,
     is_correct: bool,
@@ -528,7 +564,7 @@ async def review_wrong_answer(
     }
 
 
-@router.get("/stats/{chapter_id}")
+@router.get("/stats/{chapter_id}", response_model=LegacyQuizStatsResponse)
 async def get_quiz_stats(
     chapter_id: str,
     db: Session = Depends(get_db)

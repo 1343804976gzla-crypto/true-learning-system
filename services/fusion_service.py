@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from learning_tracking_models import WrongAnswerV2, WrongAnswerRetry
 from services.ai_client import get_ai_client
+from utils.data_contracts import canonicalize_fusion_data
 
 
 class FusionService:
@@ -229,7 +230,7 @@ class FusionService:
             return {"error": "融合题不存在"}
 
         # 获取融合题的预期要点
-        fusion_data = fusion.fusion_data or {}
+        fusion_data = canonicalize_fusion_data(fusion.fusion_data)
         expected_points = fusion_data.get("expected_key_points", [])
         scoring_criteria = fusion_data.get("scoring_criteria", {})
 

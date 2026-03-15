@@ -6,6 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 
+from api_contracts import QuizVariationGenerateResponse
+from utils.data_contracts import normalize_option_map
+
 router = APIRouter(prefix="/api/quiz", tags=["quiz_variations"])
 
 
@@ -19,7 +22,7 @@ class VariationRequest(BaseModel):
     num_variations: int = 5
 
 
-@router.post("/variations")
+@router.post("/variations", response_model=QuizVariationGenerateResponse)
 async def generate_variations(request: VariationRequest):
     """
     为指定知识点生成变式题
@@ -88,6 +91,7 @@ E. {request.original_options.get('E', '')}
 
         # 确保选项完整
         for q in result.get("questions", []):
+            q["options"] = normalize_option_map(q.get("options"))
             for opt in ["A", "B", "C", "D", "E"]:
                 if opt not in q.get("options", {}) or not q["options"][opt]:
                     q["options"][opt] = f"选项{opt}"

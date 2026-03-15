@@ -3,9 +3,19 @@
 {% block title %}极速10题练习 - True Learning System{% endblock %}
 
 {% block content %}
+<div class="quiz-immersive-page">
+    <div class="quiz-immersive-bg" aria-hidden="true">
+        <video class="quiz-immersive-video" autoplay muted loop playsinline preload="metadata">
+            <source src="https://ik.imagekit.io/lrigu76hy/tailark/dna-video.mp4?updatedAt=1745736251477" type="video/mp4">
+        </video>
+        <div class="quiz-immersive-overlay"></div>
+        <div class="quiz-immersive-glow"></div>
+        <div class="quiz-immersive-grid"></div>
+    </div>
+    <div class="quiz-immersive-content">
 <div class="max-w-4xl mx-auto">
     <!-- 头部 -->
-    <div class="mb-6">
+    <div class="quiz-hero-panel mb-6">
         <div class="flex items-center text-sm text-gray-500 mb-2">
             <a href="/" class="hover:text-blue-500">仪表盘</a>
             <span class="mx-2">/</span>
@@ -20,8 +30,18 @@
 
     <!-- 加载状态 -->
     <div id="loadingState" class="bg-white rounded-lg shadow p-12 text-center">
-        <div class="inline-flex items-center justify-center w-16 h-16 mb-4">
-            <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
+        <div class="tls-loader-wrapper mb-5" aria-hidden="true">
+            <span class="tls-loader-letter" style="--loader-letter-index: 0;">G</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 1;">e</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 2;">n</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 3;">e</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 4;">r</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 5;">a</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 6;">t</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 7;">i</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 8;">n</span>
+            <span class="tls-loader-letter" style="--loader-letter-index: 9;">g</span>
+            <div class="tls-loader"></div>
         </div>
         
         <h3 class="text-xl font-medium mb-2">AI正在并发生成10道题目...</h3>
@@ -182,6 +202,8 @@
                 再练一次
             </button>
         </div>
+    </div>
+</div>
     </div>
 </div>
 {% endblock %}

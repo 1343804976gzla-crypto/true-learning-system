@@ -79,6 +79,10 @@ app.include_router(fusion_router)
 from routers.dashboard import router as dashboard_router
 app.include_router(dashboard_router)
 
+# 注册 LLM 数据合同路由
+from routers.llm import router as llm_router
+app.include_router(llm_router)
+
 # 模板和静态文件
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")

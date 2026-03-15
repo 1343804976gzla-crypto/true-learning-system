@@ -2,165 +2,790 @@
 
 {% block title %}True Learning System - 医学考研学习系统{% endblock %}
 
+{% block extra_css %}
+<style>
+    .dashboard-bento {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1rem;
+        margin-bottom: 5rem;
+    }
+
+    .dashboard-bento-card {
+        position: relative;
+        min-height: 18rem;
+        overflow: hidden;
+        border-radius: 1.5rem;
+        color: #F8F6F1;
+        background: #191919;
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.04), 0 18px 40px rgba(0,0,0,0.12);
+        transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s ease;
+    }
+
+    .dashboard-bento-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.05), 0 26px 60px rgba(0,0,0,0.18);
+    }
+
+    .dashboard-bento-card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.5));
+        z-index: 1;
+        transition: background 0.35s ease;
+    }
+
+    .dashboard-bento-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.16), transparent 32%),
+            linear-gradient(135deg, rgba(255,255,255,0.08), transparent 55%);
+        opacity: 0.75;
+        z-index: 1;
+        transition: opacity 0.35s ease;
+    }
+
+    .dashboard-bento-card:hover::after {
+        opacity: 1;
+    }
+
+    .dashboard-bento-card__media {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+    }
+
+    .dashboard-bento-card__media img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scale(1.01);
+        transition: transform 0.65s cubic-bezier(0.22, 1, 0.36, 1), filter 0.35s ease;
+        filter: saturate(0.95) contrast(1.05);
+    }
+
+    .dashboard-bento-card:hover .dashboard-bento-card__media img {
+        transform: scale(1.06);
+        filter: saturate(1.05) contrast(1.08);
+    }
+
+    .dashboard-bento-card__veil {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(10,10,10,0.08), rgba(10,10,10,0.7));
+    }
+
+    .dashboard-bento-card__mesh {
+        position: absolute;
+        inset: 0;
+        background:
+            linear-gradient(135deg, rgba(255,255,255,0.14), transparent 40%),
+            radial-gradient(circle at 20% 20%, rgba(255,255,255,0.14), transparent 28%);
+        mix-blend-mode: screen;
+        opacity: 0.5;
+    }
+
+    .dashboard-bento-card__content {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        height: 100%;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 1.25rem;
+        padding: 1.5rem;
+    }
+
+    .dashboard-bento-card__copy {
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+        transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .dashboard-bento-card:hover .dashboard-bento-card__copy {
+        transform: translateY(-0.45rem);
+    }
+
+    .dashboard-bento-card__eyebrow {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        gap: 0.5rem;
+        border-radius: 999px;
+        padding: 0.45rem 0.75rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        background: rgba(255,255,255,0.14);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+
+    .dashboard-bento-card__icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 3rem;
+        height: 3rem;
+        border-radius: 1rem;
+        background: rgba(255,255,255,0.14);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+
+    .dashboard-bento-card__title {
+        font-family: 'Noto Serif SC', Georgia, serif;
+        font-size: 1.6rem;
+        font-weight: 700;
+        line-height: 1.15;
+        max-width: 14ch;
+    }
+
+    .dashboard-bento-card__desc {
+        max-width: 34rem;
+        color: rgba(248, 246, 241, 0.82);
+        line-height: 1.7;
+        font-size: 0.96rem;
+    }
+
+    .dashboard-bento-card__footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .dashboard-bento-card__meta {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+    }
+
+    .dashboard-bento-card__chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.38rem 0.72rem;
+        border-radius: 999px;
+        font-size: 0.76rem;
+        color: rgba(248, 246, 241, 0.82);
+        background: rgba(255,255,255,0.12);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+    }
+
+    .dashboard-bento-card__cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.72rem 1rem;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #161616;
+        background: rgba(255,255,255,0.88);
+        box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+        transform: translateY(0.6rem);
+        opacity: 0;
+        transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+    }
+
+    .dashboard-bento-card:hover .dashboard-bento-card__cta {
+        transform: translateY(0);
+        opacity: 1;
+    }
+
+    .dashboard-bento-card__arrow {
+        transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .dashboard-bento-card:hover .dashboard-bento-card__arrow {
+        transform: translateX(0.28rem);
+    }
+
+    .dashboard-bento-card--warm {
+        background: linear-gradient(135deg, #4A3725 0%, #241C18 100%);
+    }
+
+    .dashboard-bento-card--ink {
+        background: linear-gradient(135deg, #1E232D 0%, #111317 100%);
+    }
+
+    .dashboard-bento-card--olive {
+        background: linear-gradient(135deg, #2B3629 0%, #182016 100%);
+    }
+
+    .dashboard-bento-card--plum {
+        background: linear-gradient(135deg, #352A37 0%, #1E171F 100%);
+    }
+
+    .dashboard-bento-card--slate {
+        background: linear-gradient(135deg, #2E3640 0%, #181C22 100%);
+    }
+
+    .dashboard-bento-card--sand {
+        background: linear-gradient(135deg, #584636 0%, #251D17 100%);
+    }
+
+    @media (min-width: 1024px) {
+        .dashboard-bento {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-auto-rows: 9rem;
+            grid-auto-flow: dense;
+            gap: 1.25rem;
+        }
+
+        .dashboard-bento-card {
+            min-height: 0;
+            grid-row: span 2;
+        }
+
+        .dashboard-bento-card--exam {
+            grid-column: span 2;
+            grid-row: span 2;
+        }
+
+        .dashboard-bento-card--wrong {
+            grid-row: span 2;
+        }
+
+        .dashboard-bento-card--tracking {
+            grid-column: span 2;
+            grid-row: span 2;
+        }
+
+        .dashboard-bento-card--history {
+            grid-column: span 2;
+            grid-row: span 2;
+        }
+    }
+
+    @media (max-width: 767px) {
+        .dashboard-bento-card {
+            min-height: 16rem;
+        }
+
+        .dashboard-bento-card__content {
+            padding: 1.25rem;
+        }
+
+        .dashboard-bento-card__title {
+            font-size: 1.35rem;
+        }
+
+        .dashboard-bento-card__cta {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<!-- 核心入口：整卷测验 -->
-<div class="mb-8">
-    <div class="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl shadow-xl p-8 text-white">
-        <div class="flex flex-col md:flex-row items-center justify-between">
-            <div class="md:w-2/3">
-                <h1 class="text-3xl font-bold mb-2">📝 整卷测验</h1>
-                <p class="text-green-100 text-lg mb-3">粘贴内容，一次性生成整套试卷，高效检验学习成果</p>
-                <div class="flex flex-wrap gap-3">
-                    <span class="px-3 py-1 bg-white/20 rounded-full text-sm">✅ 知识点辨析</span>
-                    <span class="px-3 py-1 bg-white/20 rounded-full text-sm">🔄 题目变式</span>
-                    <span class="px-3 py-1 bg-white/20 rounded-full text-sm">📊 难度梯度</span>
+<!-- ===== HERO SECTION WITH GLOWY WAVES ===== -->
+<div class="relative -mx-6 -mt-8 mb-12 overflow-hidden" style="height: 480px;">
+    <canvas id="waveCanvas" class="absolute inset-0 w-full h-full"></canvas>
+
+    <!-- Decorative blurs -->
+    <div class="absolute inset-0 pointer-events-none">
+        <div class="absolute left-1/2 top-0 h-[420px] w-[420px] -translate-x-1/2 rounded-full opacity-[0.035] dark:opacity-[0.06] blur-[140px]" style="background: currentColor;"></div>
+        <div class="absolute bottom-0 right-0 h-[300px] w-[300px] rounded-full opacity-[0.025] dark:opacity-[0.05] blur-[120px]" style="background: currentColor;"></div>
+    </div>
+
+    <div class="absolute inset-0 flex flex-col items-center justify-center text-center px-4 z-10">
+        <div class="inline-flex items-center gap-2 rounded-full border border-gray-300/40 dark:border-gray-700/60 bg-white/60 dark:bg-gray-900/70 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-gray-600 dark:text-gray-300 mb-6 backdrop-blur-sm">
+            <svg class="w-4 h-4" style="color:#8B7355;" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            AI 驱动学习系统
+        </div>
+        <h1 class="font-serif text-4xl md:text-6xl font-bold mb-4 text-gray-900 dark:text-white">
+            True Learning
+        </h1>
+        <p class="text-lg md:text-xl text-gray-700 dark:text-gray-300 max-w-2xl">
+            沉浸式医学考研学习体验，实时响应每一次交互
+        </p>
+    </div>
+</div>
+
+<script>
+(function() {
+    const canvas = document.getElementById('waveCanvas');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationId;
+    let time = 0;
+    const mouse = { x: 0, y: 0 };
+    const targetMouse = { x: 0, y: 0 };
+
+    // Theme-aware colors
+    function getThemeColors() {
+        const isDark = document.documentElement.classList.contains('dark');
+
+        if (isDark) {
+            return {
+                bgTop: 'rgba(26, 26, 26, 1)',
+                bgBottom: 'rgba(26, 26, 26, 0.95)',
+                waves: [
+                    { offset: 0, amp: 70, freq: 0.003, color: 'rgba(139, 115, 85, 0.6)', opacity: 0.45 },
+                    { offset: Math.PI/2, amp: 90, freq: 0.0026, color: 'rgba(196, 180, 154, 0.5)', opacity: 0.35 },
+                    { offset: Math.PI, amp: 60, freq: 0.0034, color: 'rgba(229, 229, 229, 0.4)', opacity: 0.3 },
+                    { offset: Math.PI*1.5, amp: 80, freq: 0.0022, color: 'rgba(255, 255, 255, 0.25)', opacity: 0.25 },
+                    { offset: Math.PI*2, amp: 55, freq: 0.004, color: 'rgba(255, 255, 255, 0.2)', opacity: 0.2 }
+                ]
+            };
+        } else {
+            return {
+                bgTop: 'rgba(254, 251, 246, 1)',
+                bgBottom: 'rgba(254, 251, 246, 0.95)',
+                waves: [
+                    { offset: 0, amp: 70, freq: 0.003, color: 'rgba(139, 115, 85, 0.8)', opacity: 0.45 },
+                    { offset: Math.PI/2, amp: 90, freq: 0.0026, color: 'rgba(196, 180, 154, 0.7)', opacity: 0.35 },
+                    { offset: Math.PI, amp: 60, freq: 0.0034, color: 'rgba(45, 45, 45, 0.65)', opacity: 0.3 },
+                    { offset: Math.PI*1.5, amp: 80, freq: 0.0022, color: 'rgba(85, 85, 85, 0.5)', opacity: 0.25 },
+                    { offset: Math.PI*2, amp: 55, freq: 0.004, color: 'rgba(100, 100, 100, 0.4)', opacity: 0.2 }
+                ]
+            };
+        }
+    }
+
+    let colors = getThemeColors();
+
+    // Watch for theme changes
+    const observer = new MutationObserver(() => {
+        colors = getThemeColors();
+    });
+    observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class']
+    });
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const mouseInfluence = prefersReducedMotion ? 10 : 70;
+    const influenceRadius = prefersReducedMotion ? 160 : 320;
+    const smoothing = prefersReducedMotion ? 0.04 : 0.1;
+
+    function resizeCanvas() {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+    }
+
+    function recenterMouse() {
+        const center = { x: canvas.width / 2, y: canvas.height / 2 };
+        mouse.x = center.x;
+        mouse.y = center.y;
+        targetMouse.x = center.x;
+        targetMouse.y = center.y;
+    }
+
+    function handleResize() {
+        resizeCanvas();
+        recenterMouse();
+    }
+
+    function handleMouseMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        targetMouse.x = e.clientX - rect.left;
+        targetMouse.y = e.clientY - rect.top;
+    }
+
+    function handleMouseLeave() {
+        recenterMouse();
+    }
+
+    resizeCanvas();
+    recenterMouse();
+
+    window.addEventListener('resize', handleResize);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseleave', handleMouseLeave);
+
+    function drawWave(wave) {
+        ctx.save();
+        ctx.beginPath();
+
+        for (let x = 0; x <= canvas.width; x += 4) {
+            const dx = x - mouse.x;
+            const dy = canvas.height / 2 - mouse.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const influence = Math.max(0, 1 - distance / influenceRadius);
+            const mouseEffect = influence * mouseInfluence * Math.sin(time * 0.001 + x * 0.01 + wave.offset);
+
+            const y = canvas.height / 2 +
+                Math.sin(x * wave.freq + time * 0.002 + wave.offset) * wave.amp +
+                Math.sin(x * wave.freq * 0.4 + time * 0.003) * (wave.amp * 0.45) +
+                mouseEffect;
+
+            if (x === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = wave.color;
+        ctx.globalAlpha = wave.opacity;
+        ctx.shadowBlur = 35;
+        ctx.shadowColor = wave.color;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function animate() {
+        time += 1;
+
+        mouse.x += (targetMouse.x - mouse.x) * smoothing;
+        mouse.y += (targetMouse.y - mouse.y) * smoothing;
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, colors.bgTop);
+        gradient.addColorStop(1, colors.bgBottom);
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+
+        colors.waves.forEach(drawWave);
+
+        animationId = requestAnimationFrame(animate);
+    }
+
+    animationId = requestAnimationFrame(animate);
+
+    // Cleanup
+    window.addEventListener('beforeunload', () => {
+        window.removeEventListener('resize', handleResize);
+        canvas.removeEventListener('mousemove', handleMouseMove);
+        canvas.removeEventListener('mouseleave', handleMouseLeave);
+        cancelAnimationFrame(animationId);
+        observer.disconnect();
+    });
+})();
+</script>
+
+<!-- ===== BENTO ENTRY GRID ===== -->
+<section class="mb-14">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between mb-6">
+        <div>
+            <div class="text-xs uppercase tracking-[0.35em] text-gray-400 mb-3">Launchpad</div>
+            <h2 class="font-serif text-3xl md:text-4xl font-semibold text-gray-900 dark:text-white">学习入口</h2>
+            <p class="mt-3 max-w-2xl text-gray-500 dark:text-gray-400">
+                把上传、测验、纠错、追踪和归档压缩到一个总控面板里。先进入最重的任务，再顺着数据回到复习闭环。
+            </p>
+        </div>
+        <div class="inline-flex items-center gap-2 rounded-full border border-gray-200/70 dark:border-gray-700/70 bg-white/80 dark:bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-gray-500 dark:text-gray-400 backdrop-blur-sm">
+            6 个核心入口
+        </div>
+    </div>
+
+    <div class="dashboard-bento">
+        <a href="/quiz/batch/0" class="dashboard-bento-card dashboard-bento-card--exam dashboard-bento-card--warm">
+            <div class="dashboard-bento-card__media">
+                <img src="https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=1200&q=80" alt="整卷测验">
+                <div class="dashboard-bento-card__veil"></div>
+                <div class="dashboard-bento-card__mesh"></div>
+            </div>
+            <div class="dashboard-bento-card__content">
+                <div class="dashboard-bento-card__copy">
+                    <span class="dashboard-bento-card__eyebrow">Featured · Exam Engine</span>
+                    <span class="dashboard-bento-card__icon">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                        </svg>
+                    </span>
+                    <h3 class="dashboard-bento-card__title">整卷测验</h3>
+                    <p class="dashboard-bento-card__desc">把一段讲义或课堂笔记直接压进系统，AI 生成整套试卷、难度梯度与题目变式，快速建立完整的检验回路。</p>
+                </div>
+                <div class="dashboard-bento-card__footer">
+                    <div class="dashboard-bento-card__meta">
+                        <span class="dashboard-bento-card__chip">整套试卷</span>
+                        <span class="dashboard-bento-card__chip">章节识别</span>
+                        <span class="dashboard-bento-card__chip">变式生成</span>
+                    </div>
+                    <span class="dashboard-bento-card__cta">开始测验
+                        <svg class="dashboard-bento-card__arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6"></path>
+                        </svg>
+                    </span>
                 </div>
             </div>
-            <div class="md:w-1/3 mt-6 md:mt-0 text-center">
-                <a href="/quiz/batch/0" class="inline-block bg-white text-green-600 px-8 py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-green-50 hover:scale-105 transition transform">
-                    开始测验 →
-                </a>
-            </div>
-        </div>
-    </div>
-</div>
+        </a>
 
-<!-- 学习数据概览 -->
-<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
-        <div class="text-xs text-gray-500">学习次数</div>
-        <div class="text-2xl font-bold text-blue-600">{{ stats.total_sessions }}</div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
-        <div class="text-xs text-gray-500">总做题数</div>
-        <div class="text-2xl font-bold text-green-600">{{ stats.total_questions }}</div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-purple-500">
-        <div class="text-xs text-gray-500">平均正确率</div>
-        <div class="text-2xl font-bold text-purple-600">{{ stats.avg_accuracy }}%</div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-orange-500">
-        <div class="text-xs text-gray-500">学习时长</div>
-        <div class="text-2xl font-bold text-orange-600">
-            {% if stats.total_duration >= 3600 %}
-                {{ (stats.total_duration / 3600) | round(1) }}h
-            {% else %}
-                {{ (stats.total_duration / 60) | round(0) | int }}min
-            {% endif %}
-        </div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-cyan-500">
-        <div class="text-xs text-gray-500">知识点数</div>
-        <div class="text-2xl font-bold text-cyan-600">{{ stats.total_kps }}</div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4 border-l-4 border-red-500">
-        <div class="text-xs text-gray-500">薄弱知识点</div>
-        <div class="text-2xl font-bold text-red-600">{{ stats.weak_kps }}</div>
-        <div class="text-xs text-gray-400">正确率&lt;60%</div>
-    </div>
-</div>
-
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- 最近学习记录 -->
-    <div class="lg:col-span-2">
-        <div class="bg-white rounded-lg shadow">
-            <div class="px-6 py-4 border-b flex justify-between items-center">
-                <h2 class="text-lg font-semibold">📚 最近学习</h2>
-                <a href="/learning-tracking" class="text-blue-600 hover:text-blue-800 text-sm">查看全部 →</a>
+        <a href="/wrong-answers" class="dashboard-bento-card dashboard-bento-card--wrong dashboard-bento-card--ink">
+            <div class="dashboard-bento-card__media">
+                <img src="https://images.unsplash.com/photo-1517842645767-c639042777db?w=900&q=80" alt="错题本">
+                <div class="dashboard-bento-card__veil"></div>
+                <div class="dashboard-bento-card__mesh"></div>
             </div>
-            <div class="divide-y">
-                {% if recent_sessions %}
-                    {% for s in recent_sessions %}
-                    <div class="px-6 py-4 hover:bg-gray-50 transition">
-                        <div class="flex justify-between items-center mb-1">
-                            <div class="flex items-center space-x-2">
-                                {% if s.session_type == 'exam' %}
-                                    <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">整卷</span>
-                                {% else %}
-                                    <span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-medium">细节</span>
-                                {% endif %}
-                                <span class="font-medium">{{ s.title }}</span>
-                            </div>
-                            <div class="flex items-center space-x-3 text-sm">
-                                {% if s.accuracy is not none %}
-                                    {% set acc_pct = (s.accuracy * 100) | round(1) %}
-                                    <span class="font-bold {% if acc_pct >= 80 %}text-green-600{% elif acc_pct >= 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
-                                        {{ acc_pct }}%
-                                    </span>
-                                {% endif %}
-                                <span class="text-gray-400 text-xs">
-                                    {{ s.started_at.strftime('%m-%d %H:%M') if s.started_at else '' }}
-                                </span>
-                            </div>
-                        </div>
-                        {% if s.accuracy is not none %}
-                        <div class="flex items-center mt-1">
-                            <div class="flex-1 bg-gray-200 rounded-full h-1.5">
-                                {% set acc_pct = (s.accuracy * 100) | round(1) %}
-                                <div class="h-1.5 rounded-full transition-all {% if acc_pct >= 80 %}bg-green-500{% elif acc_pct >= 60 %}bg-yellow-500{% else %}bg-red-500{% endif %}" style="width:{{ acc_pct }}%"></div>
-                            </div>
-                            <span class="text-xs text-gray-400 ml-3">{{ s.correct_count or 0 }}/{{ (s.correct_count or 0) + (s.wrong_count or 0) }}</span>
-                        </div>
-                        {% endif %}
+            <div class="dashboard-bento-card__content">
+                <div class="dashboard-bento-card__copy">
+                    <span class="dashboard-bento-card__eyebrow">Repair Loop</span>
+                    <span class="dashboard-bento-card__icon">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.75h6l4 4v10.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.25V6.25a1.5 1.5 0 0 1 1.5-1.5H9Z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 11.5 15 17.5"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 11.5 9 17.5"></path>
+                        </svg>
+                    </span>
+                    <h3 class="dashboard-bento-card__title">错题本</h3>
+                    <p class="dashboard-bento-card__desc">把反复失分的知识点集中起来处理，按严重度、重做批次和变式题重新打磨薄弱环节。</p>
+                </div>
+                <div class="dashboard-bento-card__footer">
+                    <div class="dashboard-bento-card__meta">
+                        <span class="dashboard-bento-card__chip">重做批次</span>
+                        <span class="dashboard-bento-card__chip">归档</span>
                     </div>
-                    {% endfor %}
+                    <span class="dashboard-bento-card__cta">进入错题本
+                        <svg class="dashboard-bento-card__arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6"></path>
+                        </svg>
+                    </span>
+                </div>
+            </div>
+        </a>
+
+        <a href="/upload" class="dashboard-bento-card dashboard-bento-card--upload dashboard-bento-card--olive">
+            <div class="dashboard-bento-card__media">
+                <img src="https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=900&q=80" alt="内容上传">
+                <div class="dashboard-bento-card__veil"></div>
+                <div class="dashboard-bento-card__mesh"></div>
+            </div>
+            <div class="dashboard-bento-card__content">
+                <div class="dashboard-bento-card__copy">
+                    <span class="dashboard-bento-card__eyebrow">Input</span>
+                    <span class="dashboard-bento-card__icon">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.75 15.75v2.5A1.75 1.75 0 0 0 6.5 20h11a1.75 1.75 0 0 0 1.75-1.75v-2.5"></path>
+                        </svg>
+                    </span>
+                    <h3 class="dashboard-bento-card__title">内容上传</h3>
+                    <p class="dashboard-bento-card__desc">导入课堂记录、教材片段与复习笔记，让系统先把原料吃进去。</p>
+                </div>
+                <div class="dashboard-bento-card__footer">
+                    <span class="dashboard-bento-card__chip">原始资料</span>
+                    <span class="dashboard-bento-card__cta">上传资料
+                        <svg class="dashboard-bento-card__arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6"></path>
+                        </svg>
+                    </span>
+                </div>
+            </div>
+        </a>
+
+        <a href="/learning-tracking" class="dashboard-bento-card dashboard-bento-card--tracking dashboard-bento-card--plum">
+            <div class="dashboard-bento-card__media">
+                <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&q=80" alt="学习轨迹">
+                <div class="dashboard-bento-card__veil"></div>
+                <div class="dashboard-bento-card__mesh"></div>
+            </div>
+            <div class="dashboard-bento-card__content">
+                <div class="dashboard-bento-card__copy">
+                    <span class="dashboard-bento-card__eyebrow">Metrics</span>
+                    <span class="dashboard-bento-card__icon">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 18h16"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M7 15.5 10.5 12l2.5 2.5L17.5 9"></path>
+                            <circle cx="7" cy="15.5" r="1"></circle>
+                            <circle cx="10.5" cy="12" r="1"></circle>
+                            <circle cx="13" cy="14.5" r="1"></circle>
+                            <circle cx="17.5" cy="9" r="1"></circle>
+                        </svg>
+                    </span>
+                    <h3 class="dashboard-bento-card__title">学习轨迹</h3>
+                    <p class="dashboard-bento-card__desc">把学习时长、正确率、活动记录和复盘结果拉成时间轴，直观看见节奏变化与进步斜率。</p>
+                </div>
+                <div class="dashboard-bento-card__footer">
+                    <div class="dashboard-bento-card__meta">
+                        <span class="dashboard-bento-card__chip">趋势分析</span>
+                        <span class="dashboard-bento-card__chip">日报导出</span>
+                    </div>
+                    <span class="dashboard-bento-card__cta">查看轨迹
+                        <svg class="dashboard-bento-card__arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6"></path>
+                        </svg>
+                    </span>
+                </div>
+            </div>
+        </a>
+
+        <a href="/knowledge-archive" class="dashboard-bento-card dashboard-bento-card--archive dashboard-bento-card--slate">
+            <div class="dashboard-bento-card__media">
+                <img src="https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=900&q=80" alt="知识点归档">
+                <div class="dashboard-bento-card__veil"></div>
+                <div class="dashboard-bento-card__mesh"></div>
+            </div>
+            <div class="dashboard-bento-card__content">
+                <div class="dashboard-bento-card__copy">
+                    <span class="dashboard-bento-card__eyebrow">Archive</span>
+                    <span class="dashboard-bento-card__icon">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.75 7.75h14.5v11.5a1.5 1.5 0 0 1-1.5 1.5H6.25a1.5 1.5 0 0 1-1.5-1.5V7.75Z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 5.75A1.75 1.75 0 0 1 4.75 4h14.5A1.75 1.75 0 0 1 21 5.75v.5H3v-.5Z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 11h6"></path>
+                        </svg>
+                    </span>
+                    <h3 class="dashboard-bento-card__title">知识归档</h3>
+                    <p class="dashboard-bento-card__desc">把知识点掌握度汇总成一份能直接复习的全局清单。</p>
+                </div>
+                <div class="dashboard-bento-card__footer">
+                    <span class="dashboard-bento-card__chip">掌握度</span>
+                    <span class="dashboard-bento-card__cta">打开归档
+                        <svg class="dashboard-bento-card__arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6"></path>
+                        </svg>
+                    </span>
+                </div>
+            </div>
+        </a>
+
+        <a href="/history" class="dashboard-bento-card dashboard-bento-card--history dashboard-bento-card--sand">
+            <div class="dashboard-bento-card__media">
+                <img src="https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=1200&q=80" alt="上传历史">
+                <div class="dashboard-bento-card__veil"></div>
+                <div class="dashboard-bento-card__mesh"></div>
+            </div>
+            <div class="dashboard-bento-card__content">
+                <div class="dashboard-bento-card__copy">
+                    <span class="dashboard-bento-card__eyebrow">Timeline</span>
+                    <span class="dashboard-bento-card__icon">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M7.75 4.75v3.5m8.5-3.5v3.5"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.75 8.25h14.5v10.5A1.75 1.75 0 0 1 17.5 20.5h-11a1.75 1.75 0 0 1-1.75-1.75V8.25Z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h8M8 15.5h5"></path>
+                        </svg>
+                    </span>
+                    <h3 class="dashboard-bento-card__title">上传历史</h3>
+                    <p class="dashboard-bento-card__desc">回看你投喂给系统的每一份资料，核对内容来源、上传节奏与累计沉淀。</p>
+                </div>
+                <div class="dashboard-bento-card__footer">
+                    <div class="dashboard-bento-card__meta">
+                        <span class="dashboard-bento-card__chip">时间线</span>
+                        <span class="dashboard-bento-card__chip">历史统计</span>
+                    </div>
+                    <span class="dashboard-bento-card__cta">查看历史
+                        <svg class="dashboard-bento-card__arrow w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6"></path>
+                        </svg>
+                    </span>
+                </div>
+            </div>
+        </a>
+    </div>
+</section>
+
+<!-- ===== 学习数据概览 ===== -->
+<h2 class="section-title">学习数据</h2>
+<div class="relative rounded-2xl overflow-hidden p-6 mb-14">
+    <canvas id="statsGradient" class="absolute inset-0 w-full h-full"></canvas>
+    <div class="absolute inset-0 bg-white/70 dark:bg-black/50 backdrop-blur-sm"></div>
+    <div class="relative z-10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div class="stat-card bg-white/80 dark:bg-white/10">
+            <div class="text-xs text-gray-400 mb-1">学习次数</div>
+            <div class="text-2xl font-bold text-blue-600">{{ stats.total_sessions }}</div>
+        </div>
+        <div class="stat-card bg-white/80 dark:bg-white/10">
+            <div class="text-xs text-gray-400 mb-1">总做题数</div>
+            <div class="text-2xl font-bold text-green-600">{{ stats.total_questions }}</div>
+        </div>
+        <div class="stat-card bg-white/80 dark:bg-white/10">
+            <div class="text-xs text-gray-400 mb-1">平均正确率</div>
+            <div class="text-2xl font-bold text-purple-600">{{ stats.avg_accuracy }}%</div>
+        </div>
+        <div class="stat-card bg-white/80 dark:bg-white/10">
+            <div class="text-xs text-gray-400 mb-1">学习时长</div>
+            <div class="text-2xl font-bold text-orange-600">
+                {% if stats.total_duration >= 3600 %}
+                    {{ (stats.total_duration / 3600) | round(1) }}h
                 {% else %}
-                    <div class="px-6 py-8 text-center text-gray-500">
-                        还没有学习记录，开始一次整卷测验吧 🚀
-                    </div>
+                    {{ (stats.total_duration / 60) | round(0) | int }}min
                 {% endif %}
             </div>
         </div>
-    </div>
-
-    <!-- 快速入口 -->
-    <div class="space-y-4">
-        <div class="bg-white rounded-lg shadow">
-            <div class="px-6 py-4 border-b">
-                <h2 class="text-lg font-semibold">⚡ 快速入口</h2>
-            </div>
-            <div class="p-4 space-y-3">
-                <a href="/quiz/batch/0" class="block p-4 bg-green-50 rounded-lg hover:bg-green-100 transition">
-                    <div class="font-bold text-green-700">📝 整卷测验</div>
-                    <div class="text-sm text-gray-600">粘贴内容，生成完整试卷</div>
-                </a>
-                <a href="/learning-tracking" class="block p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition">
-                    <div class="font-bold text-blue-700">📊 学习轨迹</div>
-                    <div class="text-sm text-gray-600">查看学习数据与趋势分析</div>
-                </a>
-                <a href="/knowledge-archive" class="block p-4 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition">
-                    <div class="font-bold text-indigo-700">🧠 知识点归档</div>
-                    <div class="text-sm text-gray-600">全局知识点掌握情况</div>
-                </a>
-                <a href="/wrong-answers" class="block p-4 bg-red-50 rounded-lg hover:bg-red-100 transition">
-                    <div class="font-bold text-red-700">❌ 错题本</div>
-                    <div class="text-sm text-gray-600">复习错题，巩固薄弱环节</div>
-                </a>
-            </div>
+        <div class="stat-card bg-white/80 dark:bg-white/10">
+            <div class="text-xs text-gray-400 mb-1">知识点数</div>
+            <div class="text-2xl font-bold text-cyan-600">{{ stats.total_kps }}</div>
         </div>
-
-        <!-- 学习流程提示 -->
-        <div class="bg-white rounded-lg shadow p-5">
-            <h3 class="font-semibold text-gray-700 mb-3">🔄 推荐学习流程</h3>
-            <div class="space-y-2 text-sm">
-                <div class="flex items-center space-x-2">
-                    <span class="w-6 h-6 bg-green-100 text-green-700 rounded-full flex items-center justify-center text-xs font-bold">1</span>
-                    <span>整卷测验 — 检验整体掌握</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <span class="w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold">2</span>
-                    <span>学习轨迹 — 定位薄弱环节</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <span class="w-6 h-6 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold">3</span>
-                    <span>细节强化 — 针对性练习</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <span class="w-6 h-6 bg-orange-100 text-orange-700 rounded-full flex items-center justify-center text-xs font-bold">4</span>
-                    <span>错题复盘 — 巩固记忆</span>
-                </div>
-            </div>
+        <div class="stat-card bg-white/80 dark:bg-white/10">
+            <div class="text-xs text-gray-400 mb-1">薄弱知识点</div>
+            <div class="text-2xl font-bold text-red-600">{{ stats.weak_kps }}</div>
+            <div class="text-xs text-gray-400">正确率&lt;60%</div>
         </div>
     </div>
 </div>
+
+<!-- ===== 最近学习 ===== -->
+<h2 class="section-title">最近学习</h2>
+<div class="mag-card mb-8">
+    <div class="divide-y">
+        {% if recent_sessions %}
+            {% for s in recent_sessions %}
+            <div class="px-6 py-4 hover:bg-gray-50 transition-colors">
+                <div class="flex justify-between items-center mb-1">
+                    <div class="flex items-center space-x-2">
+                        {% if s.session_type == 'exam' %}
+                            <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">整卷</span>
+                        {% else %}
+                            <span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-medium">细节</span>
+                        {% endif %}
+                        <span class="font-medium">{{ s.title }}</span>
+                    </div>
+                    <div class="flex items-center space-x-3 text-sm">
+                        {% if s.accuracy is not none %}
+                            {% set acc_pct = (s.accuracy * 100) | round(1) %}
+                            <span class="font-bold {% if acc_pct >= 80 %}text-green-600{% elif acc_pct >= 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                                {{ acc_pct }}%
+                            </span>
+                        {% endif %}
+                        <span class="text-gray-400 text-xs">
+                            {{ s.started_at.strftime('%m-%d %H:%M') if s.started_at else '' }}
+                        </span>
+                    </div>
+                </div>
+                {% if s.accuracy is not none %}
+                <div class="flex items-center mt-1">
+                    <div class="flex-1 bg-gray-200 rounded-full h-1.5">
+                        {% set acc_pct = (s.accuracy * 100) | round(1) %}
+                        <div class="h-1.5 rounded-full transition-all {% if acc_pct >= 80 %}bg-green-500{% elif acc_pct >= 60 %}bg-yellow-500{% else %}bg-red-500{% endif %}" style="width:{{ acc_pct }}%"></div>
+                    </div>
+                    <span class="text-xs text-gray-400 ml-3">{{ s.correct_count or 0 }}/{{ (s.correct_count or 0) + (s.wrong_count or 0) }}</span>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="px-6 py-10 text-center text-gray-400">
+                还没有学习记录，开始一次整卷测验吧
+            </div>
+        {% endif %}
+    </div>
+    {% if recent_sessions %}
+    <div class="px-6 py-3 border-t text-center">
+        <a href="/learning-tracking" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">查看全部学习记录 &rarr;</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Initialize WebGL gradient for stats section only
+if (window.initWebGLGradient) {
+    initWebGLGradient('statsGradient', 'mist');
+}
+</script>
 {% endblock %}

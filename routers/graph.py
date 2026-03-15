@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 
+from api_contracts import GraphLinkMutationResponse
 from models import get_db, Chapter, ConceptMastery, ConceptLink
 from schemas import GraphData, GraphNode, GraphLink, CreateLinkRequest
 
@@ -79,7 +80,7 @@ async def get_graph_data(
     return GraphData(nodes=nodes, links=links)
 
 
-@router.post("/link")
+@router.post("/link", response_model=GraphLinkMutationResponse)
 async def create_concept_link(
     data: CreateLinkRequest,
     db: Session = Depends(get_db)

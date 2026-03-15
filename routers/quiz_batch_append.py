@@ -1,4 +1,4 @@
-
+from api_contracts import BatchVariationResponse
 
 # 单独存储用于细节练习的数据（不删除）
 _detail_cache = {}
@@ -9,7 +9,7 @@ class GenerateVariationRequest(BaseModel):
     uploaded_content: str = ""
     num_variations: int = 5
 
-@router.post("/generate-variations")
+@router.post("/generate-variations", response_model=BatchVariationResponse)
 async def generate_variation_questions(
     request: GenerateVariationRequest,
     db: Session = Depends(get_db)

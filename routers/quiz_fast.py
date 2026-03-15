@@ -2,19 +2,27 @@
 棰勭敓鎴愭祴楠岃矾鐢?棰樼洰銆佺瓟妗堛€佽В鏋愪竴璧烽鐢熸垚锛屾湰鍦板揩閫熸壒鏀癸紝AI缁煎悎鍒嗘瀽
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta
-import json
 import random
 from types import SimpleNamespace
 from typing import List
 
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from api_contracts import QuizSessionStartResponse, QuizSessionSubmitResponse
 from models import get_db, QuizSession, ConceptMastery, Chapter, TestRecord, WrongAnswer
 from services.pre_generated_quiz import (
     get_pre_gen_service,
     get_local_grader,
     get_comprehensive_analyzer
+)
+from utils.data_contracts import (
+    canonicalize_string_list,
+    canonicalize_quiz_answers,
+    canonicalize_quiz_questions,
+    coerce_confidence,
+    normalize_option_map,
 )
 
 router = APIRouter(prefix="/api/quiz-fast", tags=["quiz-fast"])
@@ -76,7 +84,7 @@ def _build_concept_slots(concepts: List[ConceptMastery], target: int = 10) -> Li
     return slots
 
 
-@router.post("/start/{chapter_id}")
+@router.post("/start/{chapter_id}", response_model=QuizSessionStartResponse)
 async def start_pre_gen_quiz(
     chapter_id: str,
     db: Session = Depends(get_db)
@@ -178,11 +186,12 @@ async def start_pre_gen_quiz(
     
     questions = []
     for i, (quiz, concept) in enumerate(zip(quizzes, concepts)):
+        normalized_options = normalize_option_map(quiz.get("options"))
         test_record = TestRecord(
             concept_id=concept.concept_id,
             test_type="pre_generated",
             ai_question=quiz["question"],
-            ai_options=quiz.get("options", {}),
+            ai_options=normalized_options,
             ai_correct_answer=quiz.get("correct_answer", "A"),
             ai_explanation=quiz.get("explanation", ""),
             score=0
@@ -198,7 +207,7 @@ async def start_pre_gen_quiz(
             "concept_id": concept.concept_id,
             "concept_name": concept.name,
             "question": quiz["question"],
-            "options": quiz.get("options", {"A": "", "B": "", "C": "", "D": ""}),
+            "options": normalized_options,
             # 浠ヤ笅瀛楁瀛樺偍浣嗕笉杩斿洖缁欏墠绔紙鎴栬€呭墠绔殣钘忥級
             "correct_answer": quiz.get("correct_answer", "A"),
             "explanation": quiz.get("explanation", ""),
@@ -208,12 +217,14 @@ async def start_pre_gen_quiz(
         })
     
     
+    normalized_questions = canonicalize_quiz_questions(questions)
+
     session = QuizSession(
         session_type="pre_generated",
         chapter_id=chapter_id,
-        questions=questions,
+        questions=normalized_questions,
         answers=[],
-        total_questions=len(questions),
+        total_questions=len(normalized_questions),
         correct_count=0,
         score=0,
         started_at=datetime.now()
@@ -230,11 +241,11 @@ async def start_pre_gen_quiz(
             "concept_id": q["concept_id"],
             "concept_name": q["concept_name"],
             "question": q["question"],
-            "options": q["options"],
+            "options": normalize_option_map(q.get("options")),
             "difficulty": q["difficulty"],
             "key_points": q["key_points"]
         }
-        for q in questions
+        for q in normalized_questions
     ]
     
     return {
@@ -245,7 +256,7 @@ async def start_pre_gen_quiz(
     }
 
 
-@router.post("/submit/{session_id}")
+@router.post("/submit/{session_id}", response_model=QuizSessionSubmitResponse)
 async def submit_pre_gen_quiz(
     session_id: int,
     data: dict,
@@ -265,6 +276,7 @@ async def submit_pre_gen_quiz(
     print(f"[鏈湴鎵规敼] 寮€濮嬫壒鏀?{len(answers)} 閬撻鐩?..")
     
     
+    grader = get_local_grader()
     graded_results = grader.grade_batch(session.questions, answers)
     
     print(f"[鏈湴鎵规敼] 瀹屾垚")
@@ -275,20 +287,24 @@ async def submit_pre_gen_quiz(
     
     for i, (question, answer, graded) in enumerate(zip(session.questions, answers, graded_results)):
         is_correct = graded.get("is_correct", False)
+        normalized_weak_points = canonicalize_string_list(graded.get("weak_points"))
+        normalized_options = normalize_option_map(question.get("options"))
         if is_correct:
             correct_count += 1
         
+        normalized_confidence = coerce_confidence(answer.get("confidence"), default="unsure")
         record = {
             "question_index": i,
             "test_id": question["test_id"],
             "user_answer": answer.get("user_answer"),
             "correct_answer": question["correct_answer"],
             "is_correct": is_correct,
-            "confidence": answer.get("confidence"),
+            "confidence": normalized_confidence,
             "time_spent": answer.get("time_spent", 0),
             "score": graded.get("score", 0),
             "feedback": graded.get("feedback", ""),
-            "explanation": question["explanation"],  # 鎶婅В鏋愪篃瀛樿捣鏉?            "weak_points": graded.get("weak_points", []),
+            "explanation": question["explanation"],
+            "weak_points": normalized_weak_points,
             "error_type": graded.get("error_type"),
             "confidence_analysis": graded.get("confidence_analysis", "")
         }
@@ -298,10 +314,10 @@ async def submit_pre_gen_quiz(
         test = db.query(TestRecord).filter(TestRecord.id == question["test_id"]).first()
         if test:
             test.user_answer = answer.get("user_answer")
-            test.confidence = answer.get("confidence")
+            test.confidence = normalized_confidence
             test.is_correct = is_correct
             test.ai_feedback = graded.get("feedback", "")
-            test.weak_points = graded.get("weak_points", [])
+            test.weak_points = normalized_weak_points
             test.score = graded.get("score", 0)
         
         
@@ -326,12 +342,12 @@ async def submit_pre_gen_quiz(
                 wrong = WrongAnswer(
                     concept_id=question["concept_id"],
                     question=question["question"],
-                    options=json.dumps(question.get("options", {})),
+                    options=normalized_options,
                     correct_answer=question["correct_answer"],
                     user_answer=answer.get("user_answer"),
                     explanation=question["explanation"],
                     error_type=graded.get("error_type", "unknown"),
-                    weak_points=graded.get("weak_points", []),
+                    weak_points=normalized_weak_points,
                     review_count=1,
                     last_reviewed=datetime.now(),
                     next_review=date.today() + timedelta(days=1),
@@ -343,6 +359,8 @@ async def submit_pre_gen_quiz(
                 existing.review_count += 1
                 existing.last_reviewed = datetime.now()
                 existing.user_answer = answer.get("user_answer")
+                existing.options = normalized_options
+                existing.weak_points = normalized_weak_points
     
     # AI缁煎悎鍒嗘瀽
     print(f"[AI鍒嗘瀽] 寮€濮嬬敓鎴愮患鍚堝垎鏋愭姤鍛?..")
@@ -356,7 +374,8 @@ async def submit_pre_gen_quiz(
     print(f"[AI鍒嗘瀽] 瀹屾垚")
     
     # 鏇存柊浼氳瘽
-    session.answers = answer_records
+    normalized_answers = canonicalize_quiz_answers(answer_records)
+    session.answers = normalized_answers
     session.correct_count = correct_count
     session.score = int(correct_count / len(session.questions) * 100)
     session.completed_at = datetime.now()
@@ -367,12 +386,12 @@ async def submit_pre_gen_quiz(
         "score": session.score,
         "correct_count": correct_count,
         "wrong_count": len(session.questions) - correct_count,
-        "answers": answer_records,
+        "answers": normalized_answers,
         "ai_analysis": analysis
     }
 
 
-@router.get("/result/{session_id}")
+@router.get("/result/{session_id}", response_model=QuizSessionSubmitResponse)
 async def get_result(
     session_id: int,
     db: Session = Depends(get_db)

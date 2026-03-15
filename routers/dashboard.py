@@ -3,19 +3,21 @@
 实时计算错题消耗进度和预期清仓时间
 """
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
 from datetime import datetime, date, timedelta
 from typing import Optional
 
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, and_
+from sqlalchemy.orm import Session
+
+from api_contracts import DashboardStatsResponse
 from models import get_db
 from learning_tracking_models import WrongAnswerV2, WrongAnswerRetry
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(
     daily_planned_review: int = Query(default=20, ge=1, description="每日计划复习量"),
     db: Session = Depends(get_db)

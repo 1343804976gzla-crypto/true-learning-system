@@ -2,6 +2,1419 @@
 
 {% block title %}学习轨迹 - 战略指挥舱{% endblock %}
 
+{% block extra_css %}
+<style>
+    .insight-card {
+        position: relative;
+        overflow: hidden;
+        border-radius: 24px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        background:
+            radial-gradient(circle at top right, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0) 34%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
+        padding: 1.2rem;
+        box-shadow:
+            0 24px 60px rgba(15, 23, 42, 0.08),
+            inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+
+    .insight-card::before {
+        content: "";
+        position: absolute;
+        inset: auto -2rem -3.5rem auto;
+        width: 9rem;
+        height: 9rem;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(59, 130, 246, 0.18), rgba(59, 130, 246, 0));
+        pointer-events: none;
+    }
+
+    .insight-card--amber::before {
+        background: radial-gradient(circle, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0));
+    }
+
+    .insight-card--blue {
+        --insight-bar-start: #4f8dfd;
+        --insight-bar-end: #97beff;
+        --insight-dot: #4f8dfd;
+        --insight-pill-bg: rgba(59, 130, 246, 0.12);
+        --insight-pill-color: #1d4ed8;
+        --insight-avg-bg: #0f172a;
+        --insight-avg-text: #ffffff;
+    }
+
+    .insight-card--amber {
+        --insight-bar-start: #fb7185;
+        --insight-bar-end: #fda4af;
+        --insight-dot: #fb7185;
+        --insight-pill-bg: rgba(245, 158, 11, 0.14);
+        --insight-pill-color: #b45309;
+        --insight-avg-bg: #422006;
+        --insight-avg-text: #fff7ed;
+    }
+
+    .insight-card__header {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.65rem;
+    }
+
+    .insight-card__eyebrow {
+        display: inline-block;
+        margin-bottom: 0.35rem;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #94a3b8;
+    }
+
+    .insight-card__headline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .insight-card__title {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #111827;
+    }
+
+    .insight-card__pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 1.75rem;
+        border-radius: 999px;
+        padding: 0.25rem 0.65rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        background: var(--insight-pill-bg);
+        color: var(--insight-pill-color);
+    }
+
+    .insight-card__action {
+        flex-shrink: 0;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.88);
+        color: #0f172a;
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 0.42rem 0.8rem;
+        transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .insight-card__action:hover {
+        transform: translateY(-1px);
+        background: rgba(255, 255, 255, 1);
+        border-color: rgba(59, 130, 246, 0.28);
+    }
+
+    .insight-card__range {
+        display: flex;
+        align-items: flex-end;
+        gap: 0.35rem;
+        margin-bottom: 0.25rem;
+        position: relative;
+        z-index: 1;
+    }
+
+    .insight-card__value {
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 0.95;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        color: #0f172a;
+    }
+
+    .insight-card__unit {
+        font-size: 1.1rem;
+        font-weight: 400;
+        color: #94a3b8;
+        margin-bottom: 0.28rem;
+    }
+
+    .insight-card__meta {
+        position: relative;
+        z-index: 1;
+        font-size: 0.78rem;
+        color: #64748b;
+    }
+
+    .insight-card__chart-shell {
+        position: relative;
+        height: 10.75rem;
+        margin: 1.15rem 0 1rem;
+    }
+
+    .insight-card__avg-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: var(--insight-avg-top, 45%);
+        height: 1.5px;
+        background: rgba(148, 163, 184, 0.28);
+        z-index: 1;
+    }
+
+    .insight-card__avg-label {
+        display: inline-block;
+        margin-left: 0.5rem;
+        vertical-align: middle;
+        border-radius: 999px;
+        padding: 0.22rem 0.55rem;
+        font-size: 0.66rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        background: var(--insight-avg-bg);
+        color: var(--insight-avg-text);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+    }
+
+    .insight-card__chart {
+        position: relative;
+        z-index: 2;
+        display: grid;
+        grid-template-columns: repeat(var(--insight-bar-count, 7), minmax(0, 1fr));
+        align-items: end;
+        gap: 0.45rem;
+        height: 100%;
+        padding: 0 0.2rem;
+    }
+
+    .insight-card__bar-slot {
+        display: flex;
+        height: 100%;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.45rem;
+        min-width: 0;
+    }
+
+    .insight-card__bar-value {
+        font-size: 0.66rem;
+        font-weight: 700;
+        color: #64748b;
+        line-height: 1;
+    }
+
+    .insight-card__bar-stage {
+        position: relative;
+        display: flex;
+        width: 100%;
+        flex: 1;
+        align-items: flex-end;
+        justify-content: center;
+        padding-top: 0.4rem;
+    }
+
+    .insight-card__bar {
+        position: relative;
+        width: min(22px, 100%);
+        min-height: 10px;
+        border-radius: 999px;
+        background: linear-gradient(to bottom, var(--insight-bar-start), var(--insight-bar-end));
+        box-shadow:
+            0 14px 26px rgba(15, 23, 42, 0.14),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.32);
+        transition: transform 0.24s ease, filter 0.24s ease;
+    }
+
+    .insight-card__bar:hover {
+        transform: translateY(-2px) scale(1.04);
+        filter: saturate(1.08);
+    }
+
+    .insight-card__dot {
+        position: absolute;
+        left: 50%;
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #ffffff;
+        border: 1.5px solid var(--insight-dot);
+        transform: translateX(-50%);
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+    }
+
+    .insight-card__dot--top {
+        top: -4px;
+    }
+
+    .insight-card__dot--bottom {
+        bottom: -4px;
+    }
+
+    .insight-card__day {
+        font-size: 0.66rem;
+        font-weight: 700;
+        color: #94a3b8;
+        letter-spacing: 0.04em;
+    }
+
+    .insight-card__readings {
+        position: relative;
+        z-index: 1;
+        border-top: 1px solid rgba(226, 232, 240, 0.9);
+        padding-top: 0.8rem;
+    }
+
+    .insight-card__reading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.45rem 0;
+        border-bottom: 1px solid rgba(241, 245, 249, 0.9);
+        font-size: 0.82rem;
+    }
+
+    .insight-card__reading:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+    }
+
+    .insight-card__reading-time {
+        color: #94a3b8;
+    }
+
+    .insight-card__reading-value {
+        font-weight: 800;
+        color: #0f172a;
+        text-align: right;
+    }
+
+    .insight-card__empty {
+        font-size: 0.9rem;
+        color: #94a3b8;
+        padding: 1rem 0;
+    }
+
+    .tracking-side-panel {
+        border-radius: 22px;
+        border: 1px solid rgba(226, 232, 240, 0.92);
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+    }
+
+    .tracking-analysis-grid {
+        align-items: stretch;
+    }
+
+    .tracking-radar-panel,
+    .tracking-quadrant-panel,
+    .tracking-difficulty-panel {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+    }
+
+    .tracking-radar-shell {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+        align-items: center;
+        justify-content: center;
+        padding: 0.35rem 0 0.15rem;
+    }
+
+    .tracking-radar-box {
+        position: relative;
+        width: min(100%, 17rem);
+        aspect-ratio: 1 / 1;
+        margin: 0 auto;
+    }
+
+    .tracking-radar-box canvas {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    .tracking-quadrant-list {
+        flex: 1 1 auto;
+        min-height: 0;
+        width: 100%;
+        padding-right: 0.15rem;
+    }
+
+    .tracking-difficulty-shell {
+        flex: 1 1 auto;
+        display: flex;
+        min-height: 0;
+        align-items: stretch;
+    }
+
+    .tracking-difficulty-shell > #diffInsightCard {
+        width: 100%;
+    }
+
+    .tracking-difficulty-shell .insight-card {
+        height: 100%;
+    }
+
+    .tracking-quadrant-card {
+        --quadrant-accent: #64748b;
+        --quadrant-ink: #0f172a;
+        --quadrant-subtle: #475569;
+        border-left: 4px solid var(--quadrant-accent);
+        border-radius: 18px;
+        padding: 0.85rem 0.95rem;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+
+    .tracking-quadrant-card--yellow {
+        --quadrant-accent: #d97706;
+        --quadrant-ink: #92400e;
+        --quadrant-subtle: #b45309;
+        background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(254, 243, 199, 0.88));
+    }
+
+    .tracking-quadrant-card--red {
+        --quadrant-accent: #dc2626;
+        --quadrant-ink: #991b1b;
+        --quadrant-subtle: #b91c1c;
+        background: linear-gradient(135deg, rgba(254, 242, 242, 0.98), rgba(254, 226, 226, 0.88));
+    }
+
+    .tracking-quadrant-card--blue {
+        --quadrant-accent: #2563eb;
+        --quadrant-ink: #1d4ed8;
+        --quadrant-subtle: #2563eb;
+        background: linear-gradient(135deg, rgba(239, 246, 255, 0.98), rgba(219, 234, 254, 0.88));
+    }
+
+    .tracking-quadrant-card--green {
+        --quadrant-accent: #16a34a;
+        --quadrant-ink: #166534;
+        --quadrant-subtle: #15803d;
+        background: linear-gradient(135deg, rgba(240, 253, 244, 0.98), rgba(220, 252, 231, 0.88));
+    }
+
+    .tracking-quadrant-title {
+        color: var(--quadrant-ink) !important;
+    }
+
+    .tracking-quadrant-desc {
+        display: inline-block;
+        margin-top: 0.18rem;
+        color: var(--quadrant-subtle) !important;
+    }
+
+    .tracking-quadrant-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.65rem;
+        padding: 0.32rem 0;
+        border-top: 1px dashed rgba(148, 163, 184, 0.28);
+    }
+
+    .tracking-quadrant-item:first-of-type {
+        margin-top: 0.25rem;
+    }
+
+    .tracking-quadrant-name {
+        flex: 1;
+        min-width: 0;
+        color: #1f2937 !important;
+    }
+
+    .tracking-quadrant-meta {
+        width: 2.75rem;
+        flex-shrink: 0;
+        text-align: right;
+        font-size: 0.72rem;
+        color: #6b7280 !important;
+    }
+
+    .tracking-quadrant-empty {
+        color: #94a3b8 !important;
+    }
+
+    .dark .insight-card {
+        border-color: rgba(148, 163, 184, 0.16);
+        background:
+            radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), rgba(59, 130, 246, 0) 30%),
+            linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.84));
+        box-shadow:
+            0 24px 60px rgba(2, 6, 23, 0.46),
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .dark .insight-card__title,
+    .dark .insight-card__value,
+    .dark .insight-card__reading-value {
+        color: #f8fafc;
+    }
+
+    .dark .insight-card__action {
+        border-color: rgba(148, 163, 184, 0.16);
+        background: rgba(15, 23, 42, 0.54);
+        color: #e2e8f0;
+    }
+
+    .dark .insight-card__action:hover {
+        border-color: rgba(96, 165, 250, 0.28);
+        background: rgba(30, 41, 59, 0.82);
+    }
+
+    .dark .insight-card__meta,
+    .dark .insight-card__bar-value {
+        color: #cbd5e1;
+    }
+
+    .dark .insight-card__day,
+    .dark .insight-card__eyebrow,
+    .dark .insight-card__reading-time {
+        color: #94a3b8;
+    }
+
+    .dark .insight-card__avg-line {
+        background: rgba(148, 163, 184, 0.22);
+    }
+
+    .dark .insight-card__readings {
+        border-top-color: rgba(51, 65, 85, 0.9);
+    }
+
+    .dark .insight-card__reading {
+        border-bottom-color: rgba(30, 41, 59, 0.9);
+    }
+
+    .dark .tracking-side-panel {
+        border-color: rgba(51, 65, 85, 0.9);
+        background: rgba(15, 23, 42, 0.78);
+        box-shadow: 0 18px 40px rgba(2, 6, 23, 0.32);
+    }
+
+    .dark .tracking-quadrant-card {
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 14px 28px rgba(2, 6, 23, 0.18);
+    }
+
+    .dark .tracking-quadrant-card--yellow {
+        --quadrant-accent: #fbbf24;
+        --quadrant-ink: #fef3c7;
+        --quadrant-subtle: #fde68a;
+        background: linear-gradient(135deg, rgba(120, 53, 15, 0.34), rgba(69, 26, 3, 0.62));
+    }
+
+    .dark .tracking-quadrant-card--red {
+        --quadrant-accent: #f87171;
+        --quadrant-ink: #fecaca;
+        --quadrant-subtle: #fda4af;
+        background: linear-gradient(135deg, rgba(127, 29, 29, 0.34), rgba(69, 10, 10, 0.62));
+    }
+
+    .dark .tracking-quadrant-card--blue {
+        --quadrant-accent: #60a5fa;
+        --quadrant-ink: #dbeafe;
+        --quadrant-subtle: #93c5fd;
+        background: linear-gradient(135deg, rgba(30, 64, 175, 0.32), rgba(23, 37, 84, 0.62));
+    }
+
+    .dark .tracking-quadrant-card--green {
+        --quadrant-accent: #4ade80;
+        --quadrant-ink: #dcfce7;
+        --quadrant-subtle: #86efac;
+        background: linear-gradient(135deg, rgba(20, 83, 45, 0.34), rgba(5, 46, 22, 0.62));
+    }
+
+    .dark .tracking-quadrant-item {
+        border-top-color: rgba(148, 163, 184, 0.18);
+    }
+
+    .dark .tracking-quadrant-name {
+        color: #e2e8f0 !important;
+    }
+
+    .dark .tracking-quadrant-meta {
+        color: #cbd5e1 !important;
+    }
+
+    .dark .tracking-quadrant-empty {
+        color: #94a3b8 !important;
+    }
+
+    @media (min-width: 768px) {
+        .tracking-radar-panel,
+        .tracking-quadrant-panel,
+        .tracking-difficulty-panel {
+            height: 28rem;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .insight-card {
+            padding: 1rem;
+            border-radius: 20px;
+        }
+
+        .insight-card__header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .insight-card__action {
+            width: 100%;
+        }
+
+        .insight-card__chart-shell {
+            height: 9.6rem;
+        }
+
+        .tracking-radar-shell {
+            min-height: 15rem;
+            padding-top: 0.1rem;
+        }
+
+        .tracking-radar-box {
+            width: min(100%, 14.5rem);
+        }
+    }
+    .tracking-bento-card {
+        --tracking-bento-accent: #10b981;
+        --tracking-bento-border: rgba(15, 23, 42, 0.06);
+        --tracking-bento-shadow: 0 0 0 1px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.05), 0 12px 24px rgba(0, 0, 0, 0.05);
+        --tracking-bento-avg-top: 58%;
+        position: relative;
+        overflow: hidden;
+        min-height: 20rem;
+        border-radius: 1.6rem;
+        border: 1px solid var(--tracking-bento-border);
+        background:
+            radial-gradient(circle at top right, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0) 34%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.95));
+        padding: 1.35rem;
+        box-shadow: var(--tracking-bento-shadow);
+    }
+
+    .tracking-bento-card::before {
+        content: "";
+        position: absolute;
+        inset: -18% auto auto 72%;
+        width: 9.5rem;
+        height: 9.5rem;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0));
+        pointer-events: none;
+    }
+
+    .tracking-bento-card::after {
+        content: "";
+        position: absolute;
+        inset: auto 1.1rem 1rem auto;
+        width: 7.25rem;
+        height: 7.25rem;
+        border-radius: 1.5rem;
+        border: 1px solid rgba(15, 23, 42, 0.05);
+        background:
+            linear-gradient(135deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04)),
+            repeating-linear-gradient(
+                0deg,
+                rgba(15, 23, 42, 0.03) 0,
+                rgba(15, 23, 42, 0.03) 1px,
+                transparent 1px,
+                transparent 14px
+            );
+        opacity: 0.75;
+        pointer-events: none;
+    }
+
+    .tracking-bento-card__header,
+    .tracking-bento-card__range,
+    .tracking-bento-card__date,
+    .tracking-bento-card__chart-shell,
+    .tracking-bento-card__readings {
+        position: relative;
+        z-index: 1;
+    }
+
+    .tracking-bento-card__header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.9rem;
+        margin-bottom: 0.7rem;
+    }
+
+    .tracking-bento-card__title {
+        font-size: 1rem;
+        font-weight: 800;
+        color: #111827;
+    }
+
+    .tracking-bento-card__subtitle {
+        margin-top: 0.2rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: #94a3b8;
+    }
+
+    .tracking-bento-card__cta {
+        flex-shrink: 0;
+        min-height: 2rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        background: rgba(255, 255, 255, 0.84);
+        padding: 0.3rem 0.8rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: #0f172a;
+        transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .tracking-bento-card__cta:hover {
+        transform: translateY(-1px);
+        border-color: rgba(16, 185, 129, 0.28);
+        background: rgba(255, 255, 255, 1);
+    }
+
+    .tracking-bento-card__range {
+        display: flex;
+        align-items: flex-end;
+        gap: 0.35rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .tracking-bento-card__value {
+        font-size: clamp(3rem, 5vw, 4.3rem);
+        line-height: 0.92;
+        font-weight: 800;
+        letter-spacing: -0.05em;
+        color: #111827;
+    }
+
+    .tracking-bento-card__unit {
+        margin-bottom: 0.48rem;
+        font-size: 1.05rem;
+        font-weight: 400;
+        color: #9ca3af;
+    }
+
+    .tracking-bento-card__date {
+        margin-bottom: 1rem;
+        font-size: 0.76rem;
+        font-weight: 600;
+        color: #6b7280;
+        line-height: 1.45;
+        word-break: break-word;
+    }
+
+    .tracking-bento-card__chart-shell {
+        position: relative;
+        height: 7.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .tracking-bento-card__chart-shell--diagnostic {
+        height: auto;
+    }
+
+    .tracking-bento-card__avg-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: var(--tracking-bento-avg-top);
+        height: 1.5px;
+        background: rgba(148, 163, 184, 0.28);
+        z-index: 1;
+    }
+
+    .tracking-bento-card__avg-label {
+        position: absolute;
+        right: 0;
+        top: calc(var(--tracking-bento-avg-top) - 1.7rem);
+        z-index: 2;
+        border-radius: 999px;
+        background: #111827;
+        color: #ffffff;
+        padding: 0.22rem 0.58rem;
+        font-size: 0.67rem;
+        font-weight: 700;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+    }
+
+    .tracking-bento-card__chart {
+        position: relative;
+        display: flex;
+        align-items: flex-end;
+        gap: 0.55rem;
+        height: 100%;
+        padding: 0 0.2rem 0.15rem;
+        z-index: 2;
+    }
+
+    .tracking-bento-card__bar-wrap {
+        display: flex;
+        min-width: 0;
+        flex: 1 1 0;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.45rem;
+    }
+
+    .tracking-bento-card__bar-container {
+        display: flex;
+        min-height: 5rem;
+        width: 100%;
+        align-items: flex-end;
+        justify-content: center;
+    }
+
+    .tracking-bento-card__bar {
+        position: relative;
+        width: min(100%, 1.2rem);
+        min-height: 1rem;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #10b981 0%, #86efac 100%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+        transition: transform 0.2s ease;
+    }
+
+    .tracking-bento-card__bar:hover {
+        transform: scaleY(1.04);
+    }
+
+    .tracking-bento-card__bar--peak::after {
+        content: "";
+        position: absolute;
+        top: -0.28rem;
+        left: 50%;
+        width: 0.48rem;
+        height: 0.48rem;
+        border-radius: 999px;
+        transform: translateX(-50%);
+        background: #ffffff;
+        border: 1.5px solid var(--tracking-bento-accent);
+    }
+
+    .tracking-bento-card__day {
+        font-size: 0.67rem;
+        font-weight: 600;
+        color: #9ca3af;
+    }
+
+    .tracking-bento-card__readings {
+        border-top: 1px solid rgba(226, 232, 240, 0.86);
+        padding-top: 0.8rem;
+    }
+
+    .tracking-bento-card__diagnostic-shell {
+        display: grid;
+        grid-template-columns: minmax(6.2rem, 7rem) minmax(0, 1fr);
+        align-items: center;
+        gap: 1rem;
+        min-height: 7.5rem;
+    }
+
+    .tracking-bento-card__diagnostic-gauge {
+        --tracking-bento-diagnostic-progress: 0%;
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: min(100%, 6.8rem);
+        aspect-ratio: 1 / 1;
+        margin: 0 auto;
+        border-radius: 999px;
+        background: conic-gradient(
+            var(--tracking-bento-accent) 0 var(--tracking-bento-diagnostic-progress),
+            rgba(244, 63, 94, 0.14) var(--tracking-bento-diagnostic-progress) 100%
+        );
+        box-shadow:
+            0 18px 32px rgba(244, 63, 94, 0.14),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+    }
+
+    .tracking-bento-card__diagnostic-gauge::before {
+        content: "";
+        position: absolute;
+        inset: 0.72rem;
+        border-radius: inherit;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 241, 242, 0.92));
+        border: 1px solid rgba(244, 63, 94, 0.14);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+
+    .tracking-bento-card__diagnostic-gauge-content {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.18rem;
+    }
+
+    .tracking-bento-card__diagnostic-gauge-value {
+        font-size: 1.18rem;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        color: #be123c;
+    }
+
+    .tracking-bento-card__diagnostic-gauge-label {
+        font-size: 0.66rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #9f1239;
+    }
+
+    .tracking-bento-card__diagnostic-bars {
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+        min-width: 0;
+    }
+
+    .tracking-bento-card__diagnostic-sample {
+        display: inline-flex;
+        align-items: center;
+        align-self: flex-start;
+        border-radius: 999px;
+        padding: 0.24rem 0.62rem;
+        background: rgba(244, 63, 94, 0.08);
+        color: #be123c;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+    }
+
+    .tracking-bento-card__diagnostic-row {
+        display: grid;
+        gap: 0.36rem;
+    }
+
+    .tracking-bento-card__diagnostic-row-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.7rem;
+        min-width: 0;
+    }
+
+    .tracking-bento-card__diagnostic-row-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        min-width: 0;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #475569;
+    }
+
+    .tracking-bento-card__diagnostic-row-value {
+        flex-shrink: 0;
+        font-size: 0.76rem;
+        font-weight: 800;
+        color: #0f172a;
+    }
+
+    .tracking-bento-card__diagnostic-dot {
+        width: 0.55rem;
+        height: 0.55rem;
+        flex-shrink: 0;
+        border-radius: 999px;
+        background: #f43f5e;
+        box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.12);
+    }
+
+    .tracking-bento-card__diagnostic-track {
+        overflow: hidden;
+        height: 0.72rem;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.07);
+    }
+
+    .tracking-bento-card__diagnostic-fill {
+        display: block;
+        height: 100%;
+        width: var(--tracking-bento-fill, 0%);
+        border-radius: inherit;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    }
+
+    .tracking-bento-card__diagnostic-row--correct .tracking-bento-card__diagnostic-dot {
+        background: #10b981;
+        box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.14);
+    }
+
+    .tracking-bento-card__diagnostic-row--correct .tracking-bento-card__diagnostic-fill {
+        background: linear-gradient(90deg, #10b981 0%, #6ee7b7 100%);
+    }
+
+    .tracking-bento-card__diagnostic-row--wrong .tracking-bento-card__diagnostic-dot {
+        background: #f43f5e;
+        box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.12);
+    }
+
+    .tracking-bento-card__diagnostic-row--wrong .tracking-bento-card__diagnostic-fill {
+        background: linear-gradient(90deg, #f43f5e 0%, #fb7185 100%);
+    }
+
+    .tracking-bento-card__knowledge-shell {
+        display: grid;
+        grid-template-columns: minmax(6.4rem, 7rem) minmax(0, 1fr);
+        gap: 1rem;
+        min-height: 7.8rem;
+        align-items: stretch;
+    }
+
+    .tracking-bento-card__knowledge-score {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 0.8rem;
+        border-radius: 1.3rem;
+        border: 1px solid rgba(244, 63, 94, 0.14);
+        background: linear-gradient(180deg, rgba(255, 241, 242, 0.98), rgba(255, 228, 230, 0.92));
+        padding: 0.9rem 0.85rem;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+    }
+
+    .tracking-bento-card__knowledge-score-label {
+        font-size: 0.66rem;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #9f1239;
+    }
+
+    .tracking-bento-card__knowledge-score-value {
+        margin-top: 0.28rem;
+        font-size: 1.9rem;
+        line-height: 0.92;
+        font-weight: 800;
+        letter-spacing: -0.05em;
+        color: #be123c;
+    }
+
+    .tracking-bento-card__knowledge-score-meta {
+        margin-top: 0.25rem;
+        font-size: 0.76rem;
+        font-weight: 700;
+        color: #475569;
+    }
+
+    .tracking-bento-card__knowledge-pressure {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: #64748b;
+    }
+
+    .tracking-bento-card__knowledge-pressure-track {
+        overflow: hidden;
+        height: 0.58rem;
+        border-radius: 999px;
+        background: rgba(244, 63, 94, 0.14);
+    }
+
+    .tracking-bento-card__knowledge-pressure-fill {
+        display: block;
+        height: 100%;
+        width: var(--tracking-bento-pressure, 0%);
+        border-radius: inherit;
+        background: linear-gradient(90deg, #f43f5e 0%, #fb7185 100%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    }
+
+    .tracking-bento-card__knowledge-panel {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 0.8rem;
+        border-radius: 1.35rem;
+        border: 1px solid rgba(244, 63, 94, 0.12);
+        background:
+            radial-gradient(circle at top right, rgba(251, 113, 133, 0.14), rgba(251, 113, 133, 0) 40%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 241, 242, 0.88));
+        padding: 0.95rem 1rem;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+    }
+
+    .tracking-bento-card__knowledge-panel::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+            linear-gradient(to right, rgba(244, 63, 94, 0.05) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(244, 63, 94, 0.05) 1px, transparent 1px);
+        background-size: 16px 16px;
+        pointer-events: none;
+        opacity: 0.7;
+    }
+
+    .tracking-bento-card__knowledge-panel > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    .tracking-bento-card__knowledge-label {
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #9f1239;
+    }
+
+    .tracking-bento-card__knowledge-segments {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        align-items: center;
+    }
+
+    .tracking-bento-card__knowledge-segment {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        min-height: 2rem;
+        border-radius: 999px;
+        padding: 0.34rem 0.78rem;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(244, 63, 94, 0.12);
+        color: #881337;
+        font-size: 0.78rem;
+        font-weight: 800;
+        line-height: 1.25;
+        box-shadow:
+            0 10px 20px rgba(244, 63, 94, 0.08),
+            inset 0 1px 0 rgba(255, 255, 255, 0.82);
+    }
+
+    .tracking-bento-card__knowledge-segment::after {
+        content: "";
+        position: absolute;
+        right: -0.48rem;
+        top: 50%;
+        width: 0.62rem;
+        height: 1px;
+        background: rgba(244, 63, 94, 0.26);
+        transform: translateY(-50%);
+    }
+
+    .tracking-bento-card__knowledge-segment:last-child::after {
+        display: none;
+    }
+
+    .tracking-bento-card__knowledge-segment--focus {
+        background: linear-gradient(135deg, rgba(244, 63, 94, 0.14), rgba(251, 113, 133, 0.08));
+        border-color: rgba(244, 63, 94, 0.2);
+        color: #9f1239;
+        transform: translateY(-1px);
+    }
+
+    .tracking-bento-card__knowledge-caption {
+        font-size: 0.73rem;
+        line-height: 1.5;
+        color: #64748b;
+    }
+
+    .tracking-bento-card__knowledge-signals {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.55rem;
+    }
+
+    .tracking-bento-card__knowledge-signal {
+        border-radius: 1rem;
+        border: 1px solid rgba(244, 63, 94, 0.1);
+        background: rgba(255, 255, 255, 0.7);
+        padding: 0.55rem 0.62rem;
+    }
+
+    .tracking-bento-card__knowledge-signal-label {
+        font-size: 0.64rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #9ca3af;
+    }
+
+    .tracking-bento-card__knowledge-signal-value {
+        margin-top: 0.18rem;
+        font-size: 0.84rem;
+        font-weight: 800;
+        color: #0f172a;
+    }
+
+    .tracking-bento-card__reading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.8rem;
+        padding: 0.45rem 0;
+    }
+
+    .tracking-bento-card__reading + .tracking-bento-card__reading {
+        border-top: 1px solid rgba(226, 232, 240, 0.72);
+    }
+
+    .tracking-bento-card__reading-time {
+        font-size: 0.7rem;
+        color: #94a3b8;
+    }
+
+    .tracking-bento-card__reading-value {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #0f172a;
+        text-align: right;
+    }
+
+    .tracking-bento-card--emerald {
+        --tracking-bento-accent: #10b981;
+    }
+
+    .tracking-bento-card--violet {
+        --tracking-bento-accent: #8b5cf6;
+    }
+
+    .tracking-bento-card--rose {
+        --tracking-bento-accent: #f43f5e;
+    }
+
+    .tracking-bento-card--violet::before {
+        background: radial-gradient(circle, rgba(139, 92, 246, 0.22), rgba(139, 92, 246, 0));
+    }
+
+    .tracking-bento-card--rose::before {
+        background: radial-gradient(circle, rgba(244, 63, 94, 0.22), rgba(244, 63, 94, 0));
+    }
+
+    .tracking-bento-card--violet .tracking-bento-card__bar {
+        background: linear-gradient(180deg, #8b5cf6 0%, #c4b5fd 100%);
+    }
+
+    .tracking-bento-card--rose .tracking-bento-card__bar {
+        background: linear-gradient(180deg, #f43f5e 0%, #fda4af 100%);
+    }
+
+    .dark .tracking-bento-card {
+        --tracking-bento-border: rgba(255, 255, 255, 0.08);
+        --tracking-bento-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 24px 56px rgba(2, 6, 23, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        background:
+            radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 34%),
+            linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(2, 6, 23, 0.96));
+    }
+
+    .dark .tracking-bento-card::after {
+        border-color: rgba(255, 255, 255, 0.06);
+        background:
+            linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.01)),
+            repeating-linear-gradient(
+                0deg,
+                rgba(255, 255, 255, 0.04) 0,
+                rgba(255, 255, 255, 0.04) 1px,
+                transparent 1px,
+                transparent 14px
+            );
+    }
+
+    .dark .tracking-bento-card__title,
+    .dark .tracking-bento-card__value,
+    .dark .tracking-bento-card__reading-value {
+        color: #f8fafc;
+    }
+
+    .dark .tracking-bento-card__subtitle,
+    .dark .tracking-bento-card__day,
+    .dark .tracking-bento-card__reading-time {
+        color: #94a3b8;
+    }
+
+    .dark .tracking-bento-card__date {
+        color: #cbd5e1;
+    }
+
+    .dark .tracking-bento-card__diagnostic-gauge {
+        background: conic-gradient(
+            var(--tracking-bento-accent) 0 var(--tracking-bento-diagnostic-progress),
+            rgba(251, 113, 133, 0.18) var(--tracking-bento-diagnostic-progress) 100%
+        );
+        box-shadow:
+            0 18px 32px rgba(2, 6, 23, 0.32),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+    }
+
+    .dark .tracking-bento-card__diagnostic-gauge::before {
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.94));
+        border-color: rgba(255, 255, 255, 0.08);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .dark .tracking-bento-card__diagnostic-gauge-value {
+        color: #fecdd3;
+    }
+
+    .dark .tracking-bento-card__diagnostic-gauge-label {
+        color: #fda4af;
+    }
+
+    .dark .tracking-bento-card__diagnostic-sample {
+        background: rgba(244, 63, 94, 0.14);
+        color: #fecdd3;
+    }
+
+    .dark .tracking-bento-card__diagnostic-row-name {
+        color: #cbd5e1;
+    }
+
+    .dark .tracking-bento-card__diagnostic-row-value {
+        color: #f8fafc;
+    }
+
+    .dark .tracking-bento-card__diagnostic-track {
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .dark .tracking-bento-card__knowledge-score {
+        border-color: rgba(251, 113, 133, 0.16);
+        background: linear-gradient(180deg, rgba(76, 5, 25, 0.5), rgba(63, 10, 20, 0.42));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .dark .tracking-bento-card__knowledge-score-label {
+        color: #fda4af;
+    }
+
+    .dark .tracking-bento-card__knowledge-score-value {
+        color: #fecdd3;
+    }
+
+    .dark .tracking-bento-card__knowledge-score-meta,
+    .dark .tracking-bento-card__knowledge-pressure {
+        color: #cbd5e1;
+    }
+
+    .dark .tracking-bento-card__knowledge-pressure-track {
+        background: rgba(251, 113, 133, 0.12);
+    }
+
+    .dark .tracking-bento-card__knowledge-panel {
+        border-color: rgba(251, 113, 133, 0.16);
+        background:
+            radial-gradient(circle at top right, rgba(251, 113, 133, 0.14), rgba(251, 113, 133, 0) 40%),
+            linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.94));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .dark .tracking-bento-card__knowledge-panel::before {
+        background-image:
+            linear-gradient(to right, rgba(251, 113, 133, 0.06) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(251, 113, 133, 0.06) 1px, transparent 1px);
+    }
+
+    .dark .tracking-bento-card__knowledge-label {
+        color: #fda4af;
+    }
+
+    .dark .tracking-bento-card__knowledge-segment {
+        background: rgba(15, 23, 42, 0.72);
+        border-color: rgba(251, 113, 133, 0.14);
+        color: #ffe4e6;
+        box-shadow:
+            0 10px 20px rgba(2, 6, 23, 0.24),
+            inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    .dark .tracking-bento-card__knowledge-segment::after {
+        background: rgba(251, 113, 133, 0.28);
+    }
+
+    .dark .tracking-bento-card__knowledge-segment--focus {
+        background: linear-gradient(135deg, rgba(127, 29, 29, 0.62), rgba(76, 5, 25, 0.52));
+        border-color: rgba(251, 113, 133, 0.22);
+        color: #fecdd3;
+    }
+
+    .dark .tracking-bento-card__knowledge-caption {
+        color: #cbd5e1;
+    }
+
+    .dark .tracking-bento-card__knowledge-signal {
+        border-color: rgba(251, 113, 133, 0.12);
+        background: rgba(15, 23, 42, 0.66);
+    }
+
+    .dark .tracking-bento-card__knowledge-signal-value {
+        color: #f8fafc;
+    }
+
+    .dark .tracking-bento-card__cta {
+        border-color: rgba(255, 255, 255, 0.1);
+        background: rgba(15, 23, 42, 0.82);
+        color: #f8fafc;
+    }
+
+    .dark .tracking-bento-card__cta:hover {
+        border-color: rgba(16, 185, 129, 0.3);
+        background: rgba(30, 41, 59, 0.95);
+    }
+
+    .dark .tracking-bento-card__avg-line {
+        background: rgba(148, 163, 184, 0.2);
+    }
+
+    .dark .tracking-bento-card__readings,
+    .dark .tracking-bento-card__reading + .tracking-bento-card__reading {
+        border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    @media (max-width: 768px) {
+        .tracking-bento-card {
+            min-height: 18rem;
+            padding: 1.1rem;
+        }
+
+        .tracking-bento-card__chart-shell {
+            height: 6.6rem;
+        }
+
+        .tracking-bento-card__chart-shell--diagnostic {
+            height: auto;
+        }
+
+        .tracking-bento-card__diagnostic-shell {
+            grid-template-columns: 1fr;
+            gap: 0.85rem;
+        }
+
+        .tracking-bento-card__diagnostic-gauge {
+            width: 6rem;
+        }
+
+        .tracking-bento-card__knowledge-shell {
+            grid-template-columns: 1fr;
+        }
+
+        .tracking-bento-card__knowledge-signals {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="mb-6">
     <div class="flex items-center text-sm text-gray-500 mb-2">
@@ -39,7 +1452,7 @@
 </div>
 
 <!-- 第一层：北极星指标 -->
-<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+<div id="trackingSummaryGrid" class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
     <div class="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
         <div class="text-sm text-gray-500">做题数</div>
         <div id="totalQuestions" class="text-3xl font-bold text-green-600">0</div>
@@ -70,29 +1483,31 @@
 <!-- 第二层：学习趋势 -->
 <div class="bg-white rounded-lg shadow p-6 mb-6">
     <h3 class="font-bold text-lg mb-4">📈 学习趋势（近14天）</h3>
-    <div style="position:relative;height:300px;">
-        <canvas id="trendChartCanvas"></canvas>
+    <div style="position:relative;">
+        <div id="trendInsightCard"></div>
     </div>
 </div>
 
 <!-- 第三层：痛点剖析 -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-    <div class="bg-white rounded-lg shadow p-6">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 tracking-analysis-grid">
+    <div class="bg-white rounded-lg shadow p-6 tracking-side-panel tracking-radar-panel">
         <h3 class="font-bold text-lg mb-4">🎯 题型正确率</h3>
-        <div style="position:relative;height:260px;">
-            <canvas id="typeRadarCanvas"></canvas>
+        <div class="tracking-radar-shell">
+            <div class="tracking-radar-box">
+                <canvas id="typeRadarCanvas"></canvas>
+            </div>
         </div>
     </div>
-    <div class="bg-white rounded-lg shadow p-6">
+    <div class="bg-white rounded-lg shadow p-6 tracking-side-panel tracking-quadrant-panel">
         <h3 class="font-bold text-lg mb-4">🧠 知识点诊断象限</h3>
-        <div id="confidenceQuadrantList" class="space-y-3 max-h-[340px] overflow-y-auto text-sm">
+        <div id="confidenceQuadrantList" class="space-y-3 max-h-[340px] overflow-y-auto text-sm tracking-quadrant-list">
             <span class="text-gray-400">加载中...</span>
         </div>
     </div>
-    <div class="bg-white rounded-lg shadow p-6">
+    <div class="bg-white rounded-lg shadow p-6 tracking-difficulty-panel">
         <h3 class="font-bold text-lg mb-4">📊 难度通过率</h3>
-        <div style="position:relative;height:260px;">
-            <canvas id="diffBarCanvas"></canvas>
+        <div class="tracking-difficulty-shell" style="position:relative;">
+            <div id="diffInsightCard"></div>
         </div>
     </div>
 </div>
@@ -147,7 +1562,7 @@
 <script>
     // ========== 安全工具函数 ==========
     function escapeHtml(text) {
-        if (!text) return '';
+        if (text === null || text === undefined) return '';
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
@@ -181,7 +1596,10 @@ var allExamsExpanded = false;
 var statsData = null;
 var trendChart = null, radarChart = null, scatterChart = null, diffChart = null;
 
-document.addEventListener('DOMContentLoaded', function() { loadAllData(); });
+document.addEventListener('DOMContentLoaded', function() {
+    renderTotalQuestionsCard({ summary: {}, daily_trend: {} });
+    loadAllData();
+});
 
 // ========== Period Controls ==========
 function setPeriod(p) {
@@ -234,36 +1652,552 @@ async function loadAllData() {
 
 // ========== Layer 1: North Star Metrics ==========
 function renderSummary(data) {
-    var s = data.summary;
-    document.getElementById('totalQuestions').textContent = s.total_questions;
-    var dur = s.total_duration;
-    document.getElementById('totalDuration').textContent = dur >= 3600 ? Math.round(dur / 360) / 10 + 'h' : Math.round(dur / 60) + 'min';
-    document.getElementById('avgAccuracy').textContent = s.avg_accuracy + '%';
-    document.getElementById('totalSessions').textContent = s.total_sessions;
-
-    var wowEl = document.getElementById('wowDelta');
-    if (data.wow_delta && data.wow_delta.delta !== null) {
-        var d = data.wow_delta.delta;
-        var arrow = d > 0 ? '\u2191' : (d < 0 ? '\u2193' : '\u2192');
-        var color = d > 0 ? 'text-green-600' : (d < 0 ? 'text-red-600' : 'text-gray-400');
-        wowEl.className = 'text-xs mt-1 font-medium ' + color;
-        wowEl.textContent = '\u5468\u73af\u6bd4 ' + arrow + ' ' + Math.abs(d) + '%';
-    } else { wowEl.textContent = ''; }
-
-    if (data.weakest_area) {
-        document.getElementById('weakestName').textContent = data.weakest_area.name;
-        document.getElementById('weakestName').title = data.weakest_area.name;
-        document.getElementById('weakestAccuracy').textContent = '\u6b63\u786e\u7387 ' + data.weakest_area.accuracy + '% (' + data.weakest_area.correct + '/' + data.weakest_area.total + ')';
-    } else {
-        document.getElementById('weakestName').textContent = '\u6682\u65e0';
-        document.getElementById('weakestAccuracy').textContent = '\u505a\u9898\u22653\u624d\u4f1a\u663e\u793a';
-    }
+    renderTotalQuestionsCard(data);
 }
 
-// ========== Layer 2: Trend Chart (Chart.js dual axis) ==========
+function getTotalQuestionsMetricDates(data, count) {
+    var endDateText = data && data.end_date ? String(data.end_date).slice(0, 10) : '';
+    if (!endDateText && currentDateStr) endDateText = currentDateStr;
+    if (!endDateText) endDateText = new Date().toISOString().slice(0, 10);
+
+    var endDate = new Date(endDateText);
+    if (isNaN(endDate.getTime())) endDate = new Date();
+
+    var dates = [];
+    for (var i = count - 1; i >= 0; i--) {
+        var d = new Date(endDate);
+        d.setDate(endDate.getDate() - i);
+        dates.push(d.toISOString().slice(0, 10));
+    }
+    return dates;
+}
+
+function buildTrackingBentoCard(config) {
+    var bars = config.bars || [];
+    var readings = config.readings || [];
+    var maxValue = Number(config.maxValue || 0);
+    if (maxValue <= 0) {
+        maxValue = bars.reduce(function(maxItem, item) {
+            return Math.max(maxItem, Number(item.value || 0));
+        }, 0);
+    }
+    maxValue = Math.max(maxValue, 1);
+
+    var avgValue = Number(config.avgValue || 0);
+    var avgTop = getInsightAvgTop(avgValue, maxValue);
+
+    var barsHtml = bars.map(function(item) {
+        var value = Number(item.value || 0);
+        var barHeight = maxValue > 0 ? Math.max(16, Math.round(value / maxValue * 82)) : 16;
+        var tooltip = item.tooltip || (item.label + ' - ' + value);
+        return '<div class="tracking-bento-card__bar-wrap">' +
+            '<div class="tracking-bento-card__bar-container">' +
+                '<div class="tracking-bento-card__bar' + (item.peak ? ' tracking-bento-card__bar--peak' : '') + '" style="height:' + barHeight + 'px" title="' + escapeHtml(String(tooltip)) + '"></div>' +
+            '</div>' +
+            '<div class="tracking-bento-card__day">' + escapeHtml(String(item.label || '--')) + '</div>' +
+        '</div>';
+    }).join('');
+
+    var readingsHtml = readings.map(function(item) {
+        return '<div class="tracking-bento-card__reading">' +
+            '<span class="tracking-bento-card__reading-time">' + escapeHtml(String(item.label || '')) + '</span>' +
+            '<span class="tracking-bento-card__reading-value">' + escapeHtml(String(item.value || '')) + '</span>' +
+        '</div>';
+    }).join('');
+
+    var chartShellClass = 'tracking-bento-card__chart-shell';
+    var chartHtml =
+        '<div class="tracking-bento-card__avg-line"></div>' +
+        '<div class="tracking-bento-card__avg-label">' + escapeHtml(String(config.avgLabel || '')) + '</div>' +
+        '<div class="tracking-bento-card__chart">' + barsHtml + '</div>';
+
+    if (config.chartMode === 'diagnostic') {
+        chartShellClass += ' tracking-bento-card__chart-shell--diagnostic';
+        chartHtml = buildTrackingDiagnosticChart(config);
+    } else if (config.chartMode === 'knowledge') {
+        chartShellClass += ' tracking-bento-card__chart-shell--diagnostic';
+        chartHtml = buildTrackingKnowledgeChart(config);
+    }
+
+    return '<div class="tracking-bento-card ' + (config.cardClass || '') + '">' +
+        '<div class="tracking-bento-card__header">' +
+            '<div>' +
+                '<div class="tracking-bento-card__title">' + escapeHtml(String(config.title || '')) + '</div>' +
+                '<div class="tracking-bento-card__subtitle">' + escapeHtml(String(config.subtitle || '')) + '</div>' +
+            '</div>' +
+            '<button type="button" class="tracking-bento-card__cta" onclick="' + escapeHtml(String(config.ctaAction || 'void(0)')) + '">' + escapeHtml(String(config.ctaLabel || '')) + '</button>' +
+        '</div>' +
+        '<div class="tracking-bento-card__range">' +
+            '<div class="tracking-bento-card__value">' + escapeHtml(String(config.value || '0')) + '</div>' +
+            '<div class="tracking-bento-card__unit">' + escapeHtml(String(config.unit || '')) + '</div>' +
+        '</div>' +
+        '<div class="tracking-bento-card__date">' + escapeHtml(String(config.dateLabel || '')) + '</div>' +
+        '<div class="' + chartShellClass + '" style="--tracking-bento-avg-top:' + avgTop + '%">' +
+            chartHtml +
+        '</div>' +
+        '<div class="tracking-bento-card__readings">' + readingsHtml + '</div>' +
+    '</div>';
+}
+
+function buildTrackingDiagnosticRow(label, count, pct, rowClass) {
+    var safePct = Math.max(0, Math.min(100, Number(pct || 0)));
+    return '<div class="tracking-bento-card__diagnostic-row ' + rowClass + '">' +
+        '<div class="tracking-bento-card__diagnostic-row-head">' +
+            '<div class="tracking-bento-card__diagnostic-row-name">' +
+                '<span class="tracking-bento-card__diagnostic-dot"></span>' +
+                '<span>' + escapeHtml(String(label || '')) + '</span>' +
+            '</div>' +
+            '<div class="tracking-bento-card__diagnostic-row-value">' + escapeHtml(String(count || 0)) + ' 题 · ' + escapeHtml(formatTrackingPercent(safePct)) + '</div>' +
+        '</div>' +
+        '<div class="tracking-bento-card__diagnostic-track">' +
+            '<span class="tracking-bento-card__diagnostic-fill" style="--tracking-bento-fill:' + safePct + '%"></span>' +
+        '</div>' +
+    '</div>';
+}
+
+function buildTrackingDiagnosticChart(config) {
+    var totalCount = Math.max(Number(config.totalCount || 0), 0);
+    var correctCount = Math.max(Number(config.correctCount || 0), 0);
+    var wrongCount = Math.max(Number(config.wrongCount || 0), 0);
+    var accuracy = Math.max(0, Math.min(100, Number(config.accuracy || 0)));
+    var correctPct = totalCount > 0 ? correctCount / totalCount * 100 : 0;
+    var wrongPct = totalCount > 0 ? wrongCount / totalCount * 100 : 0;
+    var sampleText = totalCount > 0 ? '样本 ' + totalCount + ' 题' : '等待样本';
+
+    return '<div class="tracking-bento-card__diagnostic-shell">' +
+        '<div class="tracking-bento-card__diagnostic-gauge" style="--tracking-bento-diagnostic-progress:' + accuracy + '%">' +
+            '<div class="tracking-bento-card__diagnostic-gauge-content">' +
+                '<div class="tracking-bento-card__diagnostic-gauge-value">' + escapeHtml(formatTrackingPercent(accuracy)) + '</div>' +
+                '<div class="tracking-bento-card__diagnostic-gauge-label">正确率</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="tracking-bento-card__diagnostic-bars">' +
+            '<div class="tracking-bento-card__diagnostic-sample">' + escapeHtml(sampleText) + '</div>' +
+            buildTrackingDiagnosticRow('正答', correctCount, correctPct, 'tracking-bento-card__diagnostic-row--correct') +
+            buildTrackingDiagnosticRow('错题', wrongCount, wrongPct, 'tracking-bento-card__diagnostic-row--wrong') +
+        '</div>' +
+    '</div>';
+}
+
+function splitKnowledgeSegmentByCue(text, maxLength) {
+    var normalized = String(text || '').trim();
+    if (!normalized) return [];
+
+    var semanticCues = ['期间', '过程', '机制', '本质', '规律', '变化', '调节', '功能', '驱动力', '电位', '反应', '影响', '特点', '原则', '结构', '关系', '通路', '阶段'];
+    var pieces = [];
+    var rest = normalized;
+
+    while (rest.length > maxLength) {
+        var bestEnd = -1;
+        var bestDistance = 999;
+
+        semanticCues.forEach(function(cue) {
+            var idx = rest.indexOf(cue);
+            if (idx < 0) return;
+            var end = idx + cue.length;
+            if (end < 3 || end > Math.min(maxLength + 2, rest.length - 2)) return;
+            var distance = Math.abs(end - maxLength);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestEnd = end;
+            }
+        });
+
+        if (bestEnd < 0) {
+            bestEnd = rest.length > maxLength * 1.7 ? maxLength : Math.ceil(rest.length / 2);
+        }
+
+        pieces.push(rest.slice(0, bestEnd));
+        rest = rest.slice(bestEnd);
+    }
+
+    if (rest) pieces.push(rest);
+    return pieces.filter(Boolean);
+}
+
+function buildKnowledgeTopicSegments(name) {
+    var normalized = String(name || '').replace(/\s+/g, '').trim();
+    if (!normalized) return [];
+
+    var parts = normalized.split(/[，、；：,\/（）()]/).filter(Boolean);
+    if (!parts.length) parts = [normalized];
+
+    var connectorPatterns = [/及其/g, /以及/g, /的/g, /及/g, /与/g, /和/g];
+    connectorPatterns.forEach(function(pattern) {
+        var next = [];
+        parts.forEach(function(part) {
+            if (part.length <= 8) {
+                next.push(part);
+                return;
+            }
+            var splitParts = part.split(pattern).map(function(item) { return item.trim(); }).filter(Boolean);
+            if (splitParts.length > 1) next = next.concat(splitParts);
+            else next.push(part);
+        });
+        parts = next;
+    });
+
+    var finalSegments = [];
+    parts.forEach(function(part) {
+        finalSegments = finalSegments.concat(splitKnowledgeSegmentByCue(part, 6));
+    });
+
+    finalSegments = finalSegments.filter(Boolean);
+    if (!finalSegments.length) finalSegments = [normalized];
+    return finalSegments.slice(0, 6);
+}
+
+function buildTrackingKnowledgeChart(config) {
+    var topicName = String(config.topicName || '').trim();
+    var segments = buildKnowledgeTopicSegments(topicName);
+    if (!segments.length) segments = ['等待定位知识点'];
+
+    var totalCount = Math.max(Number(config.totalCount || 0), 0);
+    var correctCount = Math.max(Number(config.correctCount || 0), 0);
+    var wrongCount = Math.max(Number(config.wrongCount || 0), 0);
+    var accuracy = Math.max(0, Math.min(100, Number(config.accuracy || 0)));
+    var wrongPressure = totalCount > 0 ? wrongCount / totalCount * 100 : 0;
+    var confidencePct = config.hasConfidence ? Math.max(0, Math.min(100, Number(config.confidencePct || 0))) : null;
+
+    var focusIndex = 0;
+    segments.forEach(function(segment, index) {
+        if (String(segment || '').length > String(segments[focusIndex] || '').length) focusIndex = index;
+    });
+
+    var segmentsHtml = segments.map(function(segment, index) {
+        var className = 'tracking-bento-card__knowledge-segment';
+        if (index === focusIndex) className += ' tracking-bento-card__knowledge-segment--focus';
+        return '<span class="' + className + '">' + escapeHtml(String(segment)) + '</span>';
+    }).join('');
+
+    var signalItems = [
+        { label: '正答', value: correctCount + ' / ' + totalCount },
+        { label: '错题', value: wrongCount + ' 题' },
+        { label: '信心', value: confidencePct === null ? '待积累' : formatTrackingPercent(confidencePct) }
+    ];
+
+    var signalHtml = signalItems.map(function(item) {
+        return '<div class="tracking-bento-card__knowledge-signal">' +
+            '<div class="tracking-bento-card__knowledge-signal-label">' + escapeHtml(String(item.label || '')) + '</div>' +
+            '<div class="tracking-bento-card__knowledge-signal-value">' + escapeHtml(String(item.value || '')) + '</div>' +
+        '</div>';
+    }).join('');
+
+    return '<div class="tracking-bento-card__knowledge-shell">' +
+        '<div class="tracking-bento-card__knowledge-score">' +
+            '<div>' +
+                '<div class="tracking-bento-card__knowledge-score-label">Risk Focus</div>' +
+                '<div class="tracking-bento-card__knowledge-score-value">' + escapeHtml(formatTrackingPercent(accuracy)) + '</div>' +
+                '<div class="tracking-bento-card__knowledge-score-meta">' + escapeHtml(correctCount + ' / ' + totalCount + ' 正答') + '</div>' +
+            '</div>' +
+            '<div>' +
+                '<div class="tracking-bento-card__knowledge-pressure">' +
+                    '<span>风险强度</span>' +
+                    '<span>' + escapeHtml(formatTrackingPercent(wrongPressure)) + '</span>' +
+                '</div>' +
+                '<div class="tracking-bento-card__knowledge-pressure-track">' +
+                    '<span class="tracking-bento-card__knowledge-pressure-fill" style="--tracking-bento-pressure:' + wrongPressure + '%"></span>' +
+                '</div>' +
+            '</div>' +
+        '</div>' +
+        '<div class="tracking-bento-card__knowledge-panel">' +
+            '<div class="tracking-bento-card__knowledge-label">Knowledge Map</div>' +
+            '<div class="tracking-bento-card__knowledge-segments">' + segmentsHtml + '</div>' +
+            '<div class="tracking-bento-card__knowledge-caption">当前错误集中在这条知识内容链路，建议按上面的片段顺序回看概念、过程与判断依据。</div>' +
+            '<div class="tracking-bento-card__knowledge-signals">' + signalHtml + '</div>' +
+        '</div>' +
+    '</div>';
+}
+
+function renderTotalQuestionsCard(data) {
+    var summaryGrid = document.getElementById('trackingSummaryGrid');
+    if (!summaryGrid) {
+        var totalQuestionsEl = document.getElementById('totalQuestions');
+        if (totalQuestionsEl) {
+            summaryGrid = totalQuestionsEl.closest('.grid') || (totalQuestionsEl.parentElement && totalQuestionsEl.parentElement.parentElement);
+        }
+    }
+    if (!summaryGrid) return;
+    var dates = getTotalQuestionsMetricDates(data, 7);
+    var trend = data && data.daily_trend ? data.daily_trend : {};
+    var questionValues = dates.map(function(dateKey) {
+        return trend[dateKey] ? Number(trend[dateKey].questions || 0) : 0;
+    });
+    var questionMaxValue = questionValues.reduce(function(maxItem, value) {
+        return Math.max(maxItem, Number(value || 0));
+    }, 0);
+    var questionAvgValue = questionValues.length
+        ? questionValues.reduce(function(sum, value) { return sum + Number(value || 0); }, 0) / questionValues.length
+        : 0;
+    var dateRangeLabel = document.getElementById('dateRangeLabel');
+    var metricDateLabel = dateRangeLabel && dateRangeLabel.textContent
+        ? dateRangeLabel.textContent
+        : formatInsightRange(dates[0], dates[dates.length - 1]);
+
+    var recentDates = dates.slice(-3).reverse();
+    var questionReadings = recentDates.map(function(dateKey) {
+        var point = trend[dateKey] || {};
+        var questions = Number(point.questions || 0);
+        var correct = Number(point.correct || 0);
+        var accuracy = questions > 0 ? Math.round(correct / questions * 100) : 0;
+        return {
+            label: formatInsightDate(dateKey),
+            value: questions + ' \u9898 \u00b7 ' + accuracy + '%'
+        };
+    });
+
+    var questionBars = dates.map(function(dateKey, index) {
+        var value = questionValues[index];
+        return {
+            label: formatInsightDate(dateKey),
+            value: value,
+            peak: questionMaxValue > 0 && value === questionMaxValue,
+            tooltip: formatInsightDate(dateKey) + ' - ' + value + ' \u9898'
+        };
+    });
+
+    var accuracyValues = dates.map(function(dateKey) {
+        var point = trend[dateKey] || {};
+        var questions = Number(point.questions || 0);
+        return questions > 0 ? Math.round(Number(point.correct || 0) / questions * 100) : 0;
+    });
+    var accuracyAvg = Number(data && data.summary ? data.summary.avg_accuracy || 0 : 0);
+    var wowDelta = data && data.wow_delta && data.wow_delta.delta !== null ? Number(data.wow_delta.delta || 0) : null;
+    var accuracyReadings = recentDates.map(function(dateKey) {
+        var point = trend[dateKey] || {};
+        var questions = Number(point.questions || 0);
+        var accuracy = questions > 0 ? Math.round(Number(point.correct || 0) / questions * 100) : 0;
+        return {
+            label: formatInsightDate(dateKey),
+            value: accuracy + '% \u00b7 ' + questions + ' \u9898'
+        };
+    });
+    if (wowDelta !== null) {
+        var arrow = wowDelta > 0 ? '\u2191' : (wowDelta < 0 ? '\u2193' : '\u2192');
+        accuracyReadings.unshift({
+            label: '\u5468\u73af\u6bd4',
+            value: arrow + ' ' + Math.abs(wowDelta) + '%'
+        });
+    }
+    accuracyReadings = accuracyReadings.slice(0, 3);
+
+    var accuracyBars = dates.map(function(dateKey, index) {
+        var value = accuracyValues[index];
+        return {
+            label: formatInsightDate(dateKey),
+            value: value,
+            peak: value >= 85,
+            tooltip: formatInsightDate(dateKey) + ' - ' + value + '%'
+        };
+    });
+
+    var weakest = data && data.weakest_area ? data.weakest_area : null;
+    var weakestMeta = weakest && data && data.knowledge_points && weakest.name
+        ? data.knowledge_points[weakest.name]
+        : null;
+    var weakestWrong = weakest ? Math.max(Number(weakest.total || 0) - Number(weakest.correct || 0), 0) : 0;
+    var weakestTotal = weakest ? Number(weakest.total || 0) : 0;
+    var weakestCorrect = weakest ? Number(weakest.correct || 0) : 0;
+    var weakestAccuracy = weakest ? Number(weakest.accuracy || 0) : 0;
+    var weakestConfidence = weakestMeta ? Number(weakestMeta.avg_confidence || 0) * 100 : 0;
+    var weakestHasConfidence = !!(weakestMeta && weakestMeta.has_confidence_data !== false);
+    var weakestBars = weakest
+        ? [
+            { label: '\u6b63', value: weakestCorrect, tooltip: '\u6b63\u7b54 ' + weakestCorrect + ' \u9898' },
+            { label: '\u9519', value: weakestWrong, peak: weakestWrong >= weakestCorrect, tooltip: '\u9519\u9898 ' + weakestWrong + ' \u9898' },
+            { label: '\u603b', value: weakestTotal, tooltip: '\u603b\u9898 ' + weakestTotal + ' \u9898' }
+        ]
+        : [
+            { label: '\u6b63', value: 0, tooltip: '\u6682\u65e0\u6570\u636e' },
+            { label: '\u9519', value: 0, tooltip: '\u6682\u65e0\u6570\u636e' },
+            { label: '\u603b', value: 0, tooltip: '\u6682\u65e0\u6570\u636e' }
+        ];
+    var weakestReadings = weakest
+        ? [
+            { label: '\u672c\u8f6e\u8868\u73b0', value: weakestCorrect + '/' + weakestTotal },
+            { label: '\u9519\u9898\u538b\u529b', value: weakestWrong + ' \u9898' },
+            { label: '\u5efa\u8bae', value: weakestAccuracy < 40 ? '\u4f18\u5148\u590d\u76d8' : '\u7ee7\u7eed\u5de9\u56fa' }
+        ]
+        : [
+            { label: '\u672c\u8f6e\u8868\u73b0', value: '\u505a\u9898\u22653\u624d\u663e\u793a' },
+            { label: '\u9519\u9898\u538b\u529b', value: '--' },
+            { label: '\u5efa\u8bae', value: '\u5148\u7ee7\u7eed\u505a\u9898' }
+        ];
+
+    summaryGrid.className = 'grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6';
+    summaryGrid.innerHTML =
+        buildTrackingBentoCard({
+            cardClass: 'tracking-bento-card--emerald',
+            title: '\u505a\u9898\u6570',
+            subtitle: '\u7d2f\u8ba1\u9898\u76ee',
+            ctaLabel: '\u67e5\u770b\u8bb0\u5f55',
+            ctaAction: 'scrollToSessions()',
+            value: String(Number(data && data.summary ? data.summary.total_questions || 0 : 0)),
+            unit: '\u9898',
+            dateLabel: metricDateLabel,
+            avgLabel: '\u65e5\u5747 ' + (Math.round(questionAvgValue * 10) / 10),
+            avgValue: questionAvgValue,
+            maxValue: questionMaxValue,
+            bars: questionBars,
+            readings: questionReadings
+        }) +
+        buildTrackingBentoCard({
+            cardClass: 'tracking-bento-card--violet',
+            title: '\u5e73\u5747\u6b63\u786e\u7387',
+            subtitle: '\u603b\u4f53\u8868\u73b0',
+            ctaLabel: '\u67e5\u770b\u8d8b\u52bf',
+            ctaAction: 'scrollToTrend()',
+            value: String(accuracyAvg),
+            unit: '%',
+            dateLabel: metricDateLabel,
+            avgLabel: '\u5747\u503c ' + accuracyAvg + '%',
+            avgValue: accuracyAvg,
+            maxValue: 100,
+            bars: accuracyBars,
+            readings: accuracyReadings
+        }) +
+        buildTrackingBentoCard({
+            cardClass: 'tracking-bento-card--rose',
+            title: '\u6700\u8584\u5f31\u77e5\u8bc6\u70b9',
+            subtitle: '\u9700\u8981\u4f18\u5148\u4fee\u8865',
+            ctaLabel: '\u67e5\u770b\u8bca\u65ad',
+            ctaAction: 'scrollToDiagnosis()',
+            value: formatTrackingNumber(weakestAccuracy),
+            unit: '%',
+            dateLabel: weakest ? '\u5185\u5bb9\u56fe\u8c31 \u00b7 \u5f53\u524d\u6700\u8584\u5f31\u94fe\u8def' : '\u6682\u65e0\u8db3\u591f\u6570\u636e',
+            avgLabel: weakest ? '\u6b63\u7b54 ' + weakestCorrect + '/' + weakestTotal : '\u5f85\u751f\u6210',
+            avgValue: weakest ? weakestAccuracy : 0,
+            maxValue: Math.max(weakestTotal, 1),
+            chartMode: 'knowledge',
+            accuracy: weakestAccuracy,
+            correctCount: weakestCorrect,
+            wrongCount: weakestWrong,
+            totalCount: weakestTotal,
+            confidencePct: weakestConfidence,
+            hasConfidence: weakestHasConfidence,
+            topicName: weakest ? weakest.name : '',
+            bars: weakestBars,
+            readings: weakestReadings
+        });
+}
+
+function formatTrackingNumber(value) {
+    var numericValue = Number(value || 0);
+    if (Math.abs(numericValue - Math.round(numericValue)) < 0.05) {
+        return String(Math.round(numericValue));
+    }
+    return String(Math.round(numericValue * 10) / 10);
+}
+
+function formatTrackingPercent(value) {
+    return formatTrackingNumber(value) + '%';
+}
+
+function formatInsightDate(dateStr) {
+    if (!dateStr) return '--';
+    return dateStr.slice(5).replace('-', '/');
+}
+
+function formatInsightRange(startDate, endDate) {
+    return formatInsightDate(startDate) + ' - ' + formatInsightDate(endDate);
+}
+
+function getInsightAvgTop(avgValue, maxValue) {
+    if (!maxValue || maxValue <= 0) return 58;
+    var ratio = avgValue / maxValue;
+    ratio = Math.max(0.1, Math.min(0.92, ratio));
+    return 100 - ratio * 100;
+}
+
+function buildInsightCard(config) {
+    var bars = config.bars || [];
+    if (bars.length === 0) {
+        return '<div class="insight-card ' + (config.variantClass || '') + '">' +
+            '<div class="insight-card__header">' +
+                '<div><div class="insight-card__eyebrow">' + escapeHtml(config.eyebrow || 'Insight') + '</div>' +
+                '<div class="insight-card__title">' + escapeHtml(config.title || '暂无数据') + '</div></div>' +
+            '</div>' +
+            '<div class="insight-card__empty">暂无可渲染的数据</div>' +
+        '</div>';
+    }
+
+    var actionHtml = config.actionLabel && config.actionOnClick
+        ? '<button type="button" onclick="' + config.actionOnClick + '" class="insight-card__action">' + escapeHtml(config.actionLabel) + '</button>'
+        : '';
+    var avgTop = getInsightAvgTop(Number(config.avgValue || 0), Number(config.maxValue || 0));
+
+    var barsHtml = bars.map(function(item) {
+        var numericValue = Number(item.value || 0);
+        var ratio = config.maxValue > 0 ? numericValue / config.maxValue : 0;
+        var height = numericValue > 0 ? Math.max(18, Math.round(ratio * 92) + 12) : 10;
+        return '<div class="insight-card__bar-slot" title="' + escapeHtml(item.tooltip || '') + '">' +
+            '<div class="insight-card__bar-value">' + escapeHtml(item.displayValue || String(numericValue)) + '</div>' +
+            '<div class="insight-card__bar-stage">' +
+                '<div class="insight-card__bar" style="height:' + height + 'px">' +
+                    (item.topDot ? '<span class="insight-card__dot insight-card__dot--top"></span>' : '') +
+                    (item.bottomDot ? '<span class="insight-card__dot insight-card__dot--bottom"></span>' : '') +
+                '</div>' +
+            '</div>' +
+            '<div class="insight-card__day">' + escapeHtml(item.label) + '</div>' +
+        '</div>';
+    }).join('');
+
+    var readingsHtml = (config.readings || []).map(function(item) {
+        return '<div class="insight-card__reading">' +
+            '<span class="insight-card__reading-time">' + escapeHtml(item.label) + '</span>' +
+            '<span class="insight-card__reading-value">' + escapeHtml(item.value) + '</span>' +
+        '</div>';
+    }).join('');
+
+    return '<div class="insight-card ' + (config.variantClass || '') + '">' +
+        '<div class="insight-card__header">' +
+            '<div>' +
+                '<div class="insight-card__eyebrow">' + escapeHtml(config.eyebrow || 'Insight') + '</div>' +
+                '<div class="insight-card__headline">' +
+                    '<span class="insight-card__title">' + escapeHtml(config.title || '') + '</span>' +
+                    (config.pillText ? '<span class="insight-card__pill">' + escapeHtml(config.pillText) + '</span>' : '') +
+                '</div>' +
+            '</div>' +
+            actionHtml +
+        '</div>' +
+        '<div class="insight-card__range">' +
+            '<span class="insight-card__value">' + escapeHtml(config.rangeValue || '0') + '</span>' +
+            '<span class="insight-card__unit">' + escapeHtml(config.rangeUnit || '') + '</span>' +
+        '</div>' +
+        '<div class="insight-card__meta">' + escapeHtml(config.metaText || '') + (config.avgLabel ? '<span class="insight-card__avg-label">' + escapeHtml(config.avgLabel) + '</span>' : '') + '</div>' +
+        '<div class="insight-card__chart-shell" style="--insight-avg-top:' + avgTop + '%">' +
+            '<div class="insight-card__avg-line"></div>' +
+            '<div class="insight-card__chart" style="--insight-bar-count:' + bars.length + '">' + barsHtml + '</div>' +
+        '</div>' +
+        '<div class="insight-card__readings">' + readingsHtml + '</div>' +
+    '</div>';
+}
+
+function scrollToSessions() {
+    var node = document.getElementById('sessionsList');
+    if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function scrollToTrend() {
+    var node = document.getElementById('trendInsightCard');
+    if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function scrollToDiagnosis() {
+    var node = document.getElementById('confidenceQuadrantList');
+    if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ========== Layer 2: Trend Card ==========
 function renderTrendChart(dailyTrend) {
-    var ctx = document.getElementById('trendChartCanvas').getContext('2d');
-    if (trendChart) trendChart.destroy();
+    if (trendChart) {
+        trendChart.destroy();
+        trendChart = null;
+    }
+
+    var container = document.getElementById('trendInsightCard');
+    if (!container) return;
+
     var dates = [];
     var now = new Date();
     for (var i = 13; i >= 0; i--) {
@@ -271,30 +2205,60 @@ function renderTrendChart(dailyTrend) {
         d.setDate(d.getDate() - i);
         dates.push(d.toISOString().slice(0, 10));
     }
-    var counts = dates.map(function(dk) { return dailyTrend[dk] ? dailyTrend[dk].questions : 0; });
-    var accs = dates.map(function(dk) {
-        if (!dailyTrend[dk] || dailyTrend[dk].questions === 0) return null;
-        return Math.round(dailyTrend[dk].correct / dailyTrend[dk].questions * 100);
-    });
-    var labels = dates.map(function(dk) { return dk.slice(5); });
 
-    trendChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [
-                { label: '\u505a\u9898\u6570', data: counts, backgroundColor: 'rgba(59,130,246,0.6)', borderRadius: 4, yAxisID: 'y', order: 2 },
-                { label: '\u6b63\u786e\u7387%', data: accs, type: 'line', borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', tension: 0.3, pointRadius: 3, yAxisID: 'y1', order: 1, spanGaps: true }
-            ]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            scales: {
-                y: { beginAtZero: true, position: 'left', title: { display: true, text: '\u505a\u9898\u6570' } },
-                y1: { beginAtZero: true, max: 100, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '\u6b63\u786e\u7387%' } }
-            }
-        }
+    var counts = dates.map(function(dk) { return dailyTrend[dk] ? Number(dailyTrend[dk].questions || 0) : 0; });
+    var accs = dates.map(function(dk) {
+        if (!dailyTrend[dk] || Number(dailyTrend[dk].questions || 0) === 0) return null;
+        return Math.round(Number(dailyTrend[dk].correct || 0) / Number(dailyTrend[dk].questions || 1) * 100);
+    });
+
+    var maxCount = counts.reduce(function(maxValue, item) { return Math.max(maxValue, Number(item || 0)); }, 0);
+    var minCount = counts.reduce(function(minValue, item) { return Math.min(minValue, Number(item || 0)); }, counts.length ? Number(counts[0] || 0) : 0);
+    var avgCount = counts.length ? counts.reduce(function(sum, item) { return sum + Number(item || 0); }, 0) / counts.length : 0;
+    var validAccs = accs.filter(function(item) { return item !== null && item !== undefined; });
+    var avgAcc = validAccs.length
+        ? validAccs.reduce(function(sum, item) { return sum + Number(item || 0); }, 0) / validAccs.length
+        : 0;
+
+    var bars = dates.map(function(dateKey, index) {
+        var questions = Number(counts[index] || 0);
+        var acc = accs[index];
+        return {
+            label: formatInsightDate(dateKey),
+            value: questions,
+            displayValue: String(questions),
+            topDot: acc !== null && acc >= 85,
+            bottomDot: acc !== null && acc > 0 && acc < 60,
+            tooltip: formatInsightDate(dateKey) + '：做题 ' + questions + ' 题' + (acc !== null ? ('，正确率 ' + acc + '%') : '')
+        };
+    });
+
+    var readings = dates.slice(-3).reverse().map(function(dateKey) {
+        var questions = dailyTrend[dateKey] ? Number(dailyTrend[dateKey].questions || 0) : 0;
+        var acc = dailyTrend[dateKey] && questions > 0
+            ? Math.round(Number(dailyTrend[dateKey].correct || 0) / questions * 100)
+            : 0;
+        return {
+            label: '最近 ' + formatInsightDate(dateKey),
+            value: questions + ' 题 · 正确率 ' + acc + '%'
+        };
+    });
+
+    container.innerHTML = buildInsightCard({
+        variantClass: 'insight-card--blue',
+        eyebrow: 'Learning Trend',
+        title: '近14天学习趋势',
+        pillText: '日均 ' + avgCount.toFixed(1) + ' 题',
+        actionLabel: '查看记录',
+        actionOnClick: 'scrollToSessions()',
+        rangeValue: minCount + '-' + maxCount,
+        rangeUnit: '题',
+        metaText: formatInsightRange(dates[0], dates[dates.length - 1]) + ' · 平均正确率 ' + avgAcc.toFixed(1) + '%',
+        avgValue: avgCount,
+        maxValue: Math.max(maxCount, avgCount, 1),
+        avgLabel: '均值 ' + avgCount.toFixed(1),
+        bars: bars,
+        readings: readings
     });
 }
 
@@ -347,10 +2311,12 @@ function renderConfidenceScatter(kpData) {
     order.forEach(function(k) { quadrants[k].items.sort(function(a, b) { return a.acc - b.acc; }); });
 
     var html = '';
-    var colorMap = { yellow: { bg: 'bg-yellow-50', border: 'border-yellow-400', text: 'text-yellow-700', badge: 'bg-yellow-100 text-yellow-800' },
-                     red: { bg: 'bg-red-50', border: 'border-red-400', text: 'text-red-700', badge: 'bg-red-100 text-red-800' },
-                     blue: { bg: 'bg-blue-50', border: 'border-blue-400', text: 'text-blue-700', badge: 'bg-blue-100 text-blue-800' },
-                     green: { bg: 'bg-green-50', border: 'border-green-400', text: 'text-green-700', badge: 'bg-green-100 text-green-800' } };
+    var colorMap = {
+        yellow: { card: 'tracking-quadrant-card tracking-quadrant-card--yellow' },
+        red: { card: 'tracking-quadrant-card tracking-quadrant-card--red' },
+        blue: { card: 'tracking-quadrant-card tracking-quadrant-card--blue' },
+        green: { card: 'tracking-quadrant-card tracking-quadrant-card--green' }
+    };
 
     var hasAny = false;
     order.forEach(function(k) {
@@ -358,48 +2324,105 @@ function renderConfidenceScatter(kpData) {
         if (q.items.length === 0) return;
         hasAny = true;
         var c = colorMap[q.color];
-        html += '<div class="' + c.bg + ' border-l-4 ' + c.border + ' rounded p-2">';
-        html += '<div class="font-bold ' + c.text + ' mb-1">' + q.label + ' <span class="font-normal text-xs">(' + q.desc + ')</span></div>';
+        html += '<div class="' + c.card + '">';
+        html += '<div class="tracking-quadrant-title font-bold mb-1">' + escapeHtml(q.label) + ' <span class="tracking-quadrant-desc font-normal text-xs">(' + escapeHtml(q.desc) + ')</span></div>';
         q.items.forEach(function(item) {
             var accColor = item.acc >= 80 ? 'text-green-600' : (item.acc >= 60 ? 'text-yellow-600' : 'text-red-600');
-            html += '<div class="flex items-center justify-between py-0.5">';
-            html += '<span class="truncate flex-1 mr-2" title="' + item.name + '">' + item.name + '</span>';
+            html += '<div class="tracking-quadrant-item">';
+            html += '<span class="tracking-quadrant-name truncate mr-2" title="' + escapeHtml(item.name) + '">' + escapeHtml(item.name) + '</span>';
             html += '<span class="' + accColor + ' font-bold flex-shrink-0">' + item.acc + '%</span>';
-            html += '<span class="text-gray-400 ml-2 flex-shrink-0 w-10 text-right">' + item.correct + '/' + item.total + '</span>';
+            html += '<span class="tracking-quadrant-meta ml-2">' + item.correct + '/' + item.total + '</span>';
             html += '</div>';
         });
         html += '</div>';
     });
 
-    if (!hasAny) html = '<span class="text-gray-400">\u6682\u65e0\u6570\u636e</span>';
+    if (!hasAny) html = '<span class="tracking-quadrant-empty">\u6682\u65e0\u6570\u636e</span>';
     container.innerHTML = html;
 }
 
-// ========== Layer 3 Chart 3: Difficulty Bar ==========
+// ========== Layer 3 Chart 3: Difficulty Insight ==========
 function renderDifficultyBar(diffDist) {
-    var ctx = document.getElementById('diffBarCanvas').getContext('2d');
-    if (diffChart) diffChart.destroy();
-    var order = ['\u57fa\u7840', '\u63d0\u9ad8', '\u96be\u9898'];
-    var labels = [], accs = [], colors = [];
-    order.forEach(function(d) {
-        if (diffDist[d]) {
-            labels.push(d);
-            accs.push(diffDist[d].accuracy);
-            colors.push(d === '\u57fa\u7840' ? 'rgba(34,197,94,0.7)' : (d === '\u63d0\u9ad8' ? 'rgba(234,179,8,0.7)' : 'rgba(239,68,68,0.7)'));
-        }
-    });
-    for (var k in diffDist) {
-        if (order.indexOf(k) < 0) { labels.push(k); accs.push(diffDist[k].accuracy); colors.push('rgba(107,114,128,0.7)'); }
+    if (diffChart) {
+        diffChart.destroy();
+        diffChart = null;
     }
 
-    diffChart = new Chart(ctx, {
-        type: 'bar',
-        data: { labels: labels, datasets: [{ label: '\u901a\u8fc7\u7387%', data: accs, backgroundColor: colors, borderRadius: 6 }] },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: '\u6b63\u786e\u7387%' } } },
-            plugins: { legend: { display: false } }
+    var container = document.getElementById('diffInsightCard');
+    if (!container) return;
+
+    var order = ['\u57fa\u7840', '\u63d0\u9ad8', '\u96be\u9898'];
+    var aliases = {
+        '\u57fa\u7840': '\u57fa\u7840',
+        '\u57fa\u7840\u9898': '\u57fa\u7840',
+        '\u63d0\u9ad8': '\u63d0\u9ad8',
+        '\u63d0\u9ad8\u9898': '\u63d0\u9ad8',
+        '\u96be\u9898': '\u96be\u9898'
+    };
+    var buckets = {};
+    var totalCount = 0;
+
+    // Ignore unexpected difficulty labels so mojibake/dirty data cannot render a fake extra bar.
+    Object.keys(diffDist || {}).forEach(function(rawKey) {
+        var canonicalLabel = aliases[String(rawKey || '').trim()];
+        var rawItem = diffDist[rawKey] || {};
+        var count = Math.max(0, Number(rawItem.count || 0));
+        var correct = Math.max(0, Number(rawItem.correct || 0));
+
+        if (!canonicalLabel || count <= 0) return;
+        if (!buckets[canonicalLabel]) {
+            buckets[canonicalLabel] = { label: canonicalLabel, count: 0, correct: 0 };
         }
+
+        buckets[canonicalLabel].count += count;
+        buckets[canonicalLabel].correct += Math.min(correct, count);
+        totalCount += count;
+    });
+
+    var items = order.reduce(function(list, label) {
+        var bucket = buckets[label];
+        if (!bucket || bucket.count <= 0) return list;
+
+        var accuracy = bucket.count > 0 ? bucket.correct / bucket.count * 100 : 0;
+        list.push({
+            label: label,
+            accuracy: Math.max(0, Math.min(100, accuracy)),
+            correct: bucket.correct,
+            count: bucket.count,
+            pct: totalCount > 0 ? bucket.count / totalCount * 100 : 0
+        });
+        return list;
+    }, []);
+
+    container.innerHTML = buildInsightCard({
+        variantClass: 'insight-card--amber',
+        eyebrow: 'Difficulty Sensor',
+        title: '难度通过率',
+        pillText: '共 ' + items.reduce(function(sum, item) { return sum + item.count; }, 0) + ' 题',
+        actionLabel: '刷新',
+        actionOnClick: 'loadAllData()',
+        rangeValue: items.length ? items.reduce(function(minValue, item) { return Math.min(minValue, item.accuracy); }, items[0].accuracy).toFixed(0) + '-' + items.reduce(function(maxValue, item) { return Math.max(maxValue, item.accuracy); }, items[0].accuracy).toFixed(0) : '0-0',
+        rangeUnit: '%',
+        metaText: items.length ? '基础 / 提高 / 难题 的正确率和占比' : '暂无难度分布数据',
+        avgValue: items.length ? items.reduce(function(sum, item) { return sum + item.accuracy; }, 0) / items.length : 0,
+        maxValue: items.length ? Math.max(items.reduce(function(maxValue, item) { return Math.max(maxValue, item.accuracy); }, 0), 1) : 1,
+        avgLabel: items.length ? '均值 ' + (items.reduce(function(sum, item) { return sum + item.accuracy; }, 0) / items.length).toFixed(1) + '%' : '均值 0%',
+        bars: items.map(function(item) {
+            return {
+                label: item.label,
+                value: item.accuracy,
+                displayValue: item.accuracy.toFixed(0) + '%',
+                topDot: item.accuracy >= 80,
+                bottomDot: item.accuracy < 60,
+                tooltip: item.label + '：' + item.correct + '/' + item.count + '，正确率 ' + item.accuracy.toFixed(1) + '%'
+            };
+        }),
+        readings: items.map(function(item) {
+            return {
+                label: item.label + ' · 占比 ' + item.pct.toFixed(1) + '%',
+                value: item.correct + '/' + item.count + ' · ' + item.accuracy.toFixed(1) + '%'
+            };
+        })
     });
 }
 

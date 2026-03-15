@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}True Learning System{% endblock %}</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        serif: ['"Noto Serif SC"', 'Georgia', '"Times New Roman"', 'serif'],
+                        sans: ['-apple-system', '"PingFang SC"', '"Segoe UI"', 'Roboto', 'sans-serif'],
+                    },
+                    colors: {
+                        cream: '#FEFBF6',
+                        warm: { 100: '#FAF6F0', 200: '#F5EDE0', 300: '#E8DCC8', 400: '#C4B49A', 500: '#8B7355' },
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Google Fonts: Noto Serif SC -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Prevent FOUC for dark mode -->
+    <script>
+        if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+    <style>
+        /* ===== ChenNative Magazine Style ===== */
+        body {
+            font-family: -apple-system, 'PingFang SC', 'Segoe UI', Roboto, sans-serif;
+            color: #2D2D2D;
+            background-color: #FEFBF6;
+            min-height: 100vh;
+            margin: 0;
+            scroll-behavior: smooth;
+            transition: color 0.3s ease, background-color 0.3s ease;
+        }
+
+        /* Serif headings */
+        h1, h2, h3, .font-serif { font-family: 'Noto Serif SC', Georgia, serif; }
+
+        /* Navigation - warm frosted glass */
+        nav.site-nav {
+            background: rgba(254, 251, 246, 0.85);
+            backdrop-filter: saturate(180%) blur(16px);
+            -webkit-backdrop-filter: saturate(180%) blur(16px);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            transition: all 0.3s ease;
+        }
+        nav a { color: #555; font-weight: 500; transition: color 0.2s ease; }
+        nav a:hover { color: #2D2D2D; }
+
+        /* Magazine cards - clean white + subtle shadow */
+        .mag-card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            transition: box-shadow 0.3s ease;
+            overflow: hidden;
+        }
+        .mag-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        /* Card image container */
+        .mag-card-img {
+            aspect-ratio: 2/1;
+            overflow: hidden;
+        }
+        .mag-card-img img {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s ease;
+        }
+        .mag-card:hover .mag-card-img img {
+            transform: scale(1.03);
+        }
+
+        /* Section dividers */
+        .section-title {
+            font-family: 'Noto Serif SC', Georgia, serif;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #2D2D2D;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #E8DCC8;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Stat cards */
+        .stat-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 1.25rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            transition: box-shadow 0.3s ease;
+        }
+        .stat-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.08); }
+
+        /* Smooth page entry */
+        main { animation: fadeIn 0.6s ease forwards; opacity: 0; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Form elements */
+        input, textarea, select {
+            background-color: #fff;
+            border: 1px solid #E8DCC8;
+            border-radius: 8px;
+            padding: 0.6rem 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            color: #2D2D2D;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: #8B7355;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(139, 115, 85, 0.15);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+
+        /* Footer */
+        footer { border-top: 1px solid rgba(0,0,0,0.06); }
+
+        /* Button base */
+        .btn-primary {
+            display: inline-block;
+            background: #2D2D2D;
+            color: #FEFBF6;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: background 0.2s ease, transform 0.15s ease;
+        }
+        .btn-primary:hover { background: #444; }
+        .btn-primary:active { transform: scale(0.97); }
+
+        /* ===== DARK MODE ===== */
+        .dark body { color: #E5E5E5; background-color: #1A1A1A; }
+        .dark nav.site-nav {
+            background: rgba(26, 26, 26, 0.85);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .dark nav a { color: rgba(255,255,255,0.7); }
+        .dark nav a:hover { color: #fff; }
+
+        .dark .mag-card {
+            background: #242424;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .dark .mag-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+
+        .dark .section-title { color: #E5E5E5; border-bottom-color: #444; }
+
+        .dark .stat-card {
+            background: #242424;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .dark .stat-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.5); }
+
+        .dark input, .dark textarea, .dark select {
+            background-color: #2A2A2A;
+            border-color: #444;
+            color: #E5E5E5;
+        }
+        .dark input:focus, .dark textarea:focus, .dark select:focus {
+            border-color: #C4B49A;
+            box-shadow: 0 0 0 3px rgba(196, 180, 154, 0.2);
+        }
+
+        .dark footer { border-top-color: rgba(255,255,255,0.06); }
+
+        .dark .btn-primary { background: #E5E5E5; color: #1A1A1A; }
+        .dark .btn-primary:hover { background: #fff; }
+
+        /* Dark mode text overrides for Tailwind color classes */
+        .dark [class*='text-gray-900'], .dark [class*='text-gray-800'],
+        .dark [class*='text-gray-700'], .dark [class*='text-gray-600'] { color: rgba(255,255,255,0.9) !important; }
+        .dark [class*='text-gray-500'] { color: rgba(255,255,255,0.65) !important; }
+        .dark [class*='text-gray-400'] { color: rgba(255,255,255,0.5) !important; }
+
+        .dark [class*='text-blue-600'], .dark [class*='text-blue-700'] { color: #60A5FA !important; }
+        .dark [class*='text-green-600'], .dark [class*='text-green-700'] { color: #34D399 !important; }
+        .dark [class*='text-red-600'], .dark [class*='text-red-700'] { color: #F87171 !important; }
+        .dark [class*='text-purple-600'], .dark [class*='text-purple-700'] { color: #A78BFA !important; }
+        .dark [class*='text-orange-600'], .dark [class*='text-orange-700'] { color: #FB923C !important; }
+        .dark [class*='text-cyan-600'], .dark [class*='text-cyan-700'] { color: #22D3EE !important; }
+
+        .dark [class*='bg-blue-100'] { background-color: rgba(59,130,246,0.15) !important; color: #93C5FD !important; }
+        .dark [class*='bg-green-100'] { background-color: rgba(16,185,129,0.15) !important; color: #6EE7B7 !important; }
+        .dark [class*='bg-red-100'] { background-color: rgba(239,68,68,0.15) !important; color: #FCA5A5 !important; }
+        .dark [class*='bg-purple-100'] { background-color: rgba(139,92,246,0.15) !important; color: #C4B5FD !important; }
+
+        .dark [class*='border-gray-200'], .dark [class*='border-gray-300'], .dark .border-b { border-color: rgba(255,255,255,0.1) !important; }
+        .dark .divide-y > :not([hidden]) ~ :not([hidden]) { border-color: rgba(255,255,255,0.1) !important; }
+        .dark .bg-gray-200 { background-color: rgba(255,255,255,0.15) !important; }
+        .dark .bg-gray-50, .dark .hover\:bg-gray-50:hover { background-color: rgba(255,255,255,0.05) !important; }
+
+        .dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); }
+        .dark ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+        /* Keep bg-white usable in child templates */
+        .dark .bg-white { background-color: #242424 !important; color: #E5E5E5 !important; }
+        .dark .bg-white .bg-white { background-color: #2A2A2A !important; }
+    </style>
+
+    {% block extra_css %}{% endblock %}
+</head>
+
+<body class="text-gray-900 transition-colors duration-300">
+
+    <!-- Navigation -->
+    <nav class="site-nav">
+        <div class="max-w-6xl mx-auto px-6">
+            <div class="flex justify-between items-center h-14">
+                <a href="/" class="flex items-center space-x-2 text-lg font-semibold tracking-tight" style="color:#2D2D2D;">
+                    <svg class="w-5 h-5" style="color:#8B7355;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                    </svg>
+                    <span class="font-serif">True Learning</span>
+                </a>
+
+                <div class="flex items-center space-x-6 text-sm">
+                    <a href="/">仪表盘</a>
+                    <a href="/learning-tracking">学习轨迹</a>
+                    <a href="/wrong-answers">错题本</a>
+
+                    <!-- Dark Mode Toggle -->
+                    <button id="theme-toggle" type="button" class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
+                        <svg id="theme-toggle-dark-icon" class="hidden w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
+                        </svg>
+                        <svg id="theme-toggle-light-icon" class="hidden w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4.22 4.22a1 1 0 011.415 0l.708.708a1 1 0 01-1.414 1.414l-.708-.708a1 1 0 010-1.414zm3.78 3.78a1 1 0 010 2h-1a1 1 0 110-2h1zm-3.78 4.22a1 1 0 010 1.415l-.708.708a1 1 0 01-1.414-1.414l.708-.708a1 1 0 011.414 0zM10 16a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zm-4.22-4.22a1 1 0 010 1.415l-.708.708a1 1 0 01-1.414-1.414l.708-.708a1 1 0 011.414 0zM2 10a1 1 0 011-1h1a1 1 0 110 2H3a1 1 0 01-1-1zm3.78-4.22a1 1 0 011.414 0l.708-.708a1 1 0 01-1.414-1.414l-.708.708a1 1 0 010 1.414zM10 4a6 6 0 100 12 6 6 0 000-12z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto px-6 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-16 py-8">
+        <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row justify-between items-center text-sm text-gray-400">
+            <div class="flex items-center space-x-2 mb-3 sm:mb-0">
+                <svg class="w-4 h-4" style="color:#C4B49A;" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                </svg>
+                <span>True Learning System</span>
+            </div>
+            <div class="text-xs text-gray-400">Designed with AI &middot; 2026</div>
+        </div>
+    </footer>
+
+    {% block extra_js %}{% endblock %}
+
+    <!-- Theme Toggle JS -->
+    <script>
+        var themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
+        var themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
+
+        if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            themeToggleLightIcon.classList.remove('hidden');
+        } else {
+            themeToggleDarkIcon.classList.remove('hidden');
+        }
+
+        document.getElementById('theme-toggle').addEventListener('click', function() {
+            themeToggleDarkIcon.classList.toggle('hidden');
+            themeToggleLightIcon.classList.toggle('hidden');
+
+            if (localStorage.getItem('color-theme')) {
+                if (localStorage.getItem('color-theme') === 'light') {
+                    document.documentElement.classList.add('dark');
+                    localStorage.setItem('color-theme', 'dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    localStorage.setItem('color-theme', 'light');
+                }
+            } else {
+                if (document.documentElement.classList.contains('dark')) {
+                    document.documentElement.classList.remove('dark');
+                    localStorage.setItem('color-theme', 'light');
+                } else {
+                    document.documentElement.classList.add('dark');
+                    localStorage.setItem('color-theme', 'dark');
+                }
+            }
+        });
+    </script>
+</body>
+</html>

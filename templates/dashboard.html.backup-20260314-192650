@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+
+{% block title %}True Learning System - 医学考研学习系统{% endblock %}
+
+{% block content %}
+<!-- ===== HERO SECTION WITH GLOWY WAVES ===== -->
+<div class="relative -mx-6 -mt-8 mb-12 overflow-hidden" style="height: 480px;">
+    <canvas id="waveCanvas" class="absolute inset-0 w-full h-full"></canvas>
+
+    <!-- Decorative blurs -->
+    <div class="absolute inset-0 pointer-events-none">
+        <div class="absolute left-1/2 top-0 h-[420px] w-[420px] -translate-x-1/2 rounded-full opacity-[0.035] dark:opacity-[0.06] blur-[140px]" style="background: currentColor;"></div>
+        <div class="absolute bottom-0 right-0 h-[300px] w-[300px] rounded-full opacity-[0.025] dark:opacity-[0.05] blur-[120px]" style="background: currentColor;"></div>
+    </div>
+
+    <div class="absolute inset-0 flex flex-col items-center justify-center text-center px-4 z-10">
+        <div class="inline-flex items-center gap-2 rounded-full border border-gray-300/40 dark:border-gray-700/60 bg-white/60 dark:bg-gray-900/70 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-gray-600 dark:text-gray-300 mb-6 backdrop-blur-sm">
+            <svg class="w-4 h-4" style="color:#8B7355;" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+            </svg>
+            AI 驱动学习系统
+        </div>
+        <h1 class="font-serif text-4xl md:text-6xl font-bold mb-4 text-gray-900 dark:text-white">
+            True Learning
+        </h1>
+        <p class="text-lg md:text-xl text-gray-700 dark:text-gray-300 max-w-2xl">
+            沉浸式医学考研学习体验，实时响应每一次交互
+        </p>
+    </div>
+</div>
+
+<script>
+(function() {
+    const canvas = document.getElementById('waveCanvas');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationId;
+    let time = 0;
+    const mouse = { x: 0, y: 0 };
+    const targetMouse = { x: 0, y: 0 };
+
+    // Theme-aware colors
+    function getThemeColors() {
+        const isDark = document.documentElement.classList.contains('dark');
+
+        if (isDark) {
+            return {
+                bgTop: 'rgba(26, 26, 26, 1)',
+                bgBottom: 'rgba(26, 26, 26, 0.95)',
+                waves: [
+                    { offset: 0, amp: 70, freq: 0.003, color: 'rgba(139, 115, 85, 0.6)', opacity: 0.45 },
+                    { offset: Math.PI/2, amp: 90, freq: 0.0026, color: 'rgba(196, 180, 154, 0.5)', opacity: 0.35 },
+                    { offset: Math.PI, amp: 60, freq: 0.0034, color: 'rgba(229, 229, 229, 0.4)', opacity: 0.3 },
+                    { offset: Math.PI*1.5, amp: 80, freq: 0.0022, color: 'rgba(255, 255, 255, 0.25)', opacity: 0.25 },
+                    { offset: Math.PI*2, amp: 55, freq: 0.004, color: 'rgba(255, 255, 255, 0.2)', opacity: 0.2 }
+                ]
+            };
+        } else {
+            return {
+                bgTop: 'rgba(254, 251, 246, 1)',
+                bgBottom: 'rgba(254, 251, 246, 0.95)',
+                waves: [
+                    { offset: 0, amp: 70, freq: 0.003, color: 'rgba(139, 115, 85, 0.8)', opacity: 0.45 },
+                    { offset: Math.PI/2, amp: 90, freq: 0.0026, color: 'rgba(196, 180, 154, 0.7)', opacity: 0.35 },
+                    { offset: Math.PI, amp: 60, freq: 0.0034, color: 'rgba(45, 45, 45, 0.65)', opacity: 0.3 },
+                    { offset: Math.PI*1.5, amp: 80, freq: 0.0022, color: 'rgba(85, 85, 85, 0.5)', opacity: 0.25 },
+                    { offset: Math.PI*2, amp: 55, freq: 0.004, color: 'rgba(100, 100, 100, 0.4)', opacity: 0.2 }
+                ]
+            };
+        }
+    }
+
+    let colors = getThemeColors();
+
+    // Watch for theme changes
+    const observer = new MutationObserver(() => {
+        colors = getThemeColors();
+    });
+    observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class']
+    });
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const mouseInfluence = prefersReducedMotion ? 10 : 70;
+    const influenceRadius = prefersReducedMotion ? 160 : 320;
+    const smoothing = prefersReducedMotion ? 0.04 : 0.1;
+
+    function resizeCanvas() {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+    }
+
+    function recenterMouse() {
+        const center = { x: canvas.width / 2, y: canvas.height / 2 };
+        mouse.x = center.x;
+        mouse.y = center.y;
+        targetMouse.x = center.x;
+        targetMouse.y = center.y;
+    }
+
+    function handleResize() {
+        resizeCanvas();
+        recenterMouse();
+    }
+
+    function handleMouseMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        targetMouse.x = e.clientX - rect.left;
+        targetMouse.y = e.clientY - rect.top;
+    }
+
+    function handleMouseLeave() {
+        recenterMouse();
+    }
+
+    resizeCanvas();
+    recenterMouse();
+
+    window.addEventListener('resize', handleResize);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseleave', handleMouseLeave);
+
+    function drawWave(wave) {
+        ctx.save();
+        ctx.beginPath();
+
+        for (let x = 0; x <= canvas.width; x += 4) {
+            const dx = x - mouse.x;
+            const dy = canvas.height / 2 - mouse.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const influence = Math.max(0, 1 - distance / influenceRadius);
+            const mouseEffect = influence * mouseInfluence * Math.sin(time * 0.001 + x * 0.01 + wave.offset);
+
+            const y = canvas.height / 2 +
+                Math.sin(x * wave.freq + time * 0.002 + wave.offset) * wave.amp +
+                Math.sin(x * wave.freq * 0.4 + time * 0.003) * (wave.amp * 0.45) +
+                mouseEffect;
+
+            if (x === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = wave.color;
+        ctx.globalAlpha = wave.opacity;
+        ctx.shadowBlur = 35;
+        ctx.shadowColor = wave.color;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function animate() {
+        time += 1;
+
+        mouse.x += (targetMouse.x - mouse.x) * smoothing;
+        mouse.y += (targetMouse.y - mouse.y) * smoothing;
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, colors.bgTop);
+        gradient.addColorStop(1, colors.bgBottom);
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+
+        colors.waves.forEach(drawWave);
+
+        animationId = requestAnimationFrame(animate);
+    }
+
+    animationId = requestAnimationFrame(animate);
+
+    // Cleanup
+    window.addEventListener('beforeunload', () => {
+        window.removeEventListener('resize', handleResize);
+        canvas.removeEventListener('mousemove', handleMouseMove);
+        canvas.removeEventListener('mouseleave', handleMouseLeave);
+        cancelAnimationFrame(animationId);
+        observer.disconnect();
+    });
+})();
+</script>
+
+<!-- ===== FEATURED: 整卷测验入口 ===== -->
+<a href="/quiz/batch/0" class="block mag-card mb-14 group">
+    <div class="md:flex">
+        <div class="md:w-1/2 mag-card-img" style="aspect-ratio:3/2;">
+            <img src="https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&q=80"
+                 alt="整卷测验" class="w-full h-full object-cover">
+        </div>
+        <div class="md:w-1/2 p-8 flex flex-col justify-center">
+            <span class="text-xs uppercase tracking-widest text-gray-400 mb-2">Featured</span>
+            <h2 class="font-serif text-2xl md:text-3xl font-bold mb-3">整卷测验</h2>
+            <p class="text-gray-500 mb-6 leading-relaxed">粘贴学习内容，一次性生成整套试卷。涵盖知识点辨析、题目变式与难度梯度，高效检验学习成果。</p>
+            <span class="btn-primary self-start group-hover:bg-gray-700 transition-colors">开始学习 &rarr;</span>
+        </div>
+    </div>
+</a>
+
+<!-- ===== 学习工具 ===== -->
+<h2 class="section-title">学习工具</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-14">
+    <a href="/quiz/batch/0" class="mag-card group">
+        <div class="mag-card-img">
+            <img src="https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=600&q=80" alt="整卷测验">
+        </div>
+        <div class="p-5">
+            <span class="text-xs text-gray-400">考试模式</span>
+            <h3 class="font-serif text-lg font-semibold mt-1 mb-1">整卷测验</h3>
+            <p class="text-sm text-gray-500">粘贴内容，生成完整试卷，模拟真实考试体验</p>
+        </div>
+    </a>
+    <a href="/upload" class="mag-card group">
+        <div class="mag-card-img">
+            <img src="https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=600&q=80" alt="内容上传">
+        </div>
+        <div class="p-5">
+            <span class="text-xs text-gray-400">资料管理</span>
+            <h3 class="font-serif text-lg font-semibold mt-1 mb-1">内容上传</h3>
+            <p class="text-sm text-gray-500">上传学习资料，AI自动解析并生成知识点</p>
+        </div>
+    </a>
+</div>
+
+<!-- ===== 复习巩固 ===== -->
+<h2 class="section-title">复习巩固</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-14">
+    <a href="/wrong-answers" class="mag-card group">
+        <div class="mag-card-img">
+            <img src="https://images.unsplash.com/photo-1517842645767-c639042777db?w=600&q=80" alt="错题本">
+        </div>
+        <div class="p-5">
+            <span class="text-xs text-gray-400">错题管理</span>
+            <h3 class="font-serif text-lg font-semibold mt-1 mb-1">错题本</h3>
+            <p class="text-sm text-gray-500">复习错题，巩固薄弱环节，避免重复犯错</p>
+        </div>
+    </a>
+    <a href="/knowledge-archive" class="mag-card group">
+        <div class="mag-card-img">
+            <img src="https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=600&q=80" alt="知识点归档">
+        </div>
+        <div class="p-5">
+            <span class="text-xs text-gray-400">知识管理</span>
+            <h3 class="font-serif text-lg font-semibold mt-1 mb-1">知识点归档</h3>
+            <p class="text-sm text-gray-500">全局知识点掌握情况，一目了然</p>
+        </div>
+    </a>
+</div>
+
+<!-- ===== 数据分析 ===== -->
+<h2 class="section-title">数据分析</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-14">
+    <a href="/learning-tracking" class="mag-card group">
+        <div class="mag-card-img">
+            <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&q=80" alt="学习轨迹">
+        </div>
+        <div class="p-5">
+            <span class="text-xs text-gray-400">数据追踪</span>
+            <h3 class="font-serif text-lg font-semibold mt-1 mb-1">学习轨迹</h3>
+            <p class="text-sm text-gray-500">查看学习数据与趋势分析，量化你的进步</p>
+        </div>
+    </a>
+    <a href="/session-review" class="mag-card group">
+        <div class="mag-card-img">
+            <img src="https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=600&q=80" alt="沉浸式复盘">
+        </div>
+        <div class="p-5">
+            <span class="text-xs text-gray-400">深度回顾</span>
+            <h3 class="font-serif text-lg font-semibold mt-1 mb-1">沉浸式复盘</h3>
+            <p class="text-sm text-gray-500">回顾每次学习过程，发现改进空间</p>
+        </div>
+    </a>
+</div>
+
+<!-- ===== 学习数据概览 ===== -->
+<h2 class="section-title">学习数据</h2>
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-14">
+    <div class="stat-card">
+        <div class="text-xs text-gray-400 mb-1">学习次数</div>
+        <div class="text-2xl font-bold text-blue-600">{{ stats.total_sessions }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="text-xs text-gray-400 mb-1">总做题数</div>
+        <div class="text-2xl font-bold text-green-600">{{ stats.total_questions }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="text-xs text-gray-400 mb-1">平均正确率</div>
+        <div class="text-2xl font-bold text-purple-600">{{ stats.avg_accuracy }}%</div>
+    </div>
+    <div class="stat-card">
+        <div class="text-xs text-gray-400 mb-1">学习时长</div>
+        <div class="text-2xl font-bold text-orange-600">
+            {% if stats.total_duration >= 3600 %}
+                {{ (stats.total_duration / 3600) | round(1) }}h
+            {% else %}
+                {{ (stats.total_duration / 60) | round(0) | int }}min
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="text-xs text-gray-400 mb-1">知识点数</div>
+        <div class="text-2xl font-bold text-cyan-600">{{ stats.total_kps }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="text-xs text-gray-400 mb-1">薄弱知识点</div>
+        <div class="text-2xl font-bold text-red-600">{{ stats.weak_kps }}</div>
+        <div class="text-xs text-gray-400">正确率&lt;60%</div>
+    </div>
+</div>
+
+<!-- ===== 最近学习 ===== -->
+<h2 class="section-title">最近学习</h2>
+<div class="mag-card mb-8">
+    <div class="divide-y">
+        {% if recent_sessions %}
+            {% for s in recent_sessions %}
+            <div class="px-6 py-4 hover:bg-gray-50 transition-colors">
+                <div class="flex justify-between items-center mb-1">
+                    <div class="flex items-center space-x-2">
+                        {% if s.session_type == 'exam' %}
+                            <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">整卷</span>
+                        {% else %}
+                            <span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-medium">细节</span>
+                        {% endif %}
+                        <span class="font-medium">{{ s.title }}</span>
+                    </div>
+                    <div class="flex items-center space-x-3 text-sm">
+                        {% if s.accuracy is not none %}
+                            {% set acc_pct = (s.accuracy * 100) | round(1) %}
+                            <span class="font-bold {% if acc_pct >= 80 %}text-green-600{% elif acc_pct >= 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                                {{ acc_pct }}%
+                            </span>
+                        {% endif %}
+                        <span class="text-gray-400 text-xs">
+                            {{ s.started_at.strftime('%m-%d %H:%M') if s.started_at else '' }}
+                        </span>
+                    </div>
+                </div>
+                {% if s.accuracy is not none %}
+                <div class="flex items-center mt-1">
+                    <div class="flex-1 bg-gray-200 rounded-full h-1.5">
+                        {% set acc_pct = (s.accuracy * 100) | round(1) %}
+                        <div class="h-1.5 rounded-full transition-all {% if acc_pct >= 80 %}bg-green-500{% elif acc_pct >= 60 %}bg-yellow-500{% else %}bg-red-500{% endif %}" style="width:{{ acc_pct }}%"></div>
+                    </div>
+                    <span class="text-xs text-gray-400 ml-3">{{ s.correct_count or 0 }}/{{ (s.correct_count or 0) + (s.wrong_count or 0) }}</span>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="px-6 py-10 text-center text-gray-400">
+                还没有学习记录，开始一次整卷测验吧
+            </div>
+        {% endif %}
+    </div>
+    {% if recent_sessions %}
+    <div class="px-6 py-3 border-t text-center">
+        <a href="/learning-tracking" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">查看全部学习记录 &rarr;</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

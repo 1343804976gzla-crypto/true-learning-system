@@ -2,19 +2,27 @@
 骞跺彂娴嬮獙璺敱 - 浼樺寲鐨?0棰樼粌涔?骞跺彂鐢熸垚銆佹壒閲忔壒鏀广€丄I鎬荤粨
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta
-import json
 import random
 from types import SimpleNamespace
 from typing import List
 
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from api_contracts import QuizAnalysisResponse, QuizSessionStartResponse, QuizSessionSubmitResponse
 from models import get_db, QuizSession, ConceptMastery, Chapter, TestRecord, WrongAnswer
 from services.concurrent_quiz import (
     get_concurrent_generator, 
     get_batch_grader,
     get_ai_analyzer
+)
+from utils.data_contracts import (
+    canonicalize_string_list,
+    canonicalize_quiz_answers,
+    canonicalize_quiz_questions,
+    coerce_confidence,
+    normalize_option_map,
 )
 
 router = APIRouter(prefix="/api/quiz-v2", tags=["quiz-v2"])
@@ -76,7 +84,7 @@ def _build_concept_slots(concepts: List[ConceptMastery], target: int = 10) -> Li
     return slots
 
 
-@router.post("/start/{chapter_id}")
+@router.post("/start/{chapter_id}", response_model=QuizSessionStartResponse)
 async def start_concurrent_quiz(
     chapter_id: str,
     db: Session = Depends(get_db)
@@ -176,11 +184,12 @@ async def start_concurrent_quiz(
     
     questions = []
     for i, (quiz, concept) in enumerate(zip(quizzes, concepts)):
+        normalized_options = normalize_option_map(quiz.get("options"))
         test_record = TestRecord(
             concept_id=concept.concept_id,
             test_type="ai_quiz_concurrent",
             ai_question=quiz["question"],
-            ai_options=quiz.get("options", {}),
+            ai_options=normalized_options,
             ai_correct_answer=quiz.get("correct_answer", "A"),
             ai_explanation=quiz.get("explanation", ""),
             score=0
@@ -195,7 +204,7 @@ async def start_concurrent_quiz(
             "concept_id": concept.concept_id,
             "concept_name": concept.name,
             "question": quiz["question"],
-            "options": quiz.get("options", {"A": "", "B": "", "C": "", "D": ""}),
+            "options": normalized_options,
             "correct_answer": quiz.get("correct_answer", "A"),
             "explanation": quiz.get("explanation", ""),
             "key_points": quiz.get("key_points", []),
@@ -203,12 +212,14 @@ async def start_concurrent_quiz(
         })
     
     
+    normalized_questions = canonicalize_quiz_questions(questions)
+
     session = QuizSession(
         session_type="concurrent_practice",
         chapter_id=chapter_id,
-        questions=questions,
+        questions=normalized_questions,
         answers=[],
-        total_questions=len(questions),
+        total_questions=len(normalized_questions),
         correct_count=0,
         score=0,
         started_at=datetime.now()
@@ -219,13 +230,13 @@ async def start_concurrent_quiz(
     
     return {
         "session_id": session.id,
-        "total_questions": len(questions),
-        "questions": questions,
+        "total_questions": len(normalized_questions),
+        "questions": normalized_questions,
         "generation_method": "concurrent"
     }
 
 
-@router.post("/submit/{session_id}")
+@router.post("/submit/{session_id}", response_model=QuizSessionSubmitResponse)
 async def submit_concurrent_quiz(
     session_id: int,
     data: dict,
@@ -252,23 +263,27 @@ async def submit_concurrent_quiz(
     print(f"[鎵归噺鎵规敼] 瀹屾垚")
     
     
+    answer_records = []
     correct_count = 0
     
     for i, (question, answer, graded) in enumerate(zip(session.questions, answers, graded_results)):
         is_correct = graded.get("is_correct", False)
+        normalized_weak_points = canonicalize_string_list(graded.get("weak_points"))
+        normalized_options = normalize_option_map(question.get("options"))
         if is_correct:
             correct_count += 1
         
+        normalized_confidence = coerce_confidence(answer.get("confidence"), default="unsure")
         record = {
             "question_index": i,
             "test_id": question["test_id"],
             "user_answer": answer.get("user_answer"),
             "is_correct": is_correct,
-            "confidence": answer.get("confidence"),
+            "confidence": normalized_confidence,
             "time_spent": answer.get("time_spent", 0),
             "score": graded.get("score", 0),
             "feedback": graded.get("feedback", ""),
-            "weak_points": graded.get("weak_points", [])
+            "weak_points": normalized_weak_points
         }
         answer_records.append(record)
         
@@ -276,10 +291,10 @@ async def submit_concurrent_quiz(
         test = db.query(TestRecord).filter(TestRecord.id == question["test_id"]).first()
         if test:
             test.user_answer = answer.get("user_answer")
-            test.confidence = answer.get("confidence")
+            test.confidence = normalized_confidence
             test.is_correct = is_correct
             test.ai_feedback = graded.get("feedback", "")
-            test.weak_points = graded.get("weak_points", [])
+            test.weak_points = normalized_weak_points
             test.score = graded.get("score", 0)
         
         
@@ -304,12 +319,12 @@ async def submit_concurrent_quiz(
                 wrong = WrongAnswer(
                     concept_id=question["concept_id"],
                     question=question["question"],
-                    options=json.dumps(question.get("options", {})),
+                    options=normalized_options,
                     correct_answer=question["correct_answer"],
                     user_answer=answer.get("user_answer"),
                     explanation=question["explanation"],
                     error_type=graded.get("error_type", "unknown"),
-                    weak_points=graded.get("weak_points", []),
+                    weak_points=normalized_weak_points,
                     review_count=1,
                     last_reviewed=datetime.now(),
                     next_review=date.today() + timedelta(days=1),
@@ -321,6 +336,8 @@ async def submit_concurrent_quiz(
                 existing.review_count += 1
                 existing.last_reviewed = datetime.now()
                 existing.user_answer = answer.get("user_answer")
+                existing.options = normalized_options
+                existing.weak_points = normalized_weak_points
     
     # AI鎬荤粨鍒嗘瀽
     print(f"[AI鍒嗘瀽] 寮€濮嬬敓鎴愮患鍚堝垎鏋愭姤鍛?..")
@@ -333,7 +350,8 @@ async def submit_concurrent_quiz(
     print(f"[AI鍒嗘瀽] 瀹屾垚")
     
     # 鏇存柊浼氳瘽
-    session.answers = answer_records
+    normalized_answers = canonicalize_quiz_answers(answer_records)
+    session.answers = normalized_answers
     session.correct_count = correct_count
     session.score = int(correct_count / len(session.questions) * 100)
     session.completed_at = datetime.now()
@@ -344,12 +362,12 @@ async def submit_concurrent_quiz(
         "score": session.score,
         "correct_count": correct_count,
         "wrong_count": len(session.questions) - correct_count,
-        "answers": answer_records,
+        "answers": normalized_answers,
         "ai_analysis": analysis
     }
 
 
-@router.get("/analysis/{session_id}")
+@router.get("/analysis/{session_id}", response_model=QuizAnalysisResponse)
 async def get_analysis(
     session_id: int,
     db: Session = Depends(get_db)
