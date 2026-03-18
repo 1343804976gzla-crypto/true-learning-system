@@ -38,7 +38,11 @@ from services.agent_memory import (
 from services.agent_prompt_templates import resolve_prompt_template
 from services.agent_tools import execute_agent_tool, resolve_requested_tools
 from services.ai_client import get_ai_client
-from services.data_identity import build_device_scope_aliases, resolve_query_identity
+from services.data_identity import (
+    build_device_scope_aliases,
+    canonicalize_storage_identity,
+    resolve_query_identity,
+)
 from utils.agent_contracts import (
     AgentChatRequest,
     AgentChatResponse,
@@ -183,6 +187,7 @@ def _session_matches_actor(session: AgentSession, user_id: str | None, device_id
 
 
 def _actor_identity_key(user_id: str | None, device_id: str | None) -> str:
+    user_id, device_id = canonicalize_storage_identity(user_id, device_id)
     return f"user:{user_id or ''}|device:{device_id or ''}"
 
 
@@ -575,13 +580,14 @@ def serialize_turn_state(turn_state: AgentTurnState) -> AgentTurnStateItem:
 def create_session(db: Session, payload: AgentSessionCreateRequest) -> AgentSession:
     ensure_agent_schema()
     _require_actor_identity(payload.user_id, payload.device_id)
+    stored_user_id, stored_device_id = canonicalize_storage_identity(payload.user_id, payload.device_id)
     resolved_provider, resolved_model = _resolved_agent_model(payload.provider, payload.model)
     template_seed = payload.prompt_template_id or _default_prompt_template_for_agent_type(payload.agent_type)
     template_id, _ = resolve_prompt_template(payload.agent_type, template_seed)
     session = AgentSession(
         id=uuid4().hex,
-        user_id=payload.user_id,
-        device_id=payload.device_id,
+        user_id=stored_user_id,
+        device_id=stored_device_id,
         title=_default_title(payload.title),
         agent_type=payload.agent_type,
         status="active",
@@ -2382,9 +2388,10 @@ def _resolve_session_for_payload(db: Session, payload: AgentChatRequest) -> Agen
         if session is None:
             raise AgentSessionNotFoundError(AGENT_SESSION_NOT_FOUND)
     else:
+        stored_user_id, stored_device_id = canonicalize_storage_identity(payload.user_id, payload.device_id)
         create_payload = AgentSessionCreateRequest(
-            user_id=payload.user_id,
-            device_id=payload.device_id,
+            user_id=stored_user_id,
+            device_id=stored_device_id,
             title=_title_from_message(payload.message),
             agent_type=payload.agent_type,
             model=payload.model,
@@ -2412,8 +2419,8 @@ def _resolve_session_for_payload(db: Session, payload: AgentChatRequest) -> Agen
                 template_id, _ = resolve_prompt_template(create_payload.agent_type, template_seed)
                 session = AgentSession(
                     id=deterministic_session_id,
-                    user_id=create_payload.user_id,
-                    device_id=create_payload.device_id,
+                    user_id=stored_user_id,
+                    device_id=stored_device_id,
                     title=_default_title(create_payload.title),
                     agent_type=create_payload.agent_type,
                     status="active",

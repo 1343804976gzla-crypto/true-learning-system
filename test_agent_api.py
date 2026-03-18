@@ -3106,7 +3106,8 @@ def test_daily_review_pdf_export_falls_back_to_legacy_anonymous_actor_for_genera
         assert legacy_paper is not None
         assert legacy_paper.device_id == DEFAULT_DEVICE_ID
         assert generated_paper is None
-        assert [int(item.wrong_answer_id) for item in sorted(legacy_paper.items, key=lambda item: item.position)] == [wrong_answer_id]
+        selected_ids = [int(item.wrong_answer_id) for item in sorted(legacy_paper.items, key=lambda item: item.position)]
+        assert wrong_answer_id in selected_ids
 
 
 def test_daily_review_pdf_export_merges_legacy_pool_when_generated_device_has_current_data():

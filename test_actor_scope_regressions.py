@@ -204,6 +204,24 @@ def test_legacy_local_default_data_is_visible_and_daily_logs_deduped(client, ses
     assert daily_logs.json()["logs"][0]["total_sessions"] == 2
 
 
+def test_single_user_mode_collapses_local_device_identity(monkeypatch):
+    from services import data_identity
+
+    monkeypatch.setenv("SINGLE_USER_MODE", "true")
+    data_identity.clear_identity_caches_for_tests()
+
+    aliases = data_identity.build_device_scope_aliases(None, "local-single-user-current")
+    actor_scope = data_identity.resolve_request_actor_scope(device_id="local-single-user-current")
+
+    assert "local-default" in aliases
+    assert "local-single-user-current" in aliases
+    assert actor_scope["paper_device_id"] == "local-default"
+    assert "device:local-default" in actor_scope["actor_keys"]
+
+    monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+    data_identity.clear_identity_caches_for_tests()
+
+
 class _FakeBatchQuizService:
     async def generate_exam_paper(self, uploaded_content: str, num_questions: int):
         return {

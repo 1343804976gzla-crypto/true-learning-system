@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
+import os
 from threading import Lock
 from typing import Any
 
@@ -13,11 +14,14 @@ from models import engine
 DEVICE_ID_HEADER = "x-tls-device-id"
 USER_ID_HEADER = "x-tls-user-id"
 DEFAULT_DEVICE_ID = "local-default"
+SINGLE_USER_MODE_ENV = "SINGLE_USER_MODE"
 
 _current_device_id: ContextVar[str | None] = ContextVar("tls_device_id", default=None)
 _current_user_id: ContextVar[str | None] = ContextVar("tls_user_id", default=None)
 _IDENTITY_SCHEMA_READY = False
 _IDENTITY_SCHEMA_LOCK = Lock()
+_SINGLE_USER_DEVICE_CACHE: tuple[str, ...] | None = None
+_SINGLE_USER_DEVICE_CACHE_LOCK = Lock()
 
 _IDENTITY_TABLES = (
     "daily_uploads",
@@ -29,6 +33,12 @@ _IDENTITY_TABLES = (
     "wrong_answers_v2",
     "wrong_answer_retries",
 )
+_SINGLE_USER_DEVICE_TABLES = _IDENTITY_TABLES + (
+    "daily_review_papers",
+    "daily_learning_logs",
+    "batch_exam_states",
+    "agent_sessions",
+)
 
 
 def _normalize_identity(value: str | None) -> str | None:
@@ -36,7 +46,83 @@ def _normalize_identity(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _is_truthy_env(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_single_user_mode() -> bool:
+    return _is_truthy_env(os.getenv(SINGLE_USER_MODE_ENV))
+
+
+def _build_actor_key_from_resolved(user_id: str | None, device_id: str | None) -> str:
+    if user_id:
+        return f"user:{user_id}|device:{device_id or DEFAULT_DEVICE_ID}"
+    return f"device:{device_id or DEFAULT_DEVICE_ID}"
+
+
+def _load_single_user_device_aliases() -> list[str]:
+    global _SINGLE_USER_DEVICE_CACHE
+    if _SINGLE_USER_DEVICE_CACHE is not None:
+        return list(_SINGLE_USER_DEVICE_CACHE)
+
+    with _SINGLE_USER_DEVICE_CACHE_LOCK:
+        if _SINGLE_USER_DEVICE_CACHE is not None:
+            return list(_SINGLE_USER_DEVICE_CACHE)
+
+        aliases = {DEFAULT_DEVICE_ID}
+        with engine.begin() as connection:
+            for table_name in dict.fromkeys(_SINGLE_USER_DEVICE_TABLES):
+                existing_columns = {
+                    str(row[1]).lower()
+                    for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+                }
+                if "device_id" not in existing_columns:
+                    continue
+
+                rows = connection.exec_driver_sql(
+                    f"""
+                    SELECT DISTINCT device_id
+                    FROM {table_name}
+                    WHERE device_id IS NOT NULL AND TRIM(device_id) <> ''
+                    """
+                ).fetchall()
+                for row in rows:
+                    device_id = _normalize_identity(row[0])
+                    if not device_id:
+                        continue
+                    if device_id == DEFAULT_DEVICE_ID or device_id.startswith("local-"):
+                        aliases.add(device_id)
+
+        ordered = [DEFAULT_DEVICE_ID] + sorted(alias for alias in aliases if alias != DEFAULT_DEVICE_ID)
+        _SINGLE_USER_DEVICE_CACHE = tuple(ordered)
+        return list(_SINGLE_USER_DEVICE_CACHE)
+
+
+def _single_user_device_aliases(device_id: str | None = None) -> list[str]:
+    aliases = _load_single_user_device_aliases()
+    normalized_device = _normalize_identity(device_id)
+    if normalized_device and (normalized_device == DEFAULT_DEVICE_ID or normalized_device.startswith("local-")):
+        aliases.append(normalized_device)
+    return list(dict.fromkeys(aliases))
+
+
+def clear_identity_caches_for_tests() -> None:
+    global _SINGLE_USER_DEVICE_CACHE
+    _SINGLE_USER_DEVICE_CACHE = None
+
+
+def canonicalize_storage_identity(user_id: str | None = None, device_id: str | None = None) -> tuple[str | None, str | None]:
+    normalized_user = _normalize_identity(user_id)
+    normalized_device = _normalize_identity(device_id)
+    if is_single_user_mode():
+        return None, DEFAULT_DEVICE_ID
+    return normalized_user, normalized_device
+
+
 def resolve_actor_identity(user_id: str | None = None, device_id: str | None = None) -> tuple[str | None, str]:
+    if is_single_user_mode():
+        return None, DEFAULT_DEVICE_ID
+
     normalized_user = _normalize_identity(user_id)
     normalized_device = _normalize_identity(device_id)
     if normalized_user and (not normalized_device or normalized_device == DEFAULT_DEVICE_ID):
@@ -48,14 +134,17 @@ def resolve_actor_identity(user_id: str | None = None, device_id: str | None = N
 
 def build_actor_key(user_id: str | None = None, device_id: str | None = None) -> str:
     normalized_user, normalized_device = resolve_actor_identity(user_id, device_id)
-    if normalized_user:
-        return f"user:{normalized_user}|device:{normalized_device}"
-    return f"device:{normalized_device}"
+    return _build_actor_key_from_resolved(normalized_user, normalized_device)
 
 
 def build_actor_key_aliases(user_id: str | None = None, device_id: str | None = None) -> list[str]:
     normalized_user = _normalize_identity(user_id)
     normalized_device = _normalize_identity(device_id)
+    if is_single_user_mode():
+        return [
+            _build_actor_key_from_resolved(None, alias_device_id)
+            for alias_device_id in _single_user_device_aliases(normalized_device)
+        ]
     aliases = [build_actor_key(normalized_user, normalized_device)]
     if normalized_user and normalized_device in {None, DEFAULT_DEVICE_ID, f"user:{normalized_user}"}:
         legacy_key = f"user:{normalized_user}|device:{DEFAULT_DEVICE_ID}"
@@ -71,6 +160,8 @@ def build_actor_key_aliases(user_id: str | None = None, device_id: str | None = 
 def build_device_scope_aliases(user_id: str | None = None, device_id: str | None = None) -> list[str]:
     normalized_user = _normalize_identity(user_id)
     normalized_device = _normalize_identity(device_id)
+    if is_single_user_mode():
+        return _single_user_device_aliases(normalized_device)
     aliases: list[str] = []
 
     if normalized_user:
@@ -88,6 +179,9 @@ def build_device_scope_aliases(user_id: str | None = None, device_id: str | None
 
 
 def resolve_query_identity(user_id: str | None = None, device_id: str | None = None) -> tuple[str | None, str | None]:
+    if is_single_user_mode():
+        return None, DEFAULT_DEVICE_ID
+
     normalized_user = _normalize_identity(user_id)
     normalized_device = _normalize_identity(device_id)
     if normalized_user and normalized_device in {DEFAULT_DEVICE_ID, f"user:{normalized_user}"}:
@@ -128,14 +222,20 @@ def resolve_request_actor_scope(
 def resolve_request_identity(request: Request) -> tuple[str | None, str | None]:
     user_id = _normalize_identity(request.headers.get(USER_ID_HEADER))
     device_id = _normalize_identity(request.headers.get(DEVICE_ID_HEADER))
+    if is_single_user_mode():
+        return None, DEFAULT_DEVICE_ID
     if not user_id and not device_id:
         device_id = DEFAULT_DEVICE_ID
     return user_id, device_id
 
 
 def set_request_identity(*, user_id: str | None, device_id: str | None) -> tuple[Any, Any]:
-    user_token = _current_user_id.set(_normalize_identity(user_id))
-    device_token = _current_device_id.set(_normalize_identity(device_id) or (DEFAULT_DEVICE_ID if not user_id else None))
+    normalized_user = _normalize_identity(user_id)
+    normalized_device = _normalize_identity(device_id)
+    if is_single_user_mode():
+        normalized_user, normalized_device = canonicalize_storage_identity(normalized_user, normalized_device)
+    user_token = _current_user_id.set(normalized_user)
+    device_token = _current_device_id.set(normalized_device or (DEFAULT_DEVICE_ID if not normalized_user else None))
     return user_token, device_token
 
 
