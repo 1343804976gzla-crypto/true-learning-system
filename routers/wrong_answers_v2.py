@@ -588,7 +588,29 @@ def _query_daily_review_paper(
         query = query.filter(DailyReviewPaper.actor_key.in_(actor_keys))
     else:
         query = query.filter(DailyReviewPaper.actor_key == actor_key)
-    return query.order_by(desc(DailyReviewPaper.updated_at), desc(DailyReviewPaper.id))
+    return query.order_by(
+        desc(case((DailyReviewPaper.actor_key == actor_key, 1), else_=0)),
+        desc(DailyReviewPaper.updated_at),
+        desc(DailyReviewPaper.id),
+    )
+
+
+def _count_active_daily_review_items(
+    db: Session,
+    *,
+    actor: Dict[str, Any],
+) -> int:
+    return (
+        _apply_learning_actor_scope(
+            db.query(WrongAnswerV2),
+            WrongAnswerV2,
+            user_id=actor["scope_user_id"],
+            device_id=actor["scope_device_id"],
+            device_ids=actor.get("scope_device_ids"),
+        )
+        .filter(WrongAnswerV2.mastery_status == "active")
+        .count()
+    )
 
 
 def _build_daily_review_candidates(
@@ -697,28 +719,23 @@ def _export_daily_review_pdf_for_actor(
     actor: Dict[str, Any],
     force_regenerate: bool,
 ) -> bytes:
+    paper_lookup_keys = [
+        str(item).strip()
+        for item in (actor.get("paper_lookup_keys") or [])
+        if str(item or "").strip()
+    ]
     paper = _query_daily_review_paper(
         db,
         paper_date=target_date,
         actor_key=actor["actor_key"],
-        actor_keys=actor.get("actor_keys"),
+        actor_keys=paper_lookup_keys or actor.get("actor_keys"),
     ).first()
 
     if paper and not force_regenerate:
         paper_items = sorted(paper.items, key=lambda item: item.position)
         return _build_daily_review_pdf(target_date, paper_items, paper.config or {})
 
-    active_count = (
-        _apply_learning_actor_scope(
-            db.query(WrongAnswerV2),
-            WrongAnswerV2,
-            user_id=actor["scope_user_id"],
-            device_id=actor["scope_device_id"],
-            device_ids=actor.get("scope_device_ids"),
-        )
-        .filter(WrongAnswerV2.mastery_status == "active")
-        .count()
-    )
+    active_count = _count_active_daily_review_items(db, actor=actor)
     if active_count == 0:
         raise HTTPException(status_code=404, detail="褰撳墠娌℃湁 active 鐘舵€佺殑閿欓锛屾棤娉曞鍑烘瘡鏃ュ涔犲嵎")
 
@@ -2312,17 +2329,25 @@ async def export_daily_review_pdf(
 ) -> StreamingResponse:
     target_date = paper_date or date.today()
     try_legacy_anonymous = _should_try_legacy_anonymous_daily_review_actor(user_id=user_id, device_id=device_id)
-    actors_to_try = [
-        _resolve_daily_review_actor(
+    if try_legacy_anonymous:
+        current_actor = _resolve_daily_review_actor(
             user_id=user_id,
             device_id=device_id,
-            include_scope_aliases=not try_legacy_anonymous,
+            include_scope_aliases=False,
         )
-    ]
-    if try_legacy_anonymous:
-        legacy_actor = _resolve_daily_review_actor(device_id=DEFAULT_DEVICE_ID)
-        if legacy_actor["actor_key"] != actors_to_try[0]["actor_key"]:
-            actors_to_try.append(legacy_actor)
+        current_active_count = _count_active_daily_review_items(db, actor=current_actor)
+        if current_active_count > 0:
+            merged_actor = _resolve_daily_review_actor(
+                user_id=user_id,
+                device_id=device_id,
+                include_scope_aliases=True,
+            )
+            merged_actor["paper_lookup_keys"] = [current_actor["actor_key"]]
+            actors_to_try = [merged_actor]
+        else:
+            actors_to_try = [_resolve_daily_review_actor(device_id=DEFAULT_DEVICE_ID)]
+    else:
+        actors_to_try = [_resolve_daily_review_actor(user_id=user_id, device_id=device_id)]
 
     last_not_found: Optional[HTTPException] = None
     for actor in actors_to_try:

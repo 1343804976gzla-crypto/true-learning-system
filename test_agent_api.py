@@ -3109,6 +3109,65 @@ def test_daily_review_pdf_export_falls_back_to_legacy_anonymous_actor_for_genera
         assert [int(item.wrong_answer_id) for item in sorted(legacy_paper.items, key=lambda item: item.position)] == [wrong_answer_id]
 
 
+def test_daily_review_pdf_export_merges_legacy_pool_when_generated_device_has_current_data():
+    from learning_tracking_models import DailyReviewPaper
+    from models import SessionLocal
+    from services.data_identity import DEFAULT_DEVICE_ID, build_actor_key
+
+    client = TestClient(app)
+    generated_device_id = f"local-{uuid4().hex}"
+    target_date = date.today() + timedelta(days=38)
+    current_wrong_answer_id = _seed_scoped_wrong_answer(
+        device_id=generated_device_id,
+        question_text="Generated device current PDF export question",
+        key_point="pdf-generated-current-kp",
+        next_review_offset_days=0,
+    )
+    legacy_wrong_answer_ids = [
+        _seed_scoped_wrong_answer(
+            device_id=DEFAULT_DEVICE_ID,
+            question_text=f"Legacy anonymous pooled PDF export question {index}",
+            key_point=f"pdf-legacy-merge-kp-{index}",
+            next_review_offset_days=0,
+        )
+        for index in range(1, 3)
+    ]
+
+    response = client.get(
+        "/api/wrong-answers/daily-review-pdf",
+        params={"paper_date": target_date.isoformat()},
+        headers={"X-TLS-Device-ID": generated_device_id},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+
+    with SessionLocal() as db:
+        current_paper = (
+            db.query(DailyReviewPaper)
+            .filter(
+                DailyReviewPaper.paper_date == target_date,
+                DailyReviewPaper.actor_key == build_actor_key(None, generated_device_id),
+            )
+            .first()
+        )
+        legacy_paper = (
+            db.query(DailyReviewPaper)
+            .filter(
+                DailyReviewPaper.paper_date == target_date,
+                DailyReviewPaper.actor_key == build_actor_key(None, DEFAULT_DEVICE_ID),
+            )
+            .first()
+        )
+
+        assert current_paper is not None
+        assert current_paper.device_id == generated_device_id
+        selected_ids = [int(item.wrong_answer_id) for item in sorted(current_paper.items, key=lambda item: item.position)]
+        assert current_wrong_answer_id in selected_ids
+        assert any(wrong_answer_id in selected_ids for wrong_answer_id in legacy_wrong_answer_ids)
+        assert legacy_paper is None
+
+
 def test_daily_review_pdf_export_reuses_legacy_user_only_paper_actor_key():
     from learning_tracking_models import DailyReviewPaper, DailyReviewPaperItem
     from models import SessionLocal
