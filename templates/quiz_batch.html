@@ -575,6 +575,544 @@
         color: #b45309;
     }
 
+    .exam-insight-paper {
+        position: relative;
+        overflow: hidden;
+        border-radius: 2rem;
+        border: 1px solid rgba(191, 219, 254, 0.36);
+        background:
+            linear-gradient(180deg, rgba(255, 252, 245, 0.98), rgba(248, 250, 252, 0.96)),
+            radial-gradient(circle at top left, rgba(251, 191, 36, 0.13), transparent 36%),
+            radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 40%);
+        box-shadow:
+            24px 24px 46px rgba(148, 163, 184, 0.2),
+            -18px -18px 34px rgba(255, 255, 255, 0.78),
+            inset 0 1px 0 rgba(255, 255, 255, 0.82);
+    }
+
+    .exam-insight-paper::before,
+    .exam-insight-paper::after {
+        content: "";
+        position: absolute;
+        pointer-events: none;
+    }
+
+    .exam-insight-paper::before {
+        inset: 1.35rem;
+        border-radius: 1.6rem;
+        border: 1px solid rgba(255, 255, 255, 0.48);
+        opacity: 0.72;
+    }
+
+    .exam-insight-paper::after {
+        inset: 0;
+        background-image:
+            linear-gradient(120deg, rgba(255,255,255,0.2) 0%, transparent 30%),
+            radial-gradient(circle at 20% 20%, rgba(255,255,255,0.3) 0 1px, transparent 1px),
+            radial-gradient(circle at 80% 30%, rgba(148,163,184,0.08) 0 1px, transparent 1px);
+        background-size: auto, 16px 16px, 18px 18px;
+        opacity: 0.38;
+    }
+
+    .exam-insight-paper__inner {
+        position: relative;
+        z-index: 1;
+        padding: clamp(1.4rem, 3vw, 2rem);
+    }
+
+    .exam-insight-topline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.9rem 1.2rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .exam-insight-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.4rem 0.85rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.72);
+        color: #92400e;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.72), 0 8px 18px rgba(148, 163, 184, 0.12);
+    }
+
+    .exam-insight-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
+        gap: 1.2rem;
+        align-items: stretch;
+    }
+
+    .exam-insight-copy h3 {
+        margin: 0;
+        font-family: 'Noto Serif SC', Georgia, serif;
+        font-size: clamp(1.75rem, 3vw, 2.35rem);
+        line-height: 1.08;
+        color: #0f172a;
+        letter-spacing: -0.04em;
+    }
+
+    .exam-insight-copy p {
+        margin: 0.95rem 0 0;
+        max-width: 38rem;
+        color: #475569;
+        line-height: 1.8;
+        font-size: 0.97rem;
+    }
+
+    .exam-insight-note {
+        margin-top: 1rem;
+        padding-left: 0.95rem;
+        border-left: 3px solid rgba(217, 119, 6, 0.32);
+        color: #7c2d12;
+        font-size: 0.88rem;
+        line-height: 1.7;
+    }
+
+    .exam-insight-scorebox {
+        display: grid;
+        gap: 0.9rem;
+        padding: 1.1rem;
+        border-radius: 1.45rem;
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.84), rgba(241,245,249,0.7)),
+            radial-gradient(circle at top, rgba(59,130,246,0.12), transparent 72%);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.72), 0 18px 30px rgba(148, 163, 184, 0.12);
+    }
+
+    .exam-insight-scorebox__label {
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: #64748b;
+        text-transform: uppercase;
+    }
+
+    .exam-insight-scorebox__value {
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem;
+        font-family: 'Noto Serif SC', Georgia, serif;
+        font-size: clamp(2.25rem, 4vw, 3rem);
+        line-height: 1;
+        color: #0f172a;
+    }
+
+    .exam-insight-scorebox__value small {
+        font-size: 0.95rem;
+        color: #64748b;
+        font-family: "Segoe UI", sans-serif;
+    }
+
+    .exam-insight-scoregrid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.7rem;
+    }
+
+    .exam-insight-stat {
+        padding: 0.8rem 0.9rem;
+        border-radius: 1rem;
+        background: rgba(255, 255, 255, 0.68);
+        border: 1px solid rgba(226, 232, 240, 0.8);
+    }
+
+    .exam-insight-stat__value {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: #0f172a;
+    }
+
+    .exam-insight-stat__label {
+        margin-top: 0.2rem;
+        font-size: 0.78rem;
+        color: #64748b;
+    }
+
+    .exam-insight-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 1.3rem;
+    }
+
+    .exam-insight-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-height: 2.5rem;
+        padding: 0.7rem 0.9rem;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.72);
+        border: 1px solid rgba(191, 219, 254, 0.46);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.72), 0 10px 18px rgba(148, 163, 184, 0.08);
+    }
+
+    .exam-insight-chip__label {
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+
+    .exam-insight-chip__value {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #1e293b;
+    }
+
+    .exam-insight-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(18rem, 0.95fr);
+        gap: 1.2rem;
+        margin-top: 1.4rem;
+    }
+
+    .exam-insight-panel {
+        padding: 1rem;
+        border-radius: 1.4rem;
+        background: rgba(255,255,255,0.7);
+        border: 1px solid rgba(226, 232, 240, 0.86);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.75), 0 12px 24px rgba(148, 163, 184, 0.08);
+    }
+
+    .exam-insight-panel__title {
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+
+    .exam-insight-panel__body {
+        margin-top: 0.7rem;
+        color: #334155;
+        font-size: 0.94rem;
+        line-height: 1.75;
+    }
+
+    .exam-insight-panel__body strong {
+        color: #0f172a;
+    }
+
+    .exam-insight-steps {
+        display: grid;
+        gap: 0.7rem;
+        margin-top: 0.7rem;
+    }
+
+    .exam-insight-step {
+        display: grid;
+        grid-template-columns: 2rem minmax(0, 1fr);
+        gap: 0.75rem;
+        align-items: start;
+    }
+
+    .exam-insight-step__index {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #fef3c7, #fde68a);
+        color: #92400e;
+        font-size: 0.82rem;
+        font-weight: 800;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.72);
+    }
+
+    .exam-insight-step__copy {
+        padding-top: 0.1rem;
+        color: #475569;
+        font-size: 0.9rem;
+        line-height: 1.7;
+    }
+
+    .exam-quadrant-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+        margin-top: 1.6rem;
+    }
+
+    .exam-quadrant-card {
+        --quadrant-accent: #475569;
+        --quadrant-surface: rgba(255, 255, 255, 0.76);
+        --quadrant-border: rgba(226, 232, 240, 0.92);
+        --quadrant-ink: #0f172a;
+        --quadrant-copy: #475569;
+        padding: 1rem;
+        border-radius: 1.5rem;
+        background: var(--quadrant-surface);
+        border: 1px solid var(--quadrant-border);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.72), 0 10px 22px rgba(148, 163, 184, 0.08);
+    }
+
+    .exam-quadrant-card--danger {
+        --quadrant-accent: #dc2626;
+        --quadrant-surface: linear-gradient(180deg, rgba(254,242,242,0.96), rgba(255,255,255,0.78));
+        --quadrant-border: rgba(252, 165, 165, 0.58);
+        --quadrant-ink: #991b1b;
+        --quadrant-copy: #7f1d1d;
+    }
+
+    .exam-quadrant-card--sticky {
+        --quadrant-accent: #d97706;
+        --quadrant-surface: linear-gradient(180deg, rgba(255,251,235,0.98), rgba(255,255,255,0.8));
+        --quadrant-border: rgba(253, 186, 116, 0.6);
+        --quadrant-ink: #92400e;
+        --quadrant-copy: #9a3412;
+    }
+
+    .exam-quadrant-card--gap {
+        --quadrant-accent: #7c3aed;
+        --quadrant-surface: linear-gradient(180deg, rgba(245,243,255,0.98), rgba(255,255,255,0.8));
+        --quadrant-border: rgba(196, 181, 253, 0.72);
+        --quadrant-ink: #5b21b6;
+        --quadrant-copy: #6d28d9;
+    }
+
+    .exam-quadrant-card--lucky {
+        --quadrant-accent: #0f766e;
+        --quadrant-surface: linear-gradient(180deg, rgba(240,253,250,0.98), rgba(255,255,255,0.8));
+        --quadrant-border: rgba(153, 246, 228, 0.76);
+        --quadrant-ink: #115e59;
+        --quadrant-copy: #0f766e;
+    }
+
+    .exam-quadrant-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
+    }
+
+    .exam-quadrant-title {
+        font-family: 'Noto Serif SC', Georgia, serif;
+        font-size: 1.15rem;
+        line-height: 1.2;
+        color: var(--quadrant-ink);
+    }
+
+    .exam-quadrant-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 2rem;
+        height: 2rem;
+        padding: 0 0.65rem;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.75);
+        color: var(--quadrant-accent);
+        font-size: 0.82rem;
+        font-weight: 800;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.72);
+    }
+
+    .exam-quadrant-desc {
+        margin-top: 0.35rem;
+        color: var(--quadrant-copy);
+        font-size: 0.84rem;
+        line-height: 1.65;
+    }
+
+    .exam-quadrant-list {
+        display: grid;
+        gap: 0.7rem;
+        margin-top: 0.9rem;
+    }
+
+    .exam-quadrant-item {
+        padding: 0.8rem 0.9rem;
+        border-radius: 1rem;
+        background: rgba(255,255,255,0.72);
+        border: 1px solid rgba(255,255,255,0.88);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.76);
+    }
+
+    .exam-quadrant-item__name {
+        color: var(--quadrant-ink);
+        font-weight: 700;
+        line-height: 1.55;
+    }
+
+    .exam-quadrant-item__meta {
+        margin-top: 0.35rem;
+        color: #64748b;
+        font-size: 0.78rem;
+        line-height: 1.55;
+    }
+
+    .exam-quadrant-empty {
+        margin-top: 0.9rem;
+        padding: 0.9rem 1rem;
+        border-radius: 1rem;
+        background: rgba(255,255,255,0.62);
+        color: #94a3b8;
+        font-size: 0.84rem;
+        line-height: 1.6;
+    }
+
+    .exam-focus-shell {
+        position: relative;
+        overflow: hidden;
+        border-radius: 1.8rem;
+        border: 1px solid rgba(191, 219, 254, 0.36);
+        background:
+            linear-gradient(180deg, rgba(248,250,252,0.98), rgba(241,245,249,0.95)),
+            radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 32%);
+        box-shadow:
+            18px 18px 34px rgba(148, 163, 184, 0.16),
+            -14px -14px 28px rgba(255,255,255,0.72),
+            inset 0 1px 0 rgba(255,255,255,0.82);
+    }
+
+    .exam-focus-shell__inner {
+        position: relative;
+        z-index: 1;
+        padding: clamp(1.25rem, 2.5vw, 1.8rem);
+    }
+
+    .exam-focus-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+        margin-top: 1.2rem;
+    }
+
+    .exam-focus-card {
+        padding: 1rem;
+        border-radius: 1.35rem;
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.82), rgba(248,250,252,0.76)),
+            radial-gradient(circle at top, rgba(59,130,246,0.08), transparent 70%);
+        border: 1px solid rgba(226, 232, 240, 0.92);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.82), 0 12px 22px rgba(148, 163, 184, 0.08);
+    }
+
+    .exam-focus-card__topline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.55rem;
+        margin-bottom: 0.7rem;
+    }
+
+    .exam-focus-card__badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.35rem 0.72rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    .exam-focus-card__badge--danger {
+        background: rgba(254,226,226,0.96);
+        color: #b91c1c;
+    }
+
+    .exam-focus-card__badge--sticky {
+        background: rgba(254,243,199,0.98);
+        color: #b45309;
+    }
+
+    .exam-focus-card__badge--gap {
+        background: rgba(237,233,254,0.98);
+        color: #7c3aed;
+    }
+
+    .exam-focus-card__badge--lucky {
+        background: rgba(204,251,241,0.98);
+        color: #0f766e;
+    }
+
+    .exam-focus-card__title {
+        font-family: 'Noto Serif SC', Georgia, serif;
+        font-size: 1.22rem;
+        line-height: 1.2;
+        color: #0f172a;
+    }
+
+    .exam-focus-card__body {
+        margin-top: 0.7rem;
+        color: #475569;
+        font-size: 0.9rem;
+        line-height: 1.75;
+    }
+
+    .exam-focus-card__body strong {
+        color: #0f172a;
+    }
+
+    .exam-focus-card__meta {
+        display: grid;
+        gap: 0.45rem;
+        margin-top: 0.85rem;
+        padding-top: 0.85rem;
+        border-top: 1px dashed rgba(148, 163, 184, 0.28);
+        color: #475569;
+        font-size: 0.84rem;
+        line-height: 1.7;
+    }
+
+    .exam-focus-card__meta strong {
+        color: #1e293b;
+    }
+
+    .exam-focus-card__button {
+        margin-top: 1rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6rem;
+        width: 100%;
+        min-height: 3rem;
+        padding: 0.8rem 1rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(37, 99, 235, 0.18);
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        color: #f8fafc;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        box-shadow: 0 16px 26px rgba(15, 23, 42, 0.18);
+        transition: transform 160ms ease, box-shadow 180ms ease, background 180ms ease;
+    }
+
+    .exam-focus-card__button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 18px 30px rgba(15, 23, 42, 0.22);
+    }
+
+    .exam-focus-card__button.is-copied {
+        background: linear-gradient(135deg, #166534 0%, #15803d 100%);
+    }
+
+    .exam-focus-empty {
+        margin-top: 1rem;
+        padding: 1rem 1.05rem;
+        border-radius: 1.1rem;
+        background: rgba(255,255,255,0.72);
+        border: 1px dashed rgba(148, 163, 184, 0.36);
+        color: #64748b;
+        font-size: 0.92rem;
+        line-height: 1.75;
+    }
+
     @keyframes tls-spin {
         to {
             transform: rotate(360deg);
@@ -633,6 +1171,17 @@
         .confidence-pill {
             flex: 1 1 calc(50% - 0.35rem);
             min-width: 0;
+        }
+
+        .exam-insight-head,
+        .exam-insight-grid,
+        .exam-quadrant-grid,
+        .exam-focus-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .exam-insight-scoregrid {
+            grid-template-columns: 1fr;
         }
     }
 
@@ -913,33 +1462,119 @@
 
 <!-- 结果区域 -->
 <div id="resultArea" class="hidden space-y-6">
-    <!-- 成绩卡片 -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="text-center">
-            <div class="text-6xl mb-4" id="scoreEmoji"></div>
-            <div class="text-5xl font-bold text-blue-600 mb-2" id="scoreDisplay">0</div>
-            <div class="text-gray-500">分</div>
-            <div class="mt-4 flex justify-center space-x-6">
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-green-600" id="correctCount">0</div>
-                    <div class="text-sm text-gray-500">正确题数</div>
+    <div class="exam-insight-paper">
+        <div class="exam-insight-paper__inner">
+            <div class="exam-insight-topline">
+                <span class="exam-insight-eyebrow">Learning Scan · 本次整卷</span>
+                <div class="text-sm text-slate-500">先看透视，再决定要不要马上做细节强化</div>
+            </div>
+            <div class="exam-insight-head">
+                <div class="exam-insight-copy">
+                    <h3>交卷后的第一件事不是继续刷题，而是看清这次到底卡在了哪里。</h3>
+                    <p id="insightLead">
+                        本页会先给你分数和学情透视，再按本次整卷结果锁定需要追问的核心概念。
+                        你可以逐个复制苏格拉底文稿，去外部大模型做单点口头拷问。
+                    </p>
+                    <div id="insightNote" class="exam-insight-note">
+                        先把你的判断链说清，再做细节强化，效率会更高。
+                    </div>
+                    <div id="insightMeta" class="exam-insight-meta"></div>
                 </div>
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-red-600" id="wrongCount">0</div>
-                    <div class="text-sm text-gray-500">错误题数</div>
-                </div>
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-purple-600" id="accuracy">0%</div>
-                    <div class="text-sm text-gray-500">正确率</div>
+                <div class="exam-insight-scorebox">
+                    <div class="exam-insight-scorebox__label">本次得分摘要</div>
+                    <div class="exam-insight-scorebox__value">
+                        <span id="scoreEmoji">📚</span>
+                        <span><span id="scoreDisplay">0</span><small> 分</small></span>
+                    </div>
+                    <div class="exam-insight-scoregrid">
+                        <div class="exam-insight-stat">
+                            <div class="exam-insight-stat__value text-green-600" id="correctCount">0</div>
+                            <div class="exam-insight-stat__label">正确题数</div>
+                        </div>
+                        <div class="exam-insight-stat">
+                            <div class="exam-insight-stat__value text-red-600" id="wrongCount">0</div>
+                            <div class="exam-insight-stat__label">错误题数</div>
+                        </div>
+                        <div class="exam-insight-stat">
+                            <div class="exam-insight-stat__value text-blue-600" id="accuracy">0%</div>
+                            <div class="exam-insight-stat__label">正确率</div>
+                        </div>
+                    </div>
                 </div>
             </div>
+            <div class="exam-insight-grid">
+                <div class="exam-insight-panel">
+                    <div class="exam-insight-panel__title">总引导</div>
+                    <div id="insightSummary" class="exam-insight-panel__body">
+                        这次整卷会先按高危盲区、概念粘连区、知识缺口区、侥幸命中区四个维度做透视。
+                    </div>
+                </div>
+                <div class="exam-insight-panel">
+                    <div class="exam-insight-panel__title">推荐动作</div>
+                    <div id="insightActionPlan" class="exam-insight-steps">
+                        <div class="exam-insight-step">
+                            <span class="exam-insight-step__index">1</span>
+                            <div class="exam-insight-step__copy">先看四象限，确认这次最危险的误判类型。</div>
+                        </div>
+                        <div class="exam-insight-step">
+                            <span class="exam-insight-step__index">2</span>
+                            <div class="exam-insight-step__copy">逐个复制苏格拉底文稿，去外部大模型做单点追问。</div>
+                        </div>
+                        <div class="exam-insight-step">
+                            <span class="exam-insight-step__index">3</span>
+                            <div class="exam-insight-step__copy">最后再回来做靶向强化，不要直接硬切到下一轮刷题。</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="insightQuadrants" class="exam-quadrant-grid"></div>
         </div>
     </div>
 
     <!-- 难度分析 -->
     <div class="bg-white rounded-lg shadow p-6">
-        <h3 class="font-bold text-lg mb-4"> 难度分析</h3>
+        <h3 class="font-bold text-lg mb-4">本次结果摘要</h3>
         <div id="difficultyAnalysis" class="space-y-2"></div>
+    </div>
+
+    <!-- 知识点分析 -->
+    <div id="knowledgeAnalysis" class="exam-focus-shell">
+        <div class="exam-focus-shell__inner">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h3 class="font-bold text-xl text-slate-900">重点追问对象</h3>
+                    <p class="mt-2 text-sm leading-7 text-slate-600">
+                        下面每个按钮都会复制一个只针对单个知识点的苏格拉底文稿。
+                        外部大模型需要先连续追问你，确认 90% 以上的薄弱点后，才允许进入纠错和总结。
+                    </p>
+                </div>
+            </div>
+            <div id="focusPromptEmpty" class="exam-focus-empty hidden">
+                本次整卷没有明显的重点追问对象，先看答案解析或直接进入细节强化。
+            </div>
+            <div id="focusPromptList" class="exam-focus-grid"></div>
+            <div class="mt-6 rounded-2xl border border-amber-200 bg-amber-50/90 p-4 text-sm leading-7 text-amber-900">
+                <strong>使用方式：</strong>复制单个知识点文稿到外部大模型后，不要让它直接讲答案，先让它按文稿顺序追问你。
+            </div>
+            <div class="mt-6">
+                <h4 class="text-sm font-bold tracking-wide text-slate-500 uppercase">本次整卷知识点总览</h4>
+                <div id="knowledgeList" class="mt-4 space-y-3"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 细节强化入口 -->
+    <div class="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg shadow p-6 text-white">
+        <div class="flex justify-between items-center">
+            <div>
+                <h3 class="font-bold text-xl">稍后做靶向强化</h3>
+                <p class="text-blue-100 mt-1">先把思路讲清，再进入站内细节强化会更稳</p>
+            </div>
+            <button type="button" onclick="goToDetailPractice()" class="bg-white text-blue-600 px-6 py-3 rounded-lg font-bold hover:bg-blue-50 transition">
+                进入细节强化
+            </button>
+        </div>
     </div>
 
     <!-- 答案解析 -->
@@ -950,46 +1585,18 @@
         <div id="answerDetails" class="divide-y"></div>
     </div>
 
-    <!-- 知识点分析 -->
-    <div id="knowledgeAnalysis" class="bg-white rounded-lg shadow p-6">
-        <h3 class="font-bold text-lg mb-4">知识点掌握分析</h3>
-        <div id="knowledgeList" class="space-y-3"></div>
-
-        <div class="mt-6 p-4 bg-yellow-50 rounded-lg">
-            <h4 class="font-medium text-yellow-800 mb-2">下一步建议</h4>
-            <ul class="text-sm text-yellow-700 space-y-1">
-                <li>• 点击下方“细节强化”进入薄弱知识点练习</li>
-                <li>• 针对错题涉及的知识点进行靶向训练</li>
-                <li>• 掌握后再进行下一章的整卷测试</li>
-            </ul>
-        </div>
-    </div>
-
     <!-- 复制做题报告 -->
     <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex justify-between items-center">
+        <div class="flex flex-wrap justify-between items-center gap-4">
             <div>
-                <h3 class="font-bold text-xl">做题报告</h3>
-                <p class="text-gray-500 mt-1">复制本次测验的完整记录，方便复盘分析</p>
+                <h3 class="font-bold text-xl">整卷原始报告</h3>
+                <p class="text-gray-500 mt-1">次级导出项。复制完整作答记录，方便你自己归档复盘。</p>
             </div>
             <button type="button" onclick="copyExamReport()" id="copyReportBtn" class="bg-indigo-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-indigo-600 transition flex items-center">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
                 </svg>
-                <span id="copyBtnText">一键复制报告</span>
-            </button>
-        </div>
-    </div>
-
-    <!-- 细节强化入口 -->
-    <div class="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg shadow p-6 text-white">
-        <div class="flex justify-between items-center">
-            <div>
-                <h3 class="font-bold text-xl">进入细节强化</h3>
-                <p class="text-blue-100 mt-1">针对薄弱知识点进行细节练习</p>
-            </div>
-            <button type="button" onclick="goToDetailPractice()" class="bg-white text-blue-600 px-6 py-3 rounded-lg font-bold hover:bg-blue-50 transition">
-                开始细节练习
+                <span id="copyBtnText">复制整卷报告</span>
             </button>
         </div>
     </div>
@@ -2627,6 +3234,7 @@
         syncQuizStickyOffset();
         resetExamInteractionState();
         lastExamResult = null;
+        lastExamInsightModel = null;
         currentQuestion = 0;
 
         document.getElementById('paperTitle').textContent = data.paper_title;
@@ -2845,10 +3453,543 @@
         }
     }
 
+    function getInsightQuadrantCatalog() {
+        return {
+            danger: {
+                key: 'danger',
+                label: '高危盲区',
+                description: '高自信答错，说明错误判断链已经固定下来，优先级最高。',
+                empty: '本次没有出现高自信答错。',
+                priority: 0,
+                badgeClass: 'exam-focus-card__badge--danger',
+                cardClass: 'exam-quadrant-card exam-quadrant-card--danger'
+            },
+            sticky: {
+                key: 'sticky',
+                label: '概念粘连区',
+                description: '模糊选项、摇摆判断和易混对象集中出现，说明概念边界还没切开。',
+                empty: '本次没有明显的概念粘连区。',
+                priority: 1,
+                badgeClass: 'exam-focus-card__badge--sticky',
+                cardClass: 'exam-quadrant-card exam-quadrant-card--sticky'
+            },
+            gap: {
+                key: 'gap',
+                label: '知识缺口区',
+                description: '自己也知道不会，而且题目没有兜住，适合回到基础框架重建。',
+                empty: '本次没有明显的知识缺口区。',
+                priority: 2,
+                badgeClass: 'exam-focus-card__badge--gap',
+                cardClass: 'exam-quadrant-card exam-quadrant-card--gap'
+            },
+            lucky: {
+                key: 'lucky',
+                label: '侥幸命中区',
+                description: '题目答对了，但判断链并不稳定，最容易在下一轮掉回去。',
+                empty: '本次没有明显的侥幸命中区。',
+                priority: 3,
+                badgeClass: 'exam-focus-card__badge--lucky',
+                cardClass: 'exam-quadrant-card exam-quadrant-card--lucky'
+            }
+        };
+    }
+
+    function getInsightPriorityRank(quadrantKey) {
+        const catalog = getInsightQuadrantCatalog();
+        return catalog[quadrantKey] ? catalog[quadrantKey].priority : 99;
+    }
+
+    function addWeightedCount(map, key, weight) {
+        const text = String(key || '').trim();
+        if (!text) return;
+        map[text] = (map[text] || 0) + (weight || 1);
+    }
+
+    function getTopCountEntries(map, limit) {
+        return Object.keys(map || {}).sort(function(a, b) {
+            const diff = (map[b] || 0) - (map[a] || 0);
+            if (diff !== 0) return diff;
+            return a.localeCompare(b, 'zh-CN');
+        }).slice(0, limit || 3);
+    }
+
+    function getOptionText(question, optionLetter) {
+        return ((question && question.options && question.options[optionLetter]) || ('选项' + (optionLetter || ''))).trim();
+    }
+
+    function buildCurrentExamInsightModel(result) {
+        const catalog = getInsightQuadrantCatalog();
+        const topicMap = {};
+        const questionDetails = Array.isArray(result && result.details) ? result.details : [];
+
+        questionDetails.forEach(function(detail, index) {
+            const question = questions[index] || {};
+            const keyPoint = String(detail.key_point || question.key_point || ('考点' + (index + 1))).trim() || ('考点' + (index + 1));
+            const userAnswer = detail.user_answer || '';
+            const correctAnswer = detail.correct_answer || '';
+            const confidence = detail.confidence || '';
+            const review = analyzeQuestionAnswer(question, userAnswer, correctAnswer, !!detail.is_correct, confidence);
+            const fuzzyLetters = getQuestionFuzzyOptions(index);
+            const fuzzyTexts = fuzzyLetters.map(function(opt) {
+                return getOptionText(question, opt);
+            }).filter(Boolean);
+
+            if (!topicMap[keyPoint]) {
+                topicMap[keyPoint] = {
+                    keyPoint: keyPoint,
+                    total: 0,
+                    correct: 0,
+                    wrong: 0,
+                    sureCount: 0,
+                    unsureCount: 0,
+                    noCount: 0,
+                    sureWrongCount: 0,
+                    lowConfidenceWrongCount: 0,
+                    lowConfidenceCorrectCount: 0,
+                    fuzzyQuestionCount: 0,
+                    fuzzyOptionCount: 0,
+                    confidenceMap: {},
+                    diagnosisMap: {},
+                    contrastMap: {},
+                    questionRefs: []
+                };
+            }
+
+            const topic = topicMap[keyPoint];
+            topic.total += 1;
+            if (detail.is_correct) topic.correct += 1;
+            else topic.wrong += 1;
+
+            if (confidence === 'sure') topic.sureCount += 1;
+            if (confidence === 'unsure') topic.unsureCount += 1;
+            if (confidence === 'no') topic.noCount += 1;
+            if (confidence) addWeightedCount(topic.confidenceMap, confidence, 1);
+
+            if (confidence === 'sure' && !detail.is_correct) {
+                topic.sureWrongCount += 1;
+            }
+            if ((confidence === 'unsure' || confidence === 'no') && !detail.is_correct) {
+                topic.lowConfidenceWrongCount += 1;
+            }
+            if ((confidence === 'unsure' || confidence === 'no') && detail.is_correct) {
+                topic.lowConfidenceCorrectCount += 1;
+            }
+            if (fuzzyLetters.length > 0) {
+                topic.fuzzyQuestionCount += 1;
+                topic.fuzzyOptionCount += fuzzyLetters.length;
+            }
+
+            if (review.diagnosisLabel) addWeightedCount(topic.diagnosisMap, review.diagnosisLabel, 1);
+            fuzzyTexts.forEach(function(text) {
+                addWeightedCount(topic.contrastMap, text, 2);
+            });
+            review.extraLetters.forEach(function(opt) {
+                addWeightedCount(topic.contrastMap, getOptionText(question, opt), 1);
+            });
+            review.missingLetters.forEach(function(opt) {
+                addWeightedCount(topic.contrastMap, getOptionText(question, opt), 0.5);
+            });
+
+            topic.questionRefs.push({
+                index: index + 1,
+                type: question.type || detail.type || '',
+                difficulty: detail.difficulty || question.difficulty || '',
+                questionText: question.question || '',
+                options: question.options || {},
+                userAnswer: userAnswer,
+                correctAnswer: correctAnswer,
+                isCorrect: !!detail.is_correct,
+                confidence: confidence || '未标注',
+                fuzzyLetters: fuzzyLetters,
+                fuzzyTexts: fuzzyTexts,
+                issueLabel: review.issueLabel || '',
+                diagnosisLabel: review.diagnosisLabel || '',
+                diagnosisAction: review.diagnosisAction || '',
+                explanation: detail.explanation || '',
+                keyPoint: keyPoint
+            });
+        });
+
+        const quadrants = {
+            danger: [],
+            sticky: [],
+            gap: [],
+            lucky: []
+        };
+
+        const topicList = Object.keys(topicMap).map(function(key) {
+            const topic = topicMap[key];
+            const contrastList = getTopCountEntries(topic.contrastMap, 3);
+            const diagnosisList = getTopCountEntries(topic.diagnosisMap, 2);
+            const mixedOutcome = topic.correct > 0 && topic.wrong > 0;
+            const mixedConfidence = Object.keys(topic.confidenceMap).length > 1;
+            const dangerScore = topic.sureWrongCount > 0
+                ? (topic.sureWrongCount * 6 + topic.wrong + topic.fuzzyQuestionCount)
+                : 0;
+            const stickyScore = topic.fuzzyQuestionCount * 3 + topic.unsureCount * 2 + (mixedOutcome ? 2 : 0) + (mixedConfidence ? 1 : 0);
+            const gapScore = topic.lowConfidenceWrongCount * 4 + (topic.wrong > 0 ? topic.noCount * 2 : 0) + Math.max(topic.wrong - topic.sureWrongCount, 0);
+            const luckyScore = topic.lowConfidenceCorrectCount * 4 + topic.fuzzyQuestionCount + (mixedOutcome ? 1 : 0);
+            let quadrantKey = '';
+
+            if (dangerScore > 0) {
+                quadrantKey = 'danger';
+            } else if (stickyScore > 0 && (topic.fuzzyQuestionCount > 0 || topic.unsureCount > 0 || mixedOutcome || mixedConfidence)) {
+                quadrantKey = 'sticky';
+            } else if (gapScore > 0) {
+                quadrantKey = 'gap';
+            } else if (luckyScore > 0) {
+                quadrantKey = 'lucky';
+            }
+
+            topic.contrastList = contrastList;
+            topic.diagnosisList = diagnosisList;
+            topic.mixedOutcome = mixedOutcome;
+            topic.mixedConfidence = mixedConfidence;
+            topic.priorityScore = {
+                danger: dangerScore,
+                sticky: stickyScore,
+                gap: gapScore,
+                lucky: luckyScore
+            }[quadrantKey] || 0;
+            topic.quadrantKey = quadrantKey;
+            topic.quadrantSpec = quadrantKey ? catalog[quadrantKey] : null;
+            topic.summaryText = [
+                '共 ' + topic.total + ' 题',
+                '错 ' + topic.wrong + ' 题',
+                topic.fuzzyQuestionCount > 0 ? ('模糊题 ' + topic.fuzzyQuestionCount + ' 题') : ''
+            ].filter(Boolean).join(' · ');
+
+            if (quadrantKey && quadrants[quadrantKey]) {
+                quadrants[quadrantKey].push(topic);
+            }
+            return topic;
+        });
+
+        ['danger', 'sticky', 'gap', 'lucky'].forEach(function(quadrantKey) {
+            quadrants[quadrantKey].sort(function(a, b) {
+                return (b.priorityScore - a.priorityScore) ||
+                    (b.total - a.total) ||
+                    (b.wrong - a.wrong) ||
+                    (b.fuzzyOptionCount - a.fuzzyOptionCount) ||
+                    a.keyPoint.localeCompare(b.keyPoint, 'zh-CN');
+            });
+        });
+
+        const focusTopics = topicList.filter(function(topic) {
+            return !!topic.quadrantKey;
+        }).sort(function(a, b) {
+            return getInsightPriorityRank(a.quadrantKey) - getInsightPriorityRank(b.quadrantKey) ||
+                (b.priorityScore - a.priorityScore) ||
+                (b.total - a.total) ||
+                (b.wrong - a.wrong) ||
+                (b.fuzzyOptionCount - a.fuzzyOptionCount) ||
+                a.keyPoint.localeCompare(b.keyPoint, 'zh-CN');
+        }).slice(0, 5);
+
+        return {
+            catalog: catalog,
+            topicList: topicList,
+            quadrants: quadrants,
+            focusTopics: focusTopics
+        };
+    }
+
+    function renderInsightBoard(model, result) {
+        const focusCount = model.focusTopics.length;
+        const quadrants = model.quadrants;
+        const leadEl = document.getElementById('insightLead');
+        const noteEl = document.getElementById('insightNote');
+        const metaEl = document.getElementById('insightMeta');
+        const summaryEl = document.getElementById('insightSummary');
+        const quadrantsEl = document.getElementById('insightQuadrants');
+        const highRiskCount = quadrants.danger.length;
+        const stickyCount = quadrants.sticky.length;
+        const confidence = result.confidence_analysis || {};
+
+        if (leadEl) {
+            leadEl.textContent = focusCount > 0
+                ? '检测到你在 ' + focusCount + ' 个核心概念上存在混淆。先看透视，再逐个复制苏格拉底文稿去外部大模型做单点追问。'
+                : '这次整卷没有明显的重点追问对象。你可以先查看答案解析，确认是否还需要进入细节强化。';
+        }
+
+        if (noteEl) {
+            noteEl.textContent = highRiskCount > 0
+                ? '最危险的是高危盲区：高自信答错会让错误逻辑越练越稳，必须先拆。'
+                : '没有出现高自信答错时，优先看概念粘连区和侥幸命中区，别被“答对了”掩盖不稳定。';
+        }
+
+        if (summaryEl) {
+            summaryEl.innerHTML = focusCount > 0
+                ? '本次整卷会优先锁定 <strong>' + focusCount + '</strong> 个追问对象。排序遵循 <strong>高危盲区 → 概念粘连区 → 知识缺口区 → 侥幸命中区</strong>。 先把判断链讲清，再回站内做靶向强化。'
+                : '本次没有明显的重点追问对象。你可以把这张卷当作一次稳定度检查：先快速看答案解析，确认有没有漏掉的模糊点，再决定是否需要额外训练。';
+        }
+
+        if (metaEl) {
+            metaEl.innerHTML = [
+                { label: '追问对象', value: focusCount > 0 ? (focusCount + ' 个') : '暂无' },
+                { label: '高危盲区', value: highRiskCount + ' 个' },
+                { label: '概念粘连', value: stickyCount + ' 个' },
+                { label: '已标注自评', value: (confidence.marked_count || 0) + ' 题' }
+            ].map(function(item) {
+                return '<div class="exam-insight-chip">' +
+                    '<span class="exam-insight-chip__label">' + escapeHtml(item.label) + '</span>' +
+                    '<span class="exam-insight-chip__value">' + escapeHtml(item.value) + '</span>' +
+                    '</div>';
+            }).join('');
+        }
+
+        if (quadrantsEl) {
+            quadrantsEl.innerHTML = ['danger', 'sticky', 'gap', 'lucky'].map(function(quadrantKey) {
+                const spec = model.catalog[quadrantKey];
+                const items = quadrants[quadrantKey] || [];
+                let bodyHtml = '';
+
+                if (items.length === 0) {
+                    bodyHtml = '<div class="exam-quadrant-empty">' + escapeHtml(spec.empty) + '</div>';
+                } else {
+                    bodyHtml = '<div class="exam-quadrant-list">' + items.slice(0, 4).map(function(topic) {
+                        const contrastText = topic.contrastList.length > 0
+                            ? ('易混对象：' + topic.contrastList.join(' / '))
+                            : '本次没有抽出明确的对比对象';
+                        return '<div class="exam-quadrant-item">' +
+                            '<div class="exam-quadrant-item__name">' + escapeHtml(topic.keyPoint) + '</div>' +
+                            '<div class="exam-quadrant-item__meta">' + escapeHtml(topic.summaryText) + ' · ' + escapeHtml(contrastText) + '</div>' +
+                            '</div>';
+                    }).join('') + '</div>';
+                }
+
+                return '<div class="' + spec.cardClass + '">' +
+                    '<div class="exam-quadrant-head">' +
+                        '<div><div class="exam-quadrant-title">' + escapeHtml(spec.label) + '</div>' +
+                        '<div class="exam-quadrant-desc">' + escapeHtml(spec.description) + '</div></div>' +
+                        '<span class="exam-quadrant-count">' + items.length + '</span>' +
+                    '</div>' +
+                    bodyHtml +
+                    '</div>';
+            }).join('');
+        }
+    }
+
+    function renderDifficultySummary(result) {
+        const diffDiv = document.getElementById('difficultyAnalysis');
+        const wrongByDiff = result.wrong_by_difficulty || {};
+        const conf = result.confidence_analysis || {};
+        const markedCount = conf.marked_count || 0;
+        const missingCount = conf.missing_count || 0;
+
+        diffDiv.innerHTML =
+            '<div class="grid gap-3 md:grid-cols-3">' +
+                '<div class="rounded-2xl border border-green-200 bg-green-50 px-4 py-4">' +
+                    '<div class="text-sm font-semibold text-green-700">基础题</div>' +
+                    '<div class="mt-2 text-2xl font-bold text-green-800">' + (wrongByDiff['基础'] || 0) + '</div>' +
+                    '<div class="mt-1 text-xs text-green-700">本次答错</div>' +
+                '</div>' +
+                '<div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">' +
+                    '<div class="text-sm font-semibold text-amber-700">提高题</div>' +
+                    '<div class="mt-2 text-2xl font-bold text-amber-800">' + (wrongByDiff['提高'] || 0) + '</div>' +
+                    '<div class="mt-1 text-xs text-amber-700">本次答错</div>' +
+                '</div>' +
+                '<div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-4">' +
+                    '<div class="text-sm font-semibold text-red-700">难题</div>' +
+                    '<div class="mt-2 text-2xl font-bold text-red-800">' + (wrongByDiff['难题'] || 0) + '</div>' +
+                    '<div class="mt-1 text-xs text-red-700">本次答错</div>' +
+                '</div>' +
+            '</div>';
+
+        if (markedCount || missingCount) {
+            diffDiv.innerHTML +=
+                '<div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">' +
+                    '<div class="text-sm font-semibold text-slate-700">自我评估分布</div>' +
+                    '<div class="mt-3 grid grid-cols-3 gap-3 text-center text-sm">' +
+                        '<div class="rounded-xl bg-white px-3 py-3 shadow-sm"><div class="font-bold text-green-600">' + (conf.sure || 0) + '</div><div class="mt-1 text-slate-500">确定</div></div>' +
+                        '<div class="rounded-xl bg-white px-3 py-3 shadow-sm"><div class="font-bold text-amber-600">' + (conf.unsure || 0) + '</div><div class="mt-1 text-slate-500">模糊</div></div>' +
+                        '<div class="rounded-xl bg-white px-3 py-3 shadow-sm"><div class="font-bold text-red-600">' + (conf.no || 0) + '</div><div class="mt-1 text-slate-500">不会</div></div>' +
+                    '</div>' +
+                    '<div class="mt-3 text-xs text-slate-500">已标注 ' + markedCount + ' 题' +
+                        (markedCount > 0
+                            ? ' · 确定占比 ' + (conf.sure_rate || 0) + '% · 模糊占比 ' + (conf.unsure_rate || 0) + '% · 不会占比 ' + (conf.no_rate || 0) + '%'
+                            : '') +
+                        (missingCount > 0 ? ' · 未标注 ' + missingCount + ' 题' : '') +
+                    '</div>' +
+                '</div>';
+        }
+
+        diffDiv.innerHTML += buildConfidenceDiagnosticSummaryHtml(result.details);
+    }
+
+    function renderFocusPromptCards(model) {
+        const listEl = document.getElementById('focusPromptList');
+        const emptyEl = document.getElementById('focusPromptEmpty');
+        const focusTopics = model.focusTopics || [];
+
+        if (!listEl || !emptyEl) return;
+
+        if (focusTopics.length === 0) {
+            listEl.innerHTML = '';
+            emptyEl.classList.remove('hidden');
+            return;
+        }
+
+        emptyEl.classList.add('hidden');
+        listEl.innerHTML = focusTopics.map(function(topic, index) {
+            const badgeClass = topic.quadrantSpec ? topic.quadrantSpec.badgeClass : 'exam-focus-card__badge--sticky';
+            const diagnosisText = topic.diagnosisList.length > 0 ? topic.diagnosisList.join(' / ') : '等待外部追问时继续暴露薄弱点';
+            const contrastText = topic.contrastList.length > 0 ? topic.contrastList.join(' / ') : '暂无明确对比对象';
+
+            return '<div class="exam-focus-card">' +
+                '<div class="exam-focus-card__topline">' +
+                    '<span class="exam-focus-card__badge ' + badgeClass + '">' + escapeHtml(topic.quadrantSpec ? topic.quadrantSpec.label : '重点追问') + '</span>' +
+                    '<span class="text-xs font-semibold tracking-wide text-slate-400 uppercase">Top ' + (index + 1) + '</span>' +
+                '</div>' +
+                '<div class="exam-focus-card__title">' + escapeHtml(topic.keyPoint) + '</div>' +
+                '<div class="exam-focus-card__body">' +
+                    '本次共命中 <strong>' + topic.total + '</strong> 题，错了 <strong>' + topic.wrong + '</strong> 题。先把这个知识点讲清，再继续做站内强化。' +
+                '</div>' +
+                '<div class="exam-focus-card__meta">' +
+                    '<div><strong>易混对象：</strong>' + escapeHtml(contrastText) + '</div>' +
+                    '<div><strong>诊断信号：</strong>' + escapeHtml(diagnosisText) + '</div>' +
+                    '<div><strong>本次表现：</strong>' + escapeHtml(topic.summaryText) + '</div>' +
+                '</div>' +
+                '<button type="button" onclick="copySocraticPrompt(' + index + ', this)" class="exam-focus-card__button">' +
+                    '<span>复制苏格拉底文稿</span>' +
+                '</button>' +
+            '</div>';
+        }).join('');
+    }
+
+    function renderKnowledgeOverview(model) {
+        const container = document.getElementById('knowledgeList');
+        if (!container) return;
+
+        if (!model.topicList || model.topicList.length === 0) {
+            container.innerHTML = '<div class="text-sm text-slate-500">暂无知识点数据。</div>';
+            return;
+        }
+
+        const sortedTopics = model.topicList.slice().sort(function(a, b) {
+            return getInsightPriorityRank(a.quadrantKey) - getInsightPriorityRank(b.quadrantKey) ||
+                (b.wrong - a.wrong) ||
+                (b.total - a.total) ||
+                a.keyPoint.localeCompare(b.keyPoint, 'zh-CN');
+        });
+
+        container.innerHTML = sortedTopics.map(function(topic) {
+            const quadrantLabel = topic.quadrantSpec ? topic.quadrantSpec.label : '暂未归类';
+            const contrastText = topic.contrastList.length > 0 ? topic.contrastList.join(' / ') : '暂无';
+            return '<div class="rounded-2xl border border-slate-200 bg-white/90 px-4 py-4 shadow-sm">' +
+                '<div class="flex flex-wrap items-center justify-between gap-3">' +
+                    '<div class="font-semibold text-slate-900">' + escapeHtml(topic.keyPoint) + '</div>' +
+                    '<div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">' + escapeHtml(quadrantLabel) + '</div>' +
+                '</div>' +
+                '<div class="mt-2 text-sm leading-7 text-slate-600">' +
+                    '<strong class="text-slate-900">题目：</strong>' + topic.total + ' 题 · ' +
+                    '<strong class="text-slate-900">错误：</strong>' + topic.wrong + ' 题 · ' +
+                    '<strong class="text-slate-900">模糊题：</strong>' + topic.fuzzyQuestionCount + ' 题' +
+                '</div>' +
+                '<div class="mt-1 text-sm leading-7 text-slate-600"><strong class="text-slate-900">易混对象：</strong>' + escapeHtml(contrastText) + '</div>' +
+                '</div>';
+        }).join('');
+    }
+
+    function buildSocraticPrompt(topic) {
+        const lines = [];
+        const contrastText = topic.contrastList.length > 0 ? topic.contrastList.join(' / ') : '暂无明确易混对象';
+
+        lines.push('# 苏格拉底式追问文稿');
+        lines.push('');
+        lines.push('## 角色设定');
+        lines.push('你是一名医学考研的苏格拉底式追问教练。');
+        lines.push('你的任务不是直接讲答案，而是通过连续追问，逼我口头解释这个知识点的定义、判据、机制链、相邻概念差异和判断顺序。');
+        lines.push('');
+        lines.push('## 绝对规则');
+        lines.push('- 只围绕当前知识点追问，不要泛泛而谈。');
+        lines.push('- 在确认我已经暴露出至少 90% 的真实薄弱信息之前，不许直接给答案，不许直接复述标准解析，不许替我总结。');
+        lines.push('- 一次只问一个问题，等我回答后再继续追问。');
+        lines.push('- 如果我回答空泛、背结论、跳步骤，你必须继续拆问，直到我说出可检验的判断依据。');
+        lines.push('- 只有在你判断我的薄弱点已经暴露到 90% 以上后，才允许进入纠错、补充和总结。');
+        lines.push('');
+        lines.push('## 追问顺序');
+        lines.push('1. 先让我不用看答案，复述这个知识点在题目里到底考什么。');
+        lines.push('2. 再追问我当时为什么这么判断，要求我把完整判断链说出来。');
+        lines.push('3. 再追问定义、关键判据和机制因果链。');
+        lines.push('4. 再做相邻概念或易混对象对比。');
+        lines.push('5. 最后逼我用一句话总结判断规则。');
+        lines.push('6. 只有当你确认我已经暴露出至少 90% 的真实薄弱信息后，才允许讲解和总结。');
+        lines.push('');
+        lines.push('## 心智模型模板');
+        lines.push('- 定义对比');
+        lines.push('- 关键判据');
+        lines.push('- 机制链');
+        lines.push('- 易混点');
+        lines.push('- 一句话判断规则');
+        lines.push('');
+        lines.push('## 本次定位');
+        lines.push('- 当前知识点：' + topic.keyPoint);
+        lines.push('- 所属象限：' + (topic.quadrantSpec ? topic.quadrantSpec.label : '重点追问'));
+        lines.push('- 易混对象：' + contrastText);
+        lines.push('- 本次表现：' + topic.summaryText);
+        lines.push('');
+        lines.push('## 教练后台材料（这些信息不要一开始直接告诉我）');
+
+        topic.questionRefs.forEach(function(ref) {
+            lines.push('');
+            lines.push('### 第 ' + ref.index + ' 题');
+            lines.push('- 题型 / 难度：' + (ref.type || '未标注') + ' / ' + (ref.difficulty || '未标注'));
+            lines.push('- 题干：' + (ref.questionText || '无'));
+            lines.push('- 选项：');
+            getQuestionOptionLetters({ options: ref.options }).forEach(function(opt) {
+                lines.push('  - ' + opt + '. ' + ((ref.options && ref.options[opt]) || ''));
+            });
+            lines.push('- 我的答案：' + (ref.userAnswer || '未作答'));
+            lines.push('- 正确答案：' + (ref.correctAnswer || '无'));
+            lines.push('- 自信度：' + (ref.confidence || '未标注'));
+            lines.push('- 模糊选项：' + (ref.fuzzyLetters.length > 0 ? ref.fuzzyLetters.join('、') + '（' + ref.fuzzyTexts.join(' / ') + '）' : '无'));
+            lines.push('- 错因标签：' + (ref.issueLabel || '无'));
+            lines.push('- 诊断标签：' + (ref.diagnosisLabel || '无'));
+            lines.push('- 解析：' + (ref.explanation || '无'));
+        });
+
+        lines.push('');
+        lines.push('## 开始执行');
+        lines.push('现在不要解释，不要总结，不要给答案。');
+        lines.push('请直接开始第一个问题，只问一句。');
+        lines.push('');
+
+        return lines.join('\n');
+    }
+
+    function copySocraticPrompt(focusIndex, trigger) {
+        if (!lastExamInsightModel || !Array.isArray(lastExamInsightModel.focusTopics)) {
+            alert('暂无可复制的苏格拉底文稿。');
+            return;
+        }
+
+        const topic = lastExamInsightModel.focusTopics[focusIndex];
+        if (!topic) {
+            alert('未找到对应的知识点文稿。');
+            return;
+        }
+
+        const prompt = buildSocraticPrompt(topic);
+        navigator.clipboard.writeText(prompt).then(function() {
+            if (!trigger) return;
+            const originalText = trigger.textContent;
+            trigger.textContent = '✅ 已复制苏格拉底文稿';
+            trigger.classList.add('is-copied');
+            setTimeout(function() {
+                trigger.textContent = originalText;
+                trigger.classList.remove('is-copied');
+            }, 2200);
+        }).catch(function(err) {
+            console.error('复制失败:', err);
+            alert('复制失败，请手动复制以下内容：\n\n' + prompt.substring(0, 700) + '...');
+        });
+    }
+
     function displayResults(result) {
-        // 保存结果供复制报告使用
         lastExamResult = result;
-        
+        lastExamInsightModel = buildCurrentExamInsightModel(result);
+
         document.getElementById('examArea').classList.add('hidden');
         document.getElementById('resultArea').classList.remove('hidden');
 
@@ -2861,36 +4002,11 @@
         const emoji = result.score >= 80 ? '🏆' : result.score >= 60 ? '👍' : '📚';
         document.getElementById('scoreEmoji').textContent = emoji;
 
-        // 难度分析
-        const diffDiv = document.getElementById('difficultyAnalysis');
-        const wrongByDiff = result.wrong_by_difficulty;
-        diffDiv.innerHTML =
-            '<div class="flex justify-between text-sm">' +
-            '<span class="text-green-600">基础题错 ' + (wrongByDiff['基础'] || 0) + '</span>' +
-            '<span class="text-yellow-600">提高题错 ' + (wrongByDiff['提高'] || 0) + '</span>' +
-            '<span class="text-red-600">难题错误: ' + (wrongByDiff['难题'] || 0) + '</span></div>';
+        renderInsightBoard(lastExamInsightModel, result);
+        renderDifficultySummary(result);
+        renderFocusPromptCards(lastExamInsightModel);
+        renderKnowledgeOverview(lastExamInsightModel);
 
-        // 自信度分析
-        if (result.confidence_analysis) {
-            const conf = result.confidence_analysis;
-            const markedCount = conf.marked_count || 0;
-            const missingCount = conf.missing_count || 0;
-            const confHtml =
-                '<div class="mt-4 pt-4 border-t"><h4 class="font-medium mb-2"> 自我评估分析</h4>' +
-                '<div class="grid grid-cols-3 gap-2 text-center text-sm">' +
-                '<div class="p-2 bg-green-50 rounded"><div class="font-bold text-green-600">' + (conf.sure || 0) + '</div><div class="text-green-600">确定</div></div>' +
-                '<div class="p-2 bg-yellow-50 rounded"><div class="font-bold text-yellow-600">' + (conf.unsure || 0) + '</div><div class="text-yellow-600">模糊</div></div>' +
-                '<div class="p-2 bg-red-50 rounded"><div class="font-bold text-red-600">' + (conf.no || 0) + '</div><div class="text-red-600">不会</div></div></div>' +
-                '<div class="mt-2 text-xs text-gray-500 text-center">已标注 ' + markedCount + ' 题' +
-                (markedCount > 0
-                    ? ' | 确定占比 ' + (conf.sure_rate || 0) + '% | 模糊占比 ' + (conf.unsure_rate || 0) + '% | 不会占比 ' + (conf.no_rate || 0) + '%'
-                    : '') +
-                (missingCount > 0 ? ' | 未标注 ' + missingCount + ' 题' : '') +
-                '</div></div>';
-            diffDiv.innerHTML += confHtml + buildConfidenceDiagnosticSummaryHtml(result.details);
-        }
-
-        // 详细解析
         const container = document.getElementById('answerDetails');
         container.innerHTML = '';
 
@@ -2927,61 +4043,12 @@
             container.appendChild(div);
         });
 
-        // 知识点分析
-        generateKnowledgeAnalysis(result);
-        
-        // 完成学习轨迹记录
         completeTrackingSession(result.score, result.total);
     }
 
     function generateKnowledgeAnalysis(result) {
-        const container = document.getElementById('knowledgeList');
-        const knowledgeMap = {};
-
-        result.details.forEach(function(d, i) {
-            const keyPoint = d.key_point || '考点' + (i + 1);
-            if (!knowledgeMap[keyPoint]) {
-                knowledgeMap[keyPoint] = { correct: 0, wrong: 0, difficulty: d.difficulty };
-            }
-            if (d.is_correct) knowledgeMap[keyPoint].correct++;
-            else knowledgeMap[keyPoint].wrong++;
-        });
-
-        const knowledgeList = Object.entries(knowledgeMap).map(function([point, data]) {
-            return {
-                point: point,
-                correct: data.correct,
-                wrong: data.wrong,
-                difficulty: data.difficulty,
-                status: data.wrong === 0 ? 'good' : (data.correct > data.wrong ? 'partial' : 'weak')
-            };
-        });
-
-        let html = '';
-
-        const weakPoints = knowledgeList.filter(function(k) { return k.status === 'weak' || k.status === 'partial'; });
-        if (weakPoints.length > 0) {
-            html += '<div class="mb-4"><h4 class="font-medium text-red-600 mb-2">✗ 需要加强的知识点：</h4><div class="space-y-2">';
-            weakPoints.forEach(function(k) {
-                html += '<div class="flex justify-between items-center p-2 bg-red-50 rounded"><span class="text-sm">' + k.point + '</span><span class="text-xs text-red-600">' + k.wrong + '错/' + (k.correct + k.wrong) + '题</span></div>';
-            });
-            html += '</div></div>';
-        }
-
-        const goodPoints = knowledgeList.filter(function(k) { return k.status === 'good'; });
-        if (goodPoints.length > 0) {
-            html += '<div><h4 class="font-medium text-green-600 mb-2">✓ 已掌握的知识点：</h4><div class="flex flex-wrap gap-2">';
-            goodPoints.forEach(function(k) {
-                html += '<span class="px-2 py-1 bg-green-100 text-green-700 rounded text-sm">' + k.point + '</span>';
-            });
-            html += '</div></div>';
-        }
-
-        if (knowledgeList.length === 0) {
-            html = '<div class="text-gray-500 text-sm">暂无知识点数据</div>';
-        }
-
-        container.innerHTML = html;
+        const model = buildCurrentExamInsightModel(result);
+        renderKnowledgeOverview(model);
     }
 
     function goToDetailPractice() {
@@ -3088,6 +4155,7 @@
 
     // 全局变量：保存最后一次结果
     let lastExamResult = null;
+    let lastExamInsightModel = null;
 
     // 一键复制做题报告
     function copyExamReport() {
