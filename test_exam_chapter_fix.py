@@ -483,8 +483,10 @@ def test_batch_exam_api_flow_resolves_real_chapter_from_uploaded_content(monkeyp
 
 def test_quiz_batch_modal_prefills_unique_title_match_only(tmp_path):
     template_path = Path(r"C:\Users\35456\true-learning-system\templates\quiz_batch.html")
-    lines = template_path.read_text(encoding="utf-8").splitlines()
-    helper_snippet = "const chapterId = '0';\n" + "\n".join(lines[410:519])
+    template_text = template_path.read_text(encoding="utf-8")
+    helper_start = template_text.index("function isSelectableChapterId")
+    helper_end = template_text.index("let uploadedContent = '';")
+    helper_snippet = "const chapterId = '0';\n" + template_text[helper_start:helper_end]
 
     script = helper_snippet + """
 let chaptersGrouped = {

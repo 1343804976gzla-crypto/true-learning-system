@@ -91,9 +91,7 @@
             document.getElementById('weeklyUploads').textContent = data.weekly_uploads;
             document.getElementById('bookCount').textContent = Object.keys(data.book_distribution).length;
             
-            // 计算连续学习天数
-            const streak = calculateStreak(data.timeline || []);
-            document.getElementById('streakDays').textContent = streak;
+            document.getElementById('streakDays').textContent = data.streak_days ?? 0;
             
         } catch (error) {
             console.error('加载统计失败:', error);
@@ -134,6 +132,7 @@
                 listContainer.appendChild(dateSection);
                 
                 uploads.forEach(upload => {
+                    const hasChapterLink = isSelectableChapter(upload.chapter_id);
                     const item = document.createElement('div');
                     item.className = 'px-6 py-4 hover:bg-gray-50 transition';
                     item.innerHTML = `
@@ -152,10 +151,10 @@
                                     <span>🕐 ${formatTime(upload.date)}</span>
                                 </div>
                             </div>
-                            <a href="/chapter/${upload.chapter_id}" 
-                               class="ml-4 px-3 py-1 bg-blue-100 text-blue-600 rounded text-sm hover:bg-blue-200 transition">
-                                查看
-                            </a>
+                            ${hasChapterLink
+                                ? `<a href="/chapter/${upload.chapter_id}" class="ml-4 px-3 py-1 bg-blue-100 text-blue-600 rounded text-sm hover:bg-blue-200 transition">查看</a>`
+                                : `<span class="ml-4 px-3 py-1 bg-gray-100 text-gray-400 rounded text-sm">待识别</span>`
+                            }
                         </div>
                     `;
                     listContainer.appendChild(item);
@@ -216,6 +215,11 @@
             grouped[date].push(upload);
         });
         return grouped;
+    }
+
+    function isSelectableChapter(chapterId) {
+        const value = String(chapterId || '').trim();
+        return !!value && !['0', 'unknown_ch0', '未分类_ch0', '无法识别_ch0', 'uncategorized_ch0'].includes(value) && !value.endsWith('_ch0');
     }
 
     function formatDate(dateStr) {

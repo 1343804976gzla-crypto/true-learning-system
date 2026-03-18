@@ -5,7 +5,7 @@
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Date, DateTime, 
-    Float, Boolean, ForeignKey, JSON, Enum, Interval
+    Float, Boolean, ForeignKey, JSON, Enum, Interval, UniqueConstraint
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -63,6 +63,8 @@ class LearningSession(Base):
     __tablename__ = "learning_sessions"
     
     id = Column(String, primary_key=True, index=True)  # UUID
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
     session_type = Column(String, nullable=False)  # 'exam'(整卷), 'detail_practice'(细节练习)
     
     # 关联信息
@@ -118,6 +120,8 @@ class LearningActivity(Base):
     __tablename__ = "learning_activities"
     
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
     session_id = Column(String, ForeignKey("learning_sessions.id"), nullable=False, index=True)
     
     # 活动信息
@@ -146,6 +150,8 @@ class QuestionRecord(Base):
     __tablename__ = "question_records"
     
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
     session_id = Column(String, ForeignKey("learning_sessions.id"), nullable=False, index=True)
     
     # 题目信息
@@ -245,6 +251,8 @@ class WrongAnswerV2(Base):
     __tablename__ = "wrong_answers_v2"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
     question_fingerprint = Column(String(64), nullable=False, unique=True, index=True)
 
     # 题目快照
@@ -336,6 +344,8 @@ class WrongAnswerRetry(Base):
     __tablename__ = "wrong_answer_retries"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
     wrong_answer_id = Column(Integer, ForeignKey("wrong_answers_v2.id"), nullable=False, index=True)
     user_answer = Column(String)
     is_correct = Column(Boolean)
@@ -361,6 +371,52 @@ class WrongAnswerRetry(Base):
     wrong_answer = relationship("WrongAnswerV2", back_populates="retries")
 
 
+class DailyReviewPaper(Base):
+    """
+    每日复习卷主表
+    同一 actor 在同一天只保留一份抽题结果，确保重复导出时题卷稳定。
+    """
+    __tablename__ = "daily_review_papers"
+    __table_args__ = (
+        UniqueConstraint("actor_key", "paper_date", name="uq_daily_review_papers_actor_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
+    actor_key = Column(String, nullable=False, index=True)
+    paper_date = Column(Date, nullable=False, index=True)
+    total_questions = Column(Integer, default=0)
+    config = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    items = relationship("DailyReviewPaperItem", back_populates="paper", cascade="all, delete-orphan")
+
+
+class DailyReviewPaperItem(Base):
+    """
+    每日复习卷题目快照
+    保存抽中题目的顺序与快照，便于后续稳定复现 PDF 内容与 5 天避重。
+    """
+    __tablename__ = "daily_review_paper_items"
+    __table_args__ = (
+        UniqueConstraint("paper_id", "position", name="uq_daily_review_paper_item_position"),
+        UniqueConstraint("paper_id", "wrong_answer_id", name="uq_daily_review_paper_item_wrong_answer"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    paper_id = Column(Integer, ForeignKey("daily_review_papers.id"), nullable=False, index=True)
+    wrong_answer_id = Column(Integer, ForeignKey("wrong_answers_v2.id"), nullable=False, index=True)
+    position = Column(Integer, nullable=False)
+    stem_fingerprint = Column(String(64), nullable=False, index=True)
+    source_bucket = Column(String, default="due")
+    snapshot = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    paper = relationship("DailyReviewPaper", back_populates="items")
+
+
 # 创建表的函数
 def create_learning_tracking_tables():
     """创建学习轨迹记录相关的表"""
@@ -371,7 +427,9 @@ def create_learning_tracking_tables():
         DailyLearningLog.__table__,
         LearningInsight.__table__,
         WrongAnswerV2.__table__,
-        WrongAnswerRetry.__table__
+        WrongAnswerRetry.__table__,
+        DailyReviewPaper.__table__,
+        DailyReviewPaperItem.__table__
     ])
     print("✅ 学习轨迹记录表创建完成")
 

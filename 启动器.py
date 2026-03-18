@@ -19,7 +19,7 @@ for proc in psutil.process_iter(['pid', 'name']):
         if proc.info['name'] in ['python.exe', 'pythonw.exe']:
             # 检查是否是本项目的进程
             cmdline = proc.cmdline()
-            if any('main.py' in arg for arg in cmdline):
+            if any(('main.py' in arg) or ('main:app' in arg) for arg in cmdline):
                 print(f"   发现旧进程 PID {proc.info['pid']}，正在终止...")
                 proc.kill()
     except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -40,9 +40,8 @@ try:
     CREATE_NO_WINDOW = 0x08000000
     CREATE_NEW_PROCESS_GROUP = 0x00000200
 
-    # 使用 uvicorn 直接启动，不加 --reload 参数即为生产模式
     subprocess.Popen(
-        [pythonw_path, '-m', 'uvicorn', 'main:app', '--host', '0.0.0.0', '--port', '8000'],
+        [pythonw_path, '-m', 'uvicorn', 'main:app', '--host', '0.0.0.0', '--port', '8000', '--no-access-log'],
         cwd=r'C:\Users\35456\true-learning-system',
         stdout=open('server.log', 'w'),
         stderr=subprocess.STDOUT,

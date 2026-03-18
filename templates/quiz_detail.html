@@ -2,6 +2,323 @@
 
 {% block title %}细节强化练习{% endblock %}
 
+{% block extra_css %}
+<style>
+    .practice-confidence-pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.7rem;
+    }
+
+    .practice-confidence-pill {
+        --practice-confidence-rgb: 59, 130, 246;
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        min-width: 6.25rem;
+        padding: 0.68rem 0.95rem;
+        border-radius: 999px;
+        border: 1px solid rgba(var(--practice-confidence-rgb), 0.2);
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.86), rgba(241,245,249,0.72)),
+            radial-gradient(circle at top, rgba(var(--practice-confidence-rgb), 0.12), transparent 65%);
+        color: rgba(var(--practice-confidence-rgb), 0.96);
+        box-shadow:
+            inset 0 1px 0 rgba(255,255,255,0.56),
+            0 10px 22px rgba(15, 23, 42, 0.06);
+        transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease,
+            background 180ms ease, color 180ms ease, opacity 180ms ease, filter 180ms ease;
+        will-change: transform;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+
+    .practice-confidence-pill::after {
+        content: "";
+        position: absolute;
+        inset: 1px;
+        border-radius: inherit;
+        background: linear-gradient(135deg, rgba(255,255,255,0.28), transparent 58%);
+        opacity: 0.7;
+        pointer-events: none;
+    }
+
+    .practice-confidence-pill:hover:not(.is-selected):not(.is-muted) {
+        transform: translateY(-1px);
+        border-color: rgba(var(--practice-confidence-rgb), 0.32);
+        box-shadow:
+            inset 0 1px 0 rgba(255,255,255,0.6),
+            0 14px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    .practice-confidence-pill:focus-visible {
+        outline: 2px solid rgba(37, 99, 235, 0.34);
+        outline-offset: 3px;
+    }
+
+    .practice-confidence-pill__key,
+    .practice-confidence-pill__label {
+        position: relative;
+        z-index: 1;
+    }
+
+    .practice-confidence-pill__key {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.55rem;
+        height: 1.55rem;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.78);
+        color: inherit;
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.62);
+    }
+
+    .practice-confidence-pill__label {
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+    }
+
+    .practice-confidence-pill--sure {
+        --practice-confidence-rgb: 34, 197, 94;
+    }
+
+    .practice-confidence-pill--unsure {
+        --practice-confidence-rgb: 245, 158, 11;
+    }
+
+    .practice-confidence-pill--no {
+        --practice-confidence-rgb: 239, 68, 68;
+    }
+
+    .practice-confidence-pill.is-selected {
+        transform: translateY(-2px) scale(1.018);
+        border-color: rgba(var(--practice-confidence-rgb), 0.52);
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.94), rgba(var(--practice-confidence-rgb), 0.12)),
+            radial-gradient(circle at top, rgba(var(--practice-confidence-rgb), 0.18), transparent 68%);
+        color: rgba(var(--practice-confidence-rgb), 1);
+        box-shadow:
+            0 16px 28px rgba(var(--practice-confidence-rgb), 0.12),
+            inset 0 0 0 1px rgba(255,255,255,0.46);
+    }
+
+    .practice-confidence-pill.is-selected .practice-confidence-pill__key {
+        background: rgba(var(--practice-confidence-rgb), 0.16);
+        box-shadow: inset 0 0 0 1px rgba(var(--practice-confidence-rgb), 0.14);
+    }
+
+    .practice-confidence-pill.is-muted {
+        opacity: 0.56;
+        filter: saturate(0.72);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.32);
+    }
+
+    .practice-confidence-pill.is-bump {
+        animation: practice-confidence-pop 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .practice-confidence-status {
+        position: relative;
+        margin-top: 0.9rem;
+        padding: 0.85rem 1rem 0.85rem 1.15rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        background: linear-gradient(180deg, rgba(248,250,252,0.9), rgba(241,245,249,0.76));
+        color: #475569;
+        font-size: 0.9rem;
+        font-weight: 600;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.48);
+    }
+
+    .practice-confidence-status::before {
+        content: "";
+        position: absolute;
+        left: 0.7rem;
+        top: 50%;
+        width: 0.24rem;
+        height: 1.6rem;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.4);
+        transform: translateY(-50%);
+    }
+
+    .practice-confidence-status.is-sure {
+        border-color: rgba(34, 197, 94, 0.22);
+        background: linear-gradient(180deg, rgba(240,253,244,0.94), rgba(220,252,231,0.74));
+        color: #166534;
+    }
+
+    .practice-confidence-status.is-sure::before {
+        background: rgba(34, 197, 94, 0.78);
+    }
+
+    .practice-confidence-status.is-unsure {
+        border-color: rgba(245, 158, 11, 0.22);
+        background: linear-gradient(180deg, rgba(255,251,235,0.94), rgba(254,243,199,0.76));
+        color: #b45309;
+    }
+
+    .practice-confidence-status.is-unsure::before {
+        background: rgba(245, 158, 11, 0.82);
+    }
+
+    .practice-confidence-status.is-no {
+        border-color: rgba(239, 68, 68, 0.22);
+        background: linear-gradient(180deg, rgba(254,242,242,0.94), rgba(254,226,226,0.72));
+        color: #b91c1c;
+    }
+
+    .practice-confidence-status.is-no::before {
+        background: rgba(239, 68, 68, 0.82);
+    }
+
+    .practice-fuzzy-panel {
+        margin-top: 0.9rem;
+        padding: 0.95rem 1rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(245, 158, 11, 0.18);
+        background: linear-gradient(180deg, rgba(255,251,235,0.84), rgba(254,249,195,0.5));
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.48);
+    }
+
+    .practice-fuzzy-title {
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: #b45309;
+    }
+
+    .practice-fuzzy-choices {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        margin-top: 0.75rem;
+    }
+
+    .practice-fuzzy-chip {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 2.7rem;
+        padding: 0.52rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid rgba(245, 158, 11, 0.24);
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,251,235,0.64)),
+            radial-gradient(circle at top, rgba(245,158,11,0.08), transparent 72%);
+        color: #b45309;
+        font-size: 0.82rem;
+        font-weight: 700;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.56), 0 8px 16px rgba(245,158,11,0.06);
+        transition: transform 170ms ease, border-color 170ms ease, background 170ms ease,
+            box-shadow 170ms ease, color 170ms ease, opacity 170ms ease, filter 170ms ease;
+        will-change: transform;
+    }
+
+    .practice-fuzzy-chip::after {
+        content: "";
+        position: absolute;
+        inset: 1px;
+        border-radius: inherit;
+        background: linear-gradient(135deg, rgba(255,255,255,0.32), transparent 60%);
+        opacity: 0.72;
+        pointer-events: none;
+    }
+
+    .practice-fuzzy-chip:hover {
+        transform: translateY(-1px);
+        border-color: rgba(245, 158, 11, 0.36);
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,247,220,0.72)),
+            radial-gradient(circle at top, rgba(245,158,11,0.1), transparent 72%);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.62), 0 12px 18px rgba(245,158,11,0.1);
+    }
+
+    .practice-fuzzy-chip.is-selected {
+        transform: translateY(-2px) scale(1.05);
+        border-color: rgba(217, 119, 6, 0.5);
+        background:
+            linear-gradient(180deg, rgba(255,247,220,0.98), rgba(253,230,138,0.86)),
+            radial-gradient(circle at top, rgba(245,158,11,0.2), transparent 74%);
+        color: #92400e;
+        box-shadow: 0 14px 22px rgba(245, 158, 11, 0.16), inset 0 0 0 1px rgba(255,255,255,0.38);
+    }
+
+    .practice-fuzzy-chip.is-muted {
+        opacity: 0.5;
+        filter: saturate(0.72);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+    }
+
+    .practice-fuzzy-chip.is-bump {
+        animation: practice-fuzzy-pop 280ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .practice-fuzzy-summary {
+        margin-top: 0.7rem;
+        font-size: 0.76rem;
+        line-height: 1.5;
+        color: #b45309;
+    }
+
+    @keyframes practice-confidence-pop {
+        0% {
+            transform: scale(0.96);
+        }
+        55% {
+            transform: translateY(-2px) scale(1.035);
+        }
+        100% {
+            transform: translateY(-2px) scale(1.018);
+        }
+    }
+
+    @keyframes practice-fuzzy-pop {
+        0% {
+            transform: scale(0.94);
+        }
+        55% {
+            transform: translateY(-2px) scale(1.08);
+        }
+        100% {
+            transform: translateY(-2px) scale(1.05);
+        }
+    }
+
+    @media (max-width: 767px) {
+        .practice-confidence-pill-row {
+            justify-content: flex-start;
+        }
+
+        .practice-confidence-pill {
+            flex: 1 1 calc(50% - 0.35rem);
+            min-width: 0;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .practice-confidence-pill,
+        .practice-fuzzy-chip {
+            transition: none;
+        }
+
+        .practice-confidence-pill.is-bump,
+        .practice-fuzzy-chip.is-bump {
+            animation: none;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="quiz-immersive-page">
     <div class="quiz-immersive-bg" aria-hidden="true">
@@ -160,6 +477,7 @@
     let examData = null;
     let knowledgeMap = {};
     let knowledgeStatsMap = {};
+    let orderedKnowledgePoints = [];
     let currentKnowledge = null;
     let practiceQuestions = [];
     let currentPracticeIndex = 0;
@@ -168,6 +486,7 @@
     let practiceFuzzyOptions = {};
     let isPracticeMode = false;
     let detailTrackingSessionId = null;
+    let detailTrackingCompleted = false;
     let lastPracticeResult = null;
 
     function revealMaskedExplanation(revealId, triggerBtn) {
@@ -214,6 +533,103 @@
             }
         });
         return ordered;
+    }
+
+    function getKnowledgePracticeCount(keyPoint) {
+        const meta = knowledgeStatsMap[keyPoint] || {};
+        const count = parseInt(meta.practice_session_count, 10);
+        return Number.isFinite(count) && count > 0 ? count : 0;
+    }
+
+    function buildKnowledgeDetailHtml(meta) {
+        const detailBits = [];
+        const practiceCount = parseInt(meta.practice_session_count, 10) || 0;
+        detailBits.push(practiceCount > 0 ? ('已练习 ' + practiceCount + ' 次') : '未练习');
+        if ((meta.error_count || 0) > 0) {
+            detailBits.push('错' + meta.error_count + '题');
+        }
+        const severityText = getSeverityBadgeText(meta.severity_tag || '');
+        if (severityText) {
+            detailBits.push(severityText);
+        }
+        return detailBits.length > 0
+            ? '<div class="mt-1 text-sm text-gray-500">' + detailBits.join(' · ') + '</div>'
+            : '';
+    }
+
+    function renderKnowledgeList() {
+        const knowledgeList = document.getElementById('knowledgeList');
+        if (!knowledgeList) return;
+
+        knowledgeList.innerHTML = '';
+        orderedKnowledgePoints.forEach(function(key) {
+            const k = knowledgeMap[key];
+            if (!k) return;
+
+            const statusClass = k.difficulty === '鍩虹' ? 'text-green-600'
+                : (k.difficulty === '鎻愰珮' ? 'text-yellow-600' : 'text-red-600');
+            const meta = knowledgeStatsMap[key] || {};
+            const detailHtml = buildKnowledgeDetailHtml(meta);
+            const practiceCount = getKnowledgePracticeCount(key);
+            const badgeHtml = practiceCount > 0
+                ? '<span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">已做 ' + practiceCount + ' 次</span>'
+                : '<span class="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-600">未开始</span>';
+
+            const div = document.createElement('div');
+            div.className = 'flex items-center justify-between gap-4 p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-blue-50 cursor-pointer transition';
+            div.setAttribute('data-knowledge-key', key);
+            div.innerHTML =
+                '<div class="min-w-0 flex-1">' +
+                    '<div class="flex flex-wrap items-center gap-2">' +
+                        '<span class="font-bold text-lg">' + key + '</span>' +
+                        '<span class="ml-0 sm:ml-1 ' + statusClass + '">' + k.difficulty + '</span>' +
+                    '</div>' +
+                    detailHtml +
+                '</div>' +
+                '<div class="flex items-center gap-3 flex-shrink-0">' +
+                    badgeHtml +
+                    '<span class="bg-blue-500 text-white px-4 py-2 rounded-lg">开始练习</span>' +
+                '</div>';
+
+            div.addEventListener('click', async function() {
+                currentKnowledge = key;
+                currentPracticeIndex = 0;
+                practiceAnswers = {};
+                practiceConfidence = {};
+                practiceFuzzyOptions = {};
+                lastPracticeResult = null;
+                isPracticeMode = true;
+
+                document.getElementById('knowledgeList').parentElement.classList.add('hidden');
+                document.getElementById('questionArea').classList.remove('hidden');
+                document.getElementById('knowledgeTitle').textContent = key;
+
+                await startDetailTrackingSession(key);
+                await generateVariationQuestions(key);
+            });
+
+            knowledgeList.appendChild(div);
+        });
+    }
+
+    function bumpKnowledgePracticeCount(keyPoint) {
+        if (!keyPoint) return;
+        const meta = knowledgeStatsMap[keyPoint] || {
+            key_point: keyPoint,
+            error_count: 0,
+            severity_tag: '',
+            severity_weight: 0,
+            understanding: 0,
+            mastery_penalty: 0,
+            priority_score: 0,
+            original_order: 0,
+            practice_session_count: 0,
+            last_practiced_at: null
+        };
+        meta.practice_session_count = (parseInt(meta.practice_session_count, 10) || 0) + 1;
+        meta.last_practiced_at = new Date().toISOString();
+        knowledgeStatsMap[keyPoint] = meta;
+        renderKnowledgeList();
     }
 
     function normalizeOptionLetter(value) {
@@ -292,28 +708,136 @@
         const buttons = getPracticeOptionLetters(practiceQuestions[idx]).map(function(opt) {
             return '<button type="button" onclick="togglePracticeFuzzyOption(' + idx + ', \'' + opt + '\')" ' +
                 'id="practice-fuzzy-opt-' + idx + '-' + opt + '" ' +
-                'class="px-3 py-1 rounded-full text-sm border transition border-yellow-300 text-yellow-700 hover:bg-yellow-100">' +
+                'class="practice-fuzzy-chip" aria-pressed="false">' +
                 opt + '</button>';
         }).join('');
 
-        return '<div id="practice-fuzzy-panel-' + idx + '" class="mt-3 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-3 hidden">' +
-            '<div class="text-xs font-medium text-yellow-700 mb-2">对哪些选项模糊？（可多选）</div>' +
-            '<div class="flex flex-wrap gap-2">' + buttons + '</div>' +
-            '<div id="practice-fuzzy-summary-' + idx + '" class="mt-2 text-xs text-yellow-700">可多选，包括你已选的答案</div>' +
+        return '<div id="practice-fuzzy-panel-' + idx + '" class="practice-fuzzy-panel hidden">' +
+            '<div class="practice-fuzzy-title">对哪些选项模糊？可多选</div>' +
+            '<div class="practice-fuzzy-choices">' + buttons + '</div>' +
+            '<div id="practice-fuzzy-summary-' + idx + '" class="practice-fuzzy-summary">可多选，包括你已选的答案</div>' +
             '</div>';
+    }
+
+    function setPracticeElementClassState(element, className, enabled) {
+        if (!element || !className) return;
+
+        if (element.classList) {
+            if (typeof element.classList.toggle === 'function') {
+                element.classList.toggle(className, !!enabled);
+                return;
+            }
+            if (enabled) {
+                if (typeof element.classList.add === 'function') element.classList.add(className);
+            } else if (typeof element.classList.remove === 'function') {
+                element.classList.remove(className);
+            }
+            return;
+        }
+
+        const current = new Set(String(element.className || '').split(/\s+/).filter(Boolean));
+        if (enabled) current.add(className);
+        else current.delete(className);
+        element.className = Array.from(current).join(' ');
+    }
+
+    function setPracticePressedState(element, pressed) {
+        if (!element) return;
+
+        const value = pressed ? 'true' : 'false';
+        if (typeof element.setAttribute === 'function') {
+            element.setAttribute('aria-pressed', value);
+        } else {
+            element.ariaPressed = value;
+        }
+    }
+
+    function shouldRecordPracticeQuestion(idx) {
+        return typeof practiceAnswers !== 'undefined' &&
+            !!practiceAnswers &&
+            !!practiceAnswers[idx] &&
+            typeof detailTrackingSessionId !== 'undefined' &&
+            !!detailTrackingSessionId &&
+            typeof recordDetailQuestionAnswer === 'function';
+    }
+
+    function pulsePracticeFuzzyOptionButton(button) {
+        if (!button) return;
+
+        if (button._practiceFuzzyBumpTimer) {
+            clearTimeout(button._practiceFuzzyBumpTimer);
+        }
+
+        button.classList.remove('is-bump');
+        void button.offsetWidth;
+        button.classList.add('is-bump');
+
+        button._practiceFuzzyBumpTimer = setTimeout(function() {
+            button.classList.remove('is-bump');
+            button._practiceFuzzyBumpTimer = null;
+        }, 300);
     }
 
     function updatePracticeFuzzyOptionButtons(idx) {
         const selected = new Set(getPracticeFuzzyOptions(idx));
+        const hasSelected = selected.size > 0;
         getPracticeOptionLetters(practiceQuestions[idx]).forEach(function(opt) {
             const button = document.getElementById('practice-fuzzy-opt-' + idx + '-' + opt);
             if (!button) return;
-            if (selected.has(opt)) {
-                button.className = 'px-3 py-1 rounded-full text-sm border transition bg-yellow-500 border-yellow-500 text-white';
-            } else {
-                button.className = 'px-3 py-1 rounded-full text-sm border transition border-yellow-300 text-yellow-700 hover:bg-yellow-100';
+
+            const isSelected = selected.has(opt);
+            const wasSelected = button.classList.contains('is-selected');
+
+            button.classList.add('practice-fuzzy-chip');
+            setPracticeElementClassState(button, 'is-selected', isSelected);
+            setPracticeElementClassState(button, 'is-muted', hasSelected && !isSelected);
+            setPracticeElementClassState(button, 'bg-yellow-500', isSelected);
+            setPracticePressedState(button, isSelected);
+
+            if (isSelected && !wasSelected) {
+                pulsePracticeFuzzyOptionButton(button);
+            } else if (!isSelected && button._practiceFuzzyBumpTimer) {
+                clearTimeout(button._practiceFuzzyBumpTimer);
+                button._practiceFuzzyBumpTimer = null;
+                button.classList.remove('is-bump');
             }
         });
+    }
+
+    function pulsePracticeConfidenceButton(button) {
+        if (!button) return;
+
+        if (button._practiceConfidenceBumpTimer) {
+            clearTimeout(button._practiceConfidenceBumpTimer);
+        }
+
+        button.classList.remove('is-bump');
+        void button.offsetWidth;
+        button.classList.add('is-bump');
+
+        button._practiceConfidenceBumpTimer = setTimeout(function() {
+            button.classList.remove('is-bump');
+            button._practiceConfidenceBumpTimer = null;
+        }, 340);
+    }
+
+    function setPracticeConfidenceButtonState(button, isSelected, isMuted) {
+        if (!button) return;
+
+        const wasSelected = button.classList.contains('is-selected');
+
+        button.classList.add('practice-confidence-pill');
+        setPracticeElementClassState(button, 'is-selected', !!isSelected);
+        setPracticeElementClassState(button, 'is-muted', !!isMuted);
+        setPracticePressedState(button, isSelected);
+
+        if (isSelected && !wasSelected) {
+            pulsePracticeConfidenceButton(button);
+        } else if (!isSelected && button._practiceConfidenceBumpTimer) {
+            clearTimeout(button._practiceConfidenceBumpTimer);
+            button._practiceConfidenceBumpTimer = null;
+            button.classList.remove('is-bump');
+        }
     }
 
     function renderPracticeConfidenceState(idx) {
@@ -326,30 +850,37 @@
         const panel = document.getElementById('practice-fuzzy-panel-' + idx);
         const summary = document.getElementById('practice-fuzzy-summary-' + idx);
 
-        if (btnSure) btnSure.classList.remove('bg-green-500', 'text-white');
-        if (btnUnsure) btnUnsure.classList.remove('bg-yellow-500', 'text-white');
-        if (btnNo) btnNo.classList.remove('bg-red-500', 'text-white');
-        if (panel) panel.classList.add('hidden');
+        const buttonMap = {
+            sure: btnSure,
+            unsure: btnUnsure,
+            no: btnNo
+        };
+
+        Object.keys(buttonMap).forEach(function(key) {
+            setPracticeConfidenceButtonState(buttonMap[key], level === key, !!level && level !== key);
+        });
+
+        if (panel) {
+            setPracticeElementClassState(panel, 'hidden', level !== 'unsure');
+        }
 
         if (!display) return;
 
+        display.textContent = '';
+        display.className = 'practice-confidence-status hidden';
+
         if (!level) {
-            display.textContent = '';
-            display.className = 'mt-2 text-sm text-center hidden';
             return;
         }
 
         if (level === 'sure') {
-            if (btnSure) btnSure.classList.add('bg-green-500', 'text-white');
-            display.textContent = '✓ 我确定这道题会做';
-            display.className = 'mt-2 text-sm text-center text-green-600 font-medium';
+            display.textContent = '已标记为“确定”，这题按正常节奏完成即可。';
+            display.classList.add('is-sure');
         } else if (level === 'unsure') {
-            if (btnUnsure) btnUnsure.classList.add('bg-yellow-500', 'text-white');
             display.textContent = fuzzyOptions.length > 0
-                ? '？模糊选项：' + fuzzyOptions.join('、')
-                : '？这道题有点模糊，请勾选具体选项';
-            display.className = 'mt-2 text-sm text-center text-yellow-600 font-medium';
-            if (panel) panel.classList.remove('hidden');
+                ? '已标记为“模糊”，当前犹豫选项：' + fuzzyOptions.join('、')
+                : '已标记为“模糊”，请补充你犹豫的选项。';
+            display.classList.add('is-unsure');
             if (summary) {
                 summary.textContent = fuzzyOptions.length > 0
                     ? '已标记：' + fuzzyOptions.join('、')
@@ -357,9 +888,8 @@
             }
             updatePracticeFuzzyOptionButtons(idx);
         } else {
-            if (btnNo) btnNo.classList.add('bg-red-500', 'text-white');
-            display.textContent = '✗ 这道题完全不会';
-            display.className = 'mt-2 text-sm text-center text-red-600 font-medium';
+            display.textContent = '已标记为“不会”，提交后会进入重点复盘。';
+            display.classList.add('is-no');
         }
 
         display.classList.remove('hidden');
@@ -397,6 +927,235 @@
             report += '  → ' + opt + '. ' + optionText + '\n';
         });
         return report;
+    }
+
+    function normalizePracticeAnswerLetters(answer, question) {
+        const allowed = new Set(getPracticeOptionLetters(question));
+        const seen = new Set();
+        const matches = String(answer || '').toUpperCase().match(/[A-E]/g) || [];
+
+        return matches.filter(function(letter) {
+            if (!allowed.has(letter) || seen.has(letter)) {
+                return false;
+            }
+            seen.add(letter);
+            return true;
+        }).sort();
+    }
+
+    function formatPracticeAnswerLetters(letters, emptyText) {
+        return letters && letters.length > 0 ? letters.join('、') : (emptyText || '无');
+    }
+
+    function analyzePracticeAnswer(detail) {
+        const question = detail || {};
+        const userLetters = normalizePracticeAnswerLetters(question.user_answer, question);
+        const correctLetters = normalizePracticeAnswerLetters(question.correct_answer, question);
+        const missingLetters = correctLetters.filter(function(letter) {
+            return !userLetters.includes(letter);
+        });
+        const extraLetters = userLetters.filter(function(letter) {
+            return !correctLetters.includes(letter);
+        });
+        const isMultipleChoice = question.type === 'X';
+        let issueLabel = '完全正确';
+        let issueTone = 'success';
+        let issueNarrative = '你的答案与标准答案一致。';
+
+        if (!question.is_correct) {
+            if (userLetters.length === 0) {
+                issueLabel = '未作答';
+                issueTone = 'neutral';
+                issueNarrative = '这题未作答，正确答案是 ' + formatPracticeAnswerLetters(correctLetters, '无') + '。';
+            } else if (missingLetters.length > 0 && extraLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '少选 + 多选' : '错选';
+                issueTone = 'danger';
+                issueNarrative = '这题漏选 ' + formatPracticeAnswerLetters(missingLetters) +
+                    '，同时' + (isMultipleChoice ? '多选 ' : '错选 ') + formatPracticeAnswerLetters(extraLetters) + '。';
+            } else if (missingLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '少选' : '错选';
+                issueTone = 'warning';
+                issueNarrative = isMultipleChoice
+                    ? '这题漏选 ' + formatPracticeAnswerLetters(missingLetters) + '。'
+                    : '这题没有选到正确答案 ' + formatPracticeAnswerLetters(missingLetters) + '。';
+            } else if (extraLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '多选' : '错选';
+                issueTone = 'danger';
+                issueNarrative = '这题' + (isMultipleChoice ? '多选 ' : '错选 ') + formatPracticeAnswerLetters(extraLetters) + '。';
+            } else {
+                issueLabel = '答案不匹配';
+                issueTone = 'danger';
+                issueNarrative = '这题答案与标准答案不一致，请结合解析复盘。';
+            }
+        }
+
+        return {
+            isCorrect: !!question.is_correct,
+            questionType: question.type || '',
+            userLetters: userLetters,
+            correctLetters: correctLetters,
+            missingLetters: missingLetters,
+            extraLetters: extraLetters,
+            issueLabel: issueLabel,
+            issueTone: issueTone,
+            issueNarrative: issueNarrative
+        };
+    }
+
+    function buildPracticeAnswerSummaryCard(label, value, tone) {
+        const toneClassMap = {
+            user: 'bg-blue-50 border-blue-200 text-blue-700',
+            correct: 'bg-green-50 border-green-200 text-green-700',
+            missing: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+            extra: 'bg-red-50 border-red-200 text-red-700'
+        };
+        const toneClass = toneClassMap[tone] || 'bg-gray-50 border-gray-200 text-gray-700';
+
+        return '<div class="rounded-xl border px-4 py-3 ' + toneClass + '">' +
+            '<div class="text-xs font-semibold tracking-wide opacity-75">' + escapeHtml(label) + '</div>' +
+            '<div class="mt-2 text-base font-bold">' + escapeHtml(value) + '</div>' +
+            '</div>';
+    }
+
+    function buildPracticeAnswerSummaryHtml(review) {
+        const cards = [
+            buildPracticeAnswerSummaryCard('你的答案', formatPracticeAnswerLetters(review.userLetters, '未作答'), 'user'),
+            buildPracticeAnswerSummaryCard('正确答案', formatPracticeAnswerLetters(review.correctLetters, '无'), 'correct')
+        ];
+
+        if (!review.isCorrect && review.missingLetters.length > 0) {
+            cards.push(buildPracticeAnswerSummaryCard('漏选项', formatPracticeAnswerLetters(review.missingLetters), 'missing'));
+        }
+
+        if (!review.isCorrect && review.extraLetters.length > 0) {
+            cards.push(buildPracticeAnswerSummaryCard(
+                review.questionType === 'X' ? '多选项' : '错选项',
+                formatPracticeAnswerLetters(review.extraLetters),
+                'extra'
+            ));
+        }
+
+        return '<div class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">' + cards.join('') + '</div>';
+    }
+
+    function buildPracticeAnswerIssueHtml(review) {
+        if (review.isCorrect) {
+            return '';
+        }
+
+        const toneClassMap = {
+            warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+            danger: 'bg-red-50 border-red-200 text-red-700',
+            neutral: 'bg-gray-50 border-gray-200 text-gray-700'
+        };
+        const toneClass = toneClassMap[review.issueTone] || toneClassMap.neutral;
+
+        return '<div class="mb-4 rounded-xl border px-4 py-3 ' + toneClass + '">' +
+            '<div class="flex flex-wrap items-center gap-2">' +
+            '<span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs font-bold">错因：' +
+            escapeHtml(review.issueLabel) + '</span>' +
+            '<span class="text-sm font-medium">' + escapeHtml(review.issueNarrative) + '</span>' +
+            '</div></div>';
+    }
+
+    function buildPracticeAnswerOptionRowHtml(detail, optionLetter, review) {
+        const options = detail && detail.options ? detail.options : {};
+        const optionText = escapeHtml(options[optionLetter] || ('选项 ' + optionLetter));
+        const isSelected = review.userLetters.includes(optionLetter);
+        const isCorrect = review.correctLetters.includes(optionLetter);
+        let rowClass = 'bg-gray-50 border-gray-200';
+        let flagClass = 'bg-white border border-gray-200 text-gray-500';
+        let letterClass = 'bg-gray-200 text-gray-600';
+        let flagText = '未涉及';
+
+        if (isCorrect && isSelected) {
+            rowClass = 'bg-green-50 border-green-200';
+            flagClass = 'bg-green-100 text-green-700';
+            letterClass = 'bg-green-600 text-white';
+            flagText = '选对了';
+        } else if (isCorrect) {
+            rowClass = 'bg-yellow-50 border-yellow-200';
+            flagClass = 'bg-yellow-100 text-yellow-800';
+            letterClass = 'bg-yellow-500 text-white';
+            flagText = '漏选';
+        } else if (isSelected) {
+            rowClass = 'bg-red-50 border-red-200';
+            flagClass = 'bg-red-100 text-red-700';
+            letterClass = 'bg-red-500 text-white';
+            flagText = review.questionType === 'X' ? '多选了' : '错选';
+        }
+
+        return '<div class="flex flex-col gap-3 rounded-xl border px-4 py-3 sm:flex-row sm:items-start sm:justify-between ' + rowClass + '">' +
+            '<div class="flex min-w-0 items-start gap-3">' +
+            '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ' + letterClass + '">' +
+            optionLetter + '</span>' +
+            '<span class="min-w-0 text-sm leading-6 text-gray-800">' + optionText + '</span>' +
+            '</div>' +
+            '<span class="inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-bold ' + flagClass + '">' +
+            flagText + '</span>' +
+            '</div>';
+    }
+
+    function buildPracticeAnswerOptionsHtml(detail, review) {
+        const rows = getPracticeOptionLetters(detail).map(function(optionLetter) {
+            return buildPracticeAnswerOptionRowHtml(detail, optionLetter, review);
+        });
+        return '<div class="mb-4 space-y-2">' + rows.join('') + '</div>';
+    }
+
+    function renderPracticeConfidenceState(idx) {
+        const level = practiceConfidence[idx] || '';
+        const fuzzyOptions = getPracticeFuzzyOptions(idx);
+        const btnSure = document.getElementById('practice-btn-sure-' + idx);
+        const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
+        const btnNo = document.getElementById('practice-btn-no-' + idx);
+        const display = document.getElementById('practice-confidence-display-' + idx);
+        const panel = document.getElementById('practice-fuzzy-panel-' + idx);
+        const summary = document.getElementById('practice-fuzzy-summary-' + idx);
+
+        const buttonMap = {
+            sure: btnSure,
+            unsure: btnUnsure,
+            no: btnNo
+        };
+
+        Object.keys(buttonMap).forEach(function(key) {
+            setPracticeConfidenceButtonState(buttonMap[key], level === key, !!level && level !== key);
+        });
+
+        if (panel) {
+            setPracticeElementClassState(panel, 'hidden', level !== 'unsure');
+        }
+
+        if (!display) return;
+
+        display.textContent = '';
+        display.className = 'practice-confidence-status hidden';
+
+        if (!level) {
+            return;
+        }
+
+        if (level === 'sure') {
+            display.textContent = '已标记为“确定”，这题按正常节奏完成即可。';
+            display.classList.add('is-sure');
+        } else if (level === 'unsure') {
+            display.textContent = fuzzyOptions.length > 0
+                ? '？模糊选项：' + fuzzyOptions.join('、')
+                : '已标记为“模糊”，请勾选具体选项。';
+            display.classList.add('is-unsure');
+            if (summary) {
+                summary.textContent = fuzzyOptions.length > 0
+                    ? '已标记：' + fuzzyOptions.join('、')
+                    : '请勾选具体选项，可多选，包括你已选的答案';
+            }
+            updatePracticeFuzzyOptionButtons(idx);
+        } else {
+            display.textContent = '已标记为“不会”，提交后会进入重点复盘。';
+            display.classList.add('is-no');
+        }
+
+        display.classList.remove('hidden');
     }
 
     function getSeverityBadgeText(tag) {
@@ -444,6 +1203,7 @@
                 })
             }, '操作失败');
             detailTrackingSessionId = data.session_id;
+            detailTrackingCompleted = false;
             console.log('[Tracking] 细节练习会话已开启:', detailTrackingSessionId);
         } catch (error) {
             console.error('[Tracking] 开始细节练习会话失败:', error);
@@ -508,6 +1268,15 @@
             console.error('[Tracking] 完成细节练习会话失败:', error);
         }
     }
+
+    const originalCompleteDetailTrackingSession = completeDetailTrackingSession;
+    completeDetailTrackingSession = async function(score, totalQuestions) {
+        await originalCompleteDetailTrackingSession(score, totalQuestions);
+        if (!detailTrackingCompleted && currentKnowledge && detailTrackingSessionId) {
+            detailTrackingCompleted = true;
+            bumpKnowledgePracticeCount(currentKnowledge);
+        }
+    };
 
     async function generateVariationQuestions(keyPoint) {
         const k = knowledgeMap[keyPoint];
@@ -610,6 +1379,7 @@
             delete practiceConfidence[idx];
             clearPracticeFuzzyOptions(idx);
             renderPracticeConfidenceState(idx);
+            if (shouldRecordPracticeQuestion(idx)) recordDetailQuestionAnswer(idx);
             return;
         }
 
@@ -618,6 +1388,7 @@
             clearPracticeFuzzyOptions(idx);
         }
         renderPracticeConfidenceState(idx);
+        if (shouldRecordPracticeQuestion(idx)) recordDetailQuestionAnswer(idx);
     }
 
     function togglePracticeFuzzyOption(idx, opt) {
@@ -637,6 +1408,7 @@
         }
 
         renderPracticeConfidenceState(idx);
+        if (shouldRecordPracticeQuestion(idx)) recordDetailQuestionAnswer(idx);
     }
 
     function selectPracticeOption(opt) {
@@ -733,14 +1505,14 @@
             '<div class="mb-4"><p class="text-lg font-medium leading-relaxed">' + escapeHtml(q.question) + '</p></div>' +
             '<div class="space-y-2 mb-4">' + optionsHtml + '</div>' +
             '<div class="pt-4 border-t border-gray-100">' +
-            '<div class="flex items-center justify-between">' +
-            '<span class="text-sm text-gray-500">自我评估</span>' +
-            '<div class="flex space-x-2">' +
-            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'sure\')" id="practice-btn-sure-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-green-500 text-green-600 hover:bg-green-500 hover:text-white transition">Q 确定</button>' +
-            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'unsure\')" id="practice-btn-unsure-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-yellow-500 text-yellow-600 hover:bg-yellow-500 hover:text-white transition">W 模糊</button>' +
-            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'no\')" id="practice-btn-no-' + currentPracticeIndex + '" class="px-3 py-1 rounded-full text-sm border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white transition">E 不会</button>' +
+            '<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">' +
+            '<span class="text-sm font-medium text-gray-500">自我评估</span>' +
+            '<div class="practice-confidence-pill-row">' +
+            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'sure\')" id="practice-btn-sure-' + currentPracticeIndex + '" data-level="sure" aria-pressed="false" class="practice-confidence-pill practice-confidence-pill--sure"><span class="practice-confidence-pill__key">Q</span><span class="practice-confidence-pill__label">确定</span></button>' +
+            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'unsure\')" id="practice-btn-unsure-' + currentPracticeIndex + '" data-level="unsure" aria-pressed="false" class="practice-confidence-pill practice-confidence-pill--unsure"><span class="practice-confidence-pill__key">W</span><span class="practice-confidence-pill__label">模糊</span></button>' +
+            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'no\')" id="practice-btn-no-' + currentPracticeIndex + '" data-level="no" aria-pressed="false" class="practice-confidence-pill practice-confidence-pill--no"><span class="practice-confidence-pill__key">E</span><span class="practice-confidence-pill__label">不会</span></button>' +
             '</div></div>' +
-            '<div id="practice-confidence-display-' + currentPracticeIndex + '" class="mt-2 text-sm text-center hidden"></div>' +
+            '<div id="practice-confidence-display-' + currentPracticeIndex + '" class="practice-confidence-status hidden" aria-live="polite"></div>' +
             buildPracticeFuzzyOptionsPanelHtml(currentPracticeIndex) +
             '</div>' +
             '</div>';
@@ -840,6 +1612,40 @@
         container.innerHTML = '';
 
         details.forEach(function(d, i) {
+            const div = document.createElement('div');
+            div.className = 'p-6';
+            const explanationId = 'detailExplanation-' + i;
+            const review = analyzePracticeAnswer(d);
+            const questionText = escapeHtml(d.question || '').replace(/\n/g, '<br>');
+            const confidenceHtml =
+                '<div class="mb-3 text-sm text-gray-600">' +
+                '<span class="font-medium text-gray-700">自信度：</span>' + getConfidenceLabel(d.confidence) +
+                '</div>';
+
+            div.innerHTML =
+                '<div class="flex items-center justify-between mb-3 gap-3">' +
+                '<div class="flex flex-wrap items-center gap-2">' +
+                '<span class="font-bold">第' + (i + 1) + '题</span>' +
+                '<span class="' + (d.is_correct ? 'text-green-600' : 'text-red-600') + ' font-bold">' + (d.is_correct ? '✓ 正确' : '✗ 错误') + '</span>' +
+                (!d.is_correct ? '<span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ' +
+                    (review.issueTone === 'warning' ? 'bg-yellow-100 text-yellow-800' :
+                        review.issueTone === 'neutral' ? 'bg-gray-100 text-gray-700' : 'bg-red-100 text-red-700') + '">' +
+                    escapeHtml(review.issueLabel) + '</span>' : '') +
+                '</div>' +
+                '<span class="text-sm text-gray-500">' + d.type + (d.type === 'X' ? '（多选）' : '') + ' · ' + d.difficulty + '</span>' +
+                '</div>' +
+                '<p class="mb-3 text-gray-800 leading-7">' + questionText + '</p>' +
+                buildPracticeAnswerSummaryHtml(review) +
+                buildPracticeAnswerIssueHtml(review) +
+                buildPracticeAnswerOptionsHtml(d, review) +
+                confidenceHtml +
+                buildPracticeFuzzyDetailHtml(d) +
+                buildMaskedExplanationHtml(d.explanation, d.is_correct, d.confidence, explanationId);
+            container.appendChild(div);
+        });
+        return;
+
+        details.forEach(function(d, i) {
             const userAnswer = d.user_answer || '';
             const correctAnswer = d.correct_answer || '';
             const optionLetters = getPracticeOptionLetters({ options: d.options || {} });
@@ -887,6 +1693,73 @@
             alert('暂无可复制的知识点总结。');
             return;
         }
+
+        let practiceReport = '';
+        practiceReport += '==============================\n';
+        practiceReport += '细节强化知识点总结\n';
+        practiceReport += '==============================\n\n';
+        practiceReport += '【基本信息】\n';
+        practiceReport += '知识点：' + (lastPracticeResult.knowledge_point || '未命名知识点') + '\n';
+        practiceReport += '练习时间：' + new Date().toLocaleString('zh-CN') + '\n';
+        practiceReport += '得分：' + lastPracticeResult.score + ' 分\n';
+        practiceReport += '正确：' + lastPracticeResult.correct_count + ' 题 / 错误：' + lastPracticeResult.wrong_count + ' 题 / 总计：' + lastPracticeResult.total + ' 题\n\n';
+        practiceReport += '【题目详情】\n\n';
+
+        lastPracticeResult.details.forEach(function(detail, index) {
+            const review = analyzePracticeAnswer(detail);
+            practiceReport += '第 ' + (index + 1) + ' 题 [' + (detail.type || '') + '] [' + (detail.difficulty || '') + ']\n';
+            practiceReport += (detail.question || '') + '\n\n';
+
+            getPracticeOptionLetters(detail).forEach(function(opt) {
+                const isSelected = review.userLetters.includes(opt);
+                const isCorrect = review.correctLetters.includes(opt);
+                let mark = '[ ]';
+                if (isCorrect && isSelected) mark = '[选对]';
+                else if (isCorrect) mark = '[漏选]';
+                else if (isSelected) mark = detail.type === 'X' ? '[多选]' : '[错选]';
+                practiceReport += mark + ' ' + opt + '. ' + (((detail.options || {})[opt]) || ('选项' + opt)) + '\n';
+            });
+
+            practiceReport += '\n';
+            practiceReport += '你的答案：' + formatPracticeAnswerLetters(review.userLetters, '未作答') + '\n';
+            practiceReport += '正确答案：' + formatPracticeAnswerLetters(review.correctLetters, '无') + '\n';
+            if (!detail.is_correct) {
+                practiceReport += '错因：' + review.issueLabel + '\n';
+                if (review.missingLetters.length > 0) {
+                    practiceReport += '漏选项：' + formatPracticeAnswerLetters(review.missingLetters) + '\n';
+                }
+                if (review.extraLetters.length > 0) {
+                    practiceReport += (detail.type === 'X' ? '多选项：' : '错选项：') + formatPracticeAnswerLetters(review.extraLetters) + '\n';
+                }
+            }
+            practiceReport += '自信度：' + getConfidenceLabel(detail.confidence) + '\n';
+            practiceReport += buildPracticeFuzzyReportSection(detail);
+            practiceReport += '结果：' + (detail.is_correct ? '✓ 正确' : '✗ 错误') + '\n\n';
+            practiceReport += '解析：' + (detail.explanation || '无解析') + '\n';
+            practiceReport += '------------------------------------------------------------\n\n';
+        });
+
+        practiceReport += '报告生成时间：' + new Date().toLocaleString('zh-CN') + '\n';
+
+        navigator.clipboard.writeText(practiceReport).then(function() {
+            const btn = document.getElementById('copyPracticeSummaryBtn');
+            const text = document.getElementById('copyPracticeSummaryText');
+            const originalText = text.textContent;
+
+            btn.classList.remove('bg-indigo-500', 'hover:bg-indigo-600');
+            btn.classList.add('bg-green-500', 'hover:bg-green-600');
+            text.textContent = '已复制到剪贴板';
+
+            setTimeout(function() {
+                btn.classList.remove('bg-green-500', 'hover:bg-green-600');
+                btn.classList.add('bg-indigo-500', 'hover:bg-indigo-600');
+                text.textContent = originalText;
+            }, 2000);
+        }).catch(function(err) {
+            console.error('复制失败:', err);
+            alert('复制失败，请手动复制以下内容：\n\n' + practiceReport.substring(0, 500) + '...');
+        });
+        return;
 
         let report = '';
         report += '==============================\n';
@@ -1039,7 +1912,7 @@
 
         // 构建知识点映射：每个知识点对应第一道相关题目
         knowledgeMap = buildKnowledgeMapFromQuestions(questions);
-        const orderedKnowledgePoints = getOrderedKnowledgePointsFromExamData(examData, knowledgeMap);
+        orderedKnowledgePoints = getOrderedKnowledgePointsFromExamData(examData, knowledgeMap);
 
         const knowledgeList = document.getElementById('knowledgeList');
         knowledgeList.innerHTML = '';
@@ -1086,6 +1959,8 @@
 
             knowledgeList.appendChild(div);
         });
+
+        renderKnowledgeList();
     }
 
     window.selectPracticeOption = selectPracticeOption;
@@ -1106,6 +1981,7 @@
         document.getElementById('knowledgeList').parentElement.classList.remove('hidden');
         isPracticeMode = false;
         detailTrackingSessionId = null;
+        renderKnowledgeList();
     };
     window.endStudySession = function() {
         const score = document.getElementById('practiceScore').textContent;

@@ -23,7 +23,7 @@ from utils.answer import answers_match
 from utils.data_contracts import (
     canonicalize_quiz_answers,
     canonicalize_quiz_questions,
-    coerce_confidence,
+    normalize_confidence,
     normalize_option_map,
 )
 
@@ -177,7 +177,9 @@ async def submit_quiz(
         if is_correct:
             correct_count += 1
         
-        normalized_confidence = coerce_confidence(answer.confidence, default="unsure")
+        normalized_confidence = normalize_confidence(answer.confidence)
+        if normalized_confidence not in {"sure", "unsure", "no"}:
+            normalized_confidence = None
         answer_record = {
             "question_index": idx,
             "user_answer": answer.user_answer,

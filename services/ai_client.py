@@ -14,7 +14,8 @@ import json
 import asyncio
 import time as _time
 import logging
-from typing import Dict, List, Optional, Tuple
+import threading
+from typing import AsyncIterator, Dict, List, Optional, Tuple
 from pathlib import Path
 import openai
 from dotenv import load_dotenv
@@ -43,6 +44,7 @@ class AIClient:
         "gemini":      ("GEMINI",      "https://api.qingyuntop.top/v1"),
         "siliconflow": ("SILICONFLOW", "https://api.siliconflow.cn/v1"),
         "openrouter":  ("OPENROUTER",  "https://openrouter.ai/api/v1"),
+        "qingyun":     ("QINGYUN",     "https://api.qingyuntop.top/v1"),
     }
 
     def __init__(self):
@@ -87,6 +89,19 @@ class AIClient:
             if api_key:
                 client = openai.OpenAI(api_key=api_key, base_url=base_url)
                 self._providers[name] = (client, model)
+
+        # 若未显式配置 QINGYUN_*，则复用现有 GEMINI_* 的青云中转配置
+        if "qingyun" not in self._providers:
+            qingyun_key = (os.getenv("QINGYUN_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
+            qingyun_base_url = (
+                os.getenv("QINGYUN_BASE_URL")
+                or os.getenv("GEMINI_BASE_URL")
+                or self._PROVIDER_DEFS["qingyun"][1]
+            ).strip()
+            qingyun_model = (os.getenv("QINGYUN_MODEL") or "").strip()
+            if qingyun_key:
+                client = openai.OpenAI(api_key=qingyun_key, base_url=qingyun_base_url)
+                self._providers["qingyun"] = (client, qingyun_model)
 
         # 向后兼容: FAST_FALLBACK_* 作为 openrouter 的别名
         if "openrouter" not in self._providers:
@@ -349,25 +364,19 @@ class AIClient:
         temperature: float = 0.3,
         timeout: int = 120,
         use_heavy: bool = False,
+        preferred_provider: Optional[str] = None,
+        preferred_model: Optional[str] = None,
     ) -> str:
         """生成文本内容。use_heavy=True 走 Heavy池，否则走 Light池。
 
         timeout: 池级总预算（秒），会按模型数均分。
         """
-        pool = self._heavy_pool if use_heavy else self._light_pool
-        pool_name = "Heavy" if use_heavy else "Light"
+        pool, pool_name = self._compose_text_pool(
+            use_heavy=use_heavy,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+        )
         messages = [{"role": "user", "content": prompt}]
-
-        if not pool:
-            if use_heavy:
-                raise RuntimeError(
-                    "Heavy池为空：未配置任何重量级模型"
-                    "（需要 GEMINI_API_KEY 或 POOL_HEAVY）"
-                )
-            raise RuntimeError(
-                "Light池为空：未配置任何轻量级模型"
-                "（需要 DEEPSEEK_API_KEY 或 POOL_LIGHT）"
-            )
 
         return await self._call_pool(
             pool=pool,
@@ -377,6 +386,227 @@ class AIClient:
             temperature=temperature,
             timeout=timeout,
         )
+
+    def _resolve_text_pool(self, use_heavy: bool) -> Tuple[List[PoolEntry], str]:
+        pool = self._heavy_pool if use_heavy else self._light_pool
+        pool_name = "Heavy" if use_heavy else "Light"
+        if pool:
+            return pool, pool_name
+
+        if use_heavy:
+            raise RuntimeError(
+                "Heavy池为空：未配置任何重量级模型"
+                "（需要 GEMINI_API_KEY 或 POOL_HEAVY）"
+            )
+        raise RuntimeError(
+            "Light池为空：未配置任何轻量级模型"
+            "（需要 DEEPSEEK_API_KEY 或 POOL_LIGHT）"
+        )
+
+    def _resolve_direct_entry(
+        self,
+        preferred_provider: Optional[str],
+        preferred_model: Optional[str],
+    ) -> Optional[PoolEntry]:
+        provider_name = (preferred_provider or "").strip()
+        if not provider_name or provider_name == "auto":
+            return None
+
+        provider = self._providers.get(provider_name)
+        if provider is None:
+            raise RuntimeError(f"未注册的 provider: {provider_name}")
+
+        client, registered_model = provider
+        model = (preferred_model or registered_model or "").strip()
+        if not model or model == "auto":
+            raise RuntimeError(f"provider {provider_name} 未配置默认模型，且本次请求也未指定 model")
+
+        return (client, model, f"{provider_name}/{model}")
+
+    def _pool_entry_key(self, entry: PoolEntry) -> Tuple[int, str]:
+        client, model, _ = entry
+        return (id(client), model)
+
+    def _compose_text_pool(
+        self,
+        use_heavy: bool,
+        preferred_provider: Optional[str],
+        preferred_model: Optional[str],
+    ) -> Tuple[List[PoolEntry], str]:
+        direct_entry = self._resolve_direct_entry(preferred_provider, preferred_model)
+        if direct_entry is None:
+            return self._resolve_text_pool(use_heavy)
+
+        pool = [direct_entry]
+        pool_name = f"Preferred({direct_entry[2]})"
+
+        try:
+            fallback_pool, fallback_name = self._resolve_text_pool(use_heavy)
+        except Exception as exc:
+            logger.warning(
+                "Preferred model %s has no fallback pool configured: %s",
+                direct_entry[2],
+                exc,
+            )
+            return pool, pool_name
+
+        seen = {self._pool_entry_key(direct_entry)}
+        for entry in fallback_pool:
+            key = self._pool_entry_key(entry)
+            if key in seen:
+                continue
+            seen.add(key)
+            pool.append(entry)
+
+        if len(pool) > 1:
+            pool_name = f"{pool_name} -> {fallback_name}"
+        return pool, pool_name
+
+    def _extract_stream_delta(self, chunk) -> str:
+        try:
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                return ""
+            delta = getattr(choices[0], "delta", None)
+            content = getattr(delta, "content", None) if delta is not None else None
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        text = item.get("text")
+                    else:
+                        text = getattr(item, "text", None)
+                    if text:
+                        parts.append(str(text))
+                return "".join(parts)
+        except Exception:
+            return ""
+        return ""
+
+    async def _call_model_stream(
+        self,
+        client,
+        model: str,
+        provider_name: str,
+        messages: list,
+        max_tokens: int,
+        temperature: float,
+        timeout: int,
+    ) -> AsyncIterator[str]:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Tuple[str, object | None]] = asyncio.Queue()
+
+        def _push(kind: str, payload: object | None = None) -> None:
+            asyncio.run_coroutine_threadsafe(queue.put((kind, payload)), loop)
+
+        def _worker() -> None:
+            try:
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=True,
+                )
+                for chunk in stream:
+                    delta_text = self._extract_stream_delta(chunk)
+                    if delta_text:
+                        _push("delta", delta_text)
+            except Exception as exc:
+                _push("error", exc)
+            finally:
+                _push("done")
+
+        threading.Thread(
+            target=_worker,
+            name=f"ai-stream-{provider_name}",
+            daemon=True,
+        ).start()
+
+        deadline = loop.time() + timeout
+        while True:
+            remaining = max(1.0, deadline - loop.time())
+            try:
+                kind, payload = await asyncio.wait_for(queue.get(), timeout=remaining)
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(f"{provider_name}流式请求超时({timeout}s)") from exc
+
+            if kind == "delta":
+                yield str(payload or "")
+                continue
+            if kind == "error":
+                if isinstance(payload, Exception):
+                    raise payload
+                raise RuntimeError(f"{provider_name}流式调用失败")
+            break
+
+    async def generate_content_stream(
+        self,
+        prompt: str,
+        max_tokens: int = 4000,
+        temperature: float = 0.3,
+        timeout: int = 120,
+        use_heavy: bool = False,
+        preferred_provider: Optional[str] = None,
+        preferred_model: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        pool, pool_name = self._compose_text_pool(
+            use_heavy=use_heavy,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+        )
+        messages = [{"role": "user", "content": prompt}]
+        deadline = _time.time() + timeout
+        last_error: Optional[Exception] = None
+
+        for index, (client, model, display) in enumerate(pool):
+            remaining = deadline - _time.time()
+            if remaining < 10:
+                break
+
+            per_model_time = max(15, int(remaining / max(1, len(pool) - index)))
+            emitted = False
+            logger.info(f"=== {pool_name}池开始流式调用: {display}, 分配超时 {per_model_time}s ===")
+
+            try:
+                async for chunk in self._call_model_stream(
+                    client=client,
+                    model=model,
+                    provider_name=display,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=per_model_time,
+                ):
+                    if chunk:
+                        emitted = True
+                        yield chunk
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.error(f"❌ {display} 流式失败: {type(exc).__name__}: {str(exc)[:120]}")
+                if emitted:
+                    raise
+                continue
+
+        if last_error is not None:
+            logger.warning(f"{pool_name}池流式全部失败，回退到普通生成")
+            fallback_text = await self.generate_content(
+                prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                timeout=max(15, int(deadline - _time.time())),
+                use_heavy=use_heavy,
+                preferred_provider=preferred_provider,
+                preferred_model=preferred_model,
+            )
+            if fallback_text:
+                yield fallback_text
+            return
+
+        raise RuntimeError(f"{pool_name}池流式全部失败（未知错误）")
 
     def _strip_code_fence(self, text: str) -> str:
         """移除 markdown 代码块包裹，减少 JSON 解析噪声。"""
@@ -390,7 +620,13 @@ class AIClient:
         return cleaned.strip()
 
     async def _parse_json_with_repair(
-        self, text: str, schema: Dict, max_tokens: int, timeout: int
+        self,
+        text: str,
+        schema: Dict,
+        max_tokens: int,
+        timeout: int,
+        preferred_provider: Optional[str] = None,
+        preferred_model: Optional[str] = None,
     ) -> Dict:
         """解析 JSON，失败时尝试提取/修复。"""
         cleaned = self._strip_code_fence(text)
@@ -424,6 +660,8 @@ class AIClient:
             temperature=0.0,
             timeout=min(timeout, 120),
             use_heavy=False,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
         )
         repaired = self._strip_code_fence(repaired)
         try:
@@ -441,6 +679,8 @@ class AIClient:
         temperature: float = 0.2,
         timeout: int = 150,
         use_heavy: bool = False,
+        preferred_provider: Optional[str] = None,
+        preferred_model: Optional[str] = None,
     ) -> Dict:
         """生成 JSON。use_heavy=True 走 Heavy池，否则走 Light池。
 
@@ -477,11 +717,18 @@ class AIClient:
                 temperature=temperature,
                 timeout=int(remaining),
                 use_heavy=use_heavy,
+                preferred_provider=preferred_provider,
+                preferred_model=preferred_model,
             )
             try:
                 repair_remaining = max(15, int(deadline - _time.time()))
                 return await self._parse_json_with_repair(
-                    text, schema, max_tokens, repair_remaining
+                    text,
+                    schema,
+                    max_tokens,
+                    repair_remaining,
+                    preferred_provider=preferred_provider,
+                    preferred_model=preferred_model,
                 )
             except Exception as e:
                 last_error = e
@@ -521,6 +768,8 @@ class AIClient:
                     schema=schema,
                     max_tokens=min(max_tokens, 3200),
                     timeout=repair_remaining,
+                    preferred_provider=preferred_provider,
+                    preferred_model=preferred_model,
                 )
             except Exception as e:
                 last_error = e

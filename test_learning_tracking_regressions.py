@@ -23,6 +23,7 @@ from routers.learning_tracking import (
     get_stats,
     record_question_answer,
 )
+from routers.wrong_answers_v2 import sync_wrong_answers
 
 
 def run(coro):
@@ -204,6 +205,89 @@ def test_get_stats_uses_deduped_question_records_as_single_source(tmp_path):
         assert stats["sessions"][0]["total_questions"] == 99
         assert stats["type_distribution"]["A1"]["count"] == 1
         assert stats["type_distribution"]["A2"]["count"] == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_missing_confidence_is_preserved_and_excluded_from_stats(tmp_path):
+    db, engine = make_db_session(tmp_path)
+    try:
+        session = make_session(db, "session-missing-confidence")
+
+        payload = RecordQuestionRequest(
+            question_index=0,
+            question_type="A1",
+            difficulty="基础",
+            question_text="What is the diagnosis?",
+            options={"A": "Option A", "B": "Option B"},
+            correct_answer="A",
+            user_answer="A",
+            is_correct=True,
+            confidence=None,
+            explanation="Because of the classic presentation.",
+            key_point="诊断思路",
+            time_spent_seconds=15,
+        )
+
+        run(record_question_answer(session.id, payload, db))
+
+        refreshed = db.get(LearningSession, session.id)
+        stored_record = db.query(QuestionRecord).filter(
+            QuestionRecord.session_id == session.id
+        ).one()
+        stats = run(get_stats(period="all", db=db))
+
+        assert stored_record.confidence is None
+        assert refreshed.sure_count == 0
+        assert refreshed.unsure_count == 0
+        assert refreshed.no_count == 0
+        assert stats["summary"]["sure_count"] == 0
+        assert stats["summary"]["unsure_count"] == 0
+        assert stats["summary"]["no_count"] == 0
+        assert stats["sessions"][0]["question_details"][0]["confidence"] is None
+        assert stats["knowledge_points"]["诊断思路"]["avg_confidence"] == 0.0
+        assert stats["knowledge_points"]["诊断思路"]["has_confidence_data"] is False
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_sync_wrong_answers_accepts_legacy_dont_know_as_landmine(tmp_path):
+    db, engine = make_db_session(tmp_path)
+    try:
+        session = make_session(
+            db,
+            "session-legacy-dont-know",
+            chapter_id="physio_ch16",
+        )
+
+        db.add(
+            QuestionRecord(
+                session_id=session.id,
+                question_index=0,
+                question_type="A1",
+                difficulty="基础",
+                question_text="Legacy confidence question",
+                options={"A": "Option A", "B": "Option B"},
+                correct_answer="A",
+                user_answer="A",
+                is_correct=True,
+                confidence="dont_know",
+                key_point="旧合同兼容",
+                answered_at=datetime.now(),
+            )
+        )
+        db.commit()
+
+        result = run(sync_wrong_answers(db=db))
+        wrong_answer = db.query(WrongAnswerV2).one()
+
+        assert result["created"] == 1
+        assert result["updated"] == 0
+        assert wrong_answer.severity_tag == "landmine"
+        assert wrong_answer.error_count == 0
+        assert wrong_answer.encounter_count == 1
     finally:
         db.close()
         engine.dispose()

@@ -671,6 +671,8 @@ class BatchExamDetailKnowledgePointStat(BaseModel):
     mastery_penalty: float = 0.0
     priority_score: float = 0.0
     original_order: int = 0
+    practice_session_count: int = 0
+    last_practiced_at: Optional[str] = None
 
 
 class BatchExamDetailResponse(BaseModel):
@@ -963,6 +965,7 @@ class HistoryLearningStatsResponse(BaseModel):
     total_uploads: int
     weekly_uploads: int
     latest_study_date: Optional[str] = None
+    streak_days: int = 0
     book_distribution: Dict[str, int] = Field(default_factory=dict)
 
 

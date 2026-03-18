@@ -9,6 +9,8 @@ from learning_tracking_models import WrongAnswerV2
 from main import app
 from migrate_json_contracts import run_migration
 from models import Chapter, ConceptMastery, SessionLocal, TestRecord, WrongAnswer
+from schemas import QuizSubmission
+from services.agent_actions import _confidence_ratio
 from services.fusion_service import get_fusion_service
 from utils.data_contracts import (
     SCHEMA_VERSION,
@@ -89,7 +91,18 @@ def test_coerce_confidence_normalizes_blank_and_aliases():
     assert coerce_confidence("sure") == "sure"
 
 
-def test_tracking_question_endpoint_coerces_empty_confidence():
+def test_quiz_submission_accepts_canonical_no_confidence():
+    payload = QuizSubmission(test_id=1, user_answer="A", confidence="no")
+    assert payload.confidence == "no"
+
+
+def test_agent_confidence_ratio_treats_missing_as_neutral():
+    assert _confidence_ratio(None) == 0.5
+    assert _confidence_ratio("") == 0.5
+    assert _confidence_ratio("dont_know") == 0.35
+
+
+def test_tracking_question_endpoint_preserves_empty_confidence():
     client = TestClient(app)
 
     start_response = client.post(
@@ -121,7 +134,7 @@ def test_tracking_question_endpoint_coerces_empty_confidence():
     detail_response = client.get(f"/api/tracking/session/{session_id}")
     assert detail_response.status_code == 200
     payload = detail_response.json()
-    assert payload["questions"][0]["confidence"] == "unsure"
+    assert payload["questions"][0]["confidence"] is None
 
 
 def test_llm_context_endpoint_returns_stable_bundle():
@@ -198,7 +211,7 @@ def test_tracking_question_endpoint_canonicalizes_answer_changes():
     payload = detail_response.json()
     question = payload["questions"][0]
 
-    assert question["confidence"] == "unsure"
+    assert question["confidence"] is None
     assert list(question["options"].keys()) == ["A", "B"]
     assert question["answer_changes"][0]["from"] == "B"
     assert question["answer_changes"][0]["to"] == "A"
@@ -234,7 +247,7 @@ def test_quiz_payload_canonicalizers_normalize_nested_session_shapes():
     assert questions[0]["options"] == {"A": "A项", "B": "B项"}
     assert questions[0]["correct_answer"] == "B"
     assert questions[0]["key_points"] == ["循环"]
-    assert answers[0]["confidence"] == "unsure"
+    assert answers[0]["confidence"] is None
     assert answers[0]["time_spent"] == 12
     assert answers[0]["question_index"] == 0
     assert answers[0]["weak_points"] == ["计算"]
@@ -400,7 +413,7 @@ def test_quiz_fast_routes_persist_canonicalized_json(monkeypatch):
     )
     assert submit_response.status_code == 200
     submit_payload = submit_response.json()
-    assert submit_payload["answers"][0]["confidence"] == "unsure"
+    assert submit_payload["answers"][0]["confidence"] is None
     assert submit_payload["answers"][0]["weak_points"] == ["计算"]
 
     db = SessionLocal()
@@ -481,7 +494,7 @@ def test_quiz_concurrent_routes_persist_canonicalized_json(monkeypatch):
     )
     assert submit_response.status_code == 200
     submit_payload = submit_response.json()
-    assert submit_payload["answers"][0]["confidence"] == "unsure"
+    assert submit_payload["answers"][0]["confidence"] is None
     assert submit_payload["answers"][0]["weak_points"] == ["链接"]
 
     db = SessionLocal()
@@ -688,7 +701,7 @@ def test_json_contract_migration_normalizes_major_columns(tmp_path):
 
     assert questions[0]["options"] == {"A": "Option A", "B": "Option B"}
     assert questions[0]["correct_answer"] == "B"
-    assert answers[0]["confidence"] == "unsure"
+    assert answers[0]["confidence"] is None
     assert answers[0]["weak_points"] == ["计算"]
     assert ai_options == {"A": "Option A", "B": "Option B"}
     assert wrong_options == {"A": "Option A", "B": "Option B"}

@@ -11,6 +11,7 @@ aiofiles>=23.2.0
 
 # AI API
 openai>=1.0.0
+httpx>=0.25.0
 
 # 数据库
 sqlalchemy>=2.0.23
@@ -23,6 +24,7 @@ python-dotenv>=1.0.0
 
 # 文档解析
 pypdf>=4.2.0
+reportlab>=4.2.0
 
 # Testing
 pytest>=9.0.0

@@ -1,12 +1,18 @@
 Set WshShell = CreateObject("WScript.Shell")
 Set objWMIService = GetObject("winmgmts://./root/cimv2")
+Set fso = CreateObject("Scripting.FileSystemObject")
 
 ProjectPath = "C:\Users\35456\true-learning-system"
 ServerURL = "http://localhost:8000"
+PythonExe = WshShell.ExpandEnvironmentStrings("%LocalAppData%") & "\Programs\Python\Python312\python.exe"
 
-' Check if already running (兼容 main.py 与 uvicorn main:app 两种启动方式)
+If Not fso.FileExists(PythonExe) Then
+    PythonExe = "python"
+End If
+
+' Check if already running (兼容 python.exe / pythonw.exe 以及 main.py / uvicorn main:app 两种启动方式)
 Set colProcesses = objWMIService.ExecQuery( _
-    "Select * from Win32_Process Where Name = 'python.exe' AND (" & _
+    "Select * from Win32_Process Where (Name = 'python.exe' OR Name = 'pythonw.exe') AND (" & _
     "CommandLine LIKE '%main.py%' OR " & _
     "CommandLine LIKE '%main:app%' OR " & _
     "CommandLine LIKE '%uvicorn%main:app%')")
@@ -19,7 +25,11 @@ End If
 
 ' Not running, start server silently (window style 0 = hidden)
 WshShell.CurrentDirectory = ProjectPath
-WshShell.Run "cmd /c python -m uvicorn main:app --host 0.0.0.0 --port 8000 --no-access-log", 0, False
+If InStr(PythonExe, "\") > 0 Then
+    WshShell.Run """" & PythonExe & """ -m uvicorn main:app --host 0.0.0.0 --port 8000 --no-access-log", 0, False
+Else
+    WshShell.Run "python -m uvicorn main:app --host 0.0.0.0 --port 8000 --no-access-log", 0, False
+End If
 
 ' Wait and check server health (retry up to 10 times)
 Dim http

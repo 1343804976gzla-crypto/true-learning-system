@@ -21,7 +21,7 @@ from utils.data_contracts import (
     canonicalize_string_list,
     canonicalize_quiz_answers,
     canonicalize_quiz_questions,
-    coerce_confidence,
+    normalize_confidence,
     normalize_option_map,
 )
 
@@ -292,7 +292,9 @@ async def submit_pre_gen_quiz(
         if is_correct:
             correct_count += 1
         
-        normalized_confidence = coerce_confidence(answer.get("confidence"), default="unsure")
+        normalized_confidence = normalize_confidence(answer.get("confidence"))
+        if normalized_confidence not in {"sure", "unsure", "no"}:
+            normalized_confidence = None
         record = {
             "question_index": i,
             "test_id": question["test_id"],

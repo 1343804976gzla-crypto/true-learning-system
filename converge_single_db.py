@@ -4,18 +4,15 @@ Converge repository to a single SQLite database.
 Strategy:
 1) Resolve active DB from DATABASE_PATH in .env (fallback: data/learning.db).
 2) If root learning.db exists and is different:
-   - backup root DB
-   - replace root learning.db with a COPY of active DB (snapshot)
-   - set root DB as read-only (best effort), so accidental writes are blocked.
+   - rename root learning.db to a timestamped legacy backup
 
-This avoids silent divergence while keeping compatibility for legacy scripts
-that may still point to ./learning.db.
+This removes the ambiguous duplicate path entirely, so the app only uses the
+DATABASE_PATH target and old snapshots can no longer silently drift.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -55,29 +52,17 @@ def main() -> None:
         return
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    root_bak = root.with_suffix(root.suffix + f".legacy.bak.{ts}")
-    shutil.copy2(root, root_bak)
-    print(f"[backup-root] {root_bak}")
+    root_bak = root.with_suffix(root.suffix + f".legacy.detached.{ts}")
 
-    # Ensure root is writable before overwrite
     try:
         os.chmod(root, 0o666)
     except Exception:
         pass
 
-    shutil.copy2(active, root)
-    print("[sync] root learning.db replaced by active DB snapshot.")
-
-    # Best effort: mark as read-only to prevent accidental divergence
-    try:
-        os.chmod(root, 0o444)
-        print("[lock] root learning.db set to read-only.")
-    except Exception as e:
-        print(f"[warn] failed to set read-only: {e}")
-
-    print("[done] single-db convergence applied.")
+    root.rename(root_bak)
+    print(f"[detach-root] {root_bak}")
+    print("[done] single-db convergence applied; only the active DB remains in use.")
 
 
 if __name__ == "__main__":
     main()
-

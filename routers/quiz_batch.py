@@ -11,6 +11,7 @@ import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api_contracts import (
@@ -22,12 +23,18 @@ from api_contracts import (
     BatchVariationResponse,
 )
 from models import get_db, QuizSession, WrongAnswer, ConceptMastery, Chapter
-from learning_tracking_models import WrongAnswerV2, make_fingerprint, INVALID_CHAPTER_IDS
+from learning_tracking_models import (
+    INVALID_CHAPTER_IDS,
+    LearningSession,
+    SessionStatus,
+    WrongAnswerV2,
+    make_fingerprint,
+)
 from services.quiz_service_v2 import get_quiz_service
 from utils.data_contracts import (
     canonicalize_quiz_answers,
     canonicalize_quiz_questions,
-    coerce_confidence,
+    normalize_confidence,
     normalize_option_map,
 )
 
@@ -62,11 +69,37 @@ def _get_question_key_point(question: Dict[str, Any], index: int) -> str:
     return key_point or f"考点{index + 1}"
 
 
-def _severity_from_confidence(confidence: str) -> str:
-    normalized = coerce_confidence(confidence, default="unsure")
-    if normalized == "sure":
+def _normalize_marked_confidence(value: Any) -> Optional[str]:
+    normalized = normalize_confidence(value)
+    if normalized in {"sure", "unsure", "no"}:
+        return normalized
+    return None
+
+
+def _extract_submitted_confidence(
+    confidence_map: Optional[Dict[Any, Any]],
+    question_index: int,
+) -> Optional[str]:
+    if not isinstance(confidence_map, dict):
+        return None
+
+    for key in (str(question_index), question_index, str(question_index + 1), question_index + 1):
+        normalized = _normalize_marked_confidence(confidence_map.get(key))
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _is_low_confidence(confidence: Optional[str]) -> bool:
+    return confidence in {"unsure", "no"}
+
+
+def _compute_exam_follow_up_severity(is_correct: bool, confidence: Optional[str], error_count: int) -> str:
+    if confidence == "sure" and not is_correct:
         return "critical"
-    if normalized in {"unsure", "no"}:
+    if error_count >= 2:
+        return "stubborn"
+    if _is_low_confidence(confidence) and is_correct:
         return "landmine"
     return "normal"
 
@@ -91,7 +124,7 @@ def _normalize_fuzzy_option_list(raw_options: Any, question_options: Optional[Di
 
 def _build_fuzzy_option_cache(
     questions: List[Dict[str, Any]],
-    confidence: Optional[Dict[str, str]],
+    confidence: Optional[Dict[str, Optional[str]]],
     fuzzy_options: Optional[Dict[str, List[str]]],
 ) -> Dict[str, Dict[str, Any]]:
     cached: Dict[str, Dict[str, Any]] = {}
@@ -108,10 +141,7 @@ def _build_fuzzy_option_cache(
         if question_index < 0 or question_index >= len(questions):
             continue
 
-        conf = coerce_confidence(
-            confidence_map.get(str(question_index), confidence_map.get(question_index, "")),
-            default="unsure",
-        )
+        conf = _extract_submitted_confidence(confidence_map, question_index)
         if conf != "unsure":
             continue
 
@@ -133,6 +163,154 @@ def _build_fuzzy_option_cache(
         }
 
     return cached
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_batch_submit_analysis(score: int, wrong_count: int, total: int) -> str:
+    if total <= 0:
+        return "本次未记录到有效题目，建议重新生成试卷后再提交。"
+    if wrong_count <= 0:
+        return "本次全部答对，建议继续保持并复盘高频考点。"
+    if score >= 80:
+        return "整体掌握较稳，建议集中复盘错题并补强少量薄弱点。"
+    if score >= 60:
+        return "基础尚可，但仍有明显错题，建议按错题考点逐个回看。"
+    return "当前薄弱点较多，建议先回到对应章节系统复习，再重新做题巩固。"
+
+
+def _normalize_batch_submit_result(
+    result: Any,
+    questions: List[Dict[str, Any]],
+    answers: List[str],
+    confidence: Optional[Dict[str, Optional[str]]],
+) -> Dict[str, Any]:
+    normalized_result = dict(result or {})
+    question_count = len(questions)
+    raw_details = normalized_result.get("details")
+    if not isinstance(raw_details, list):
+        raw_details = []
+
+    computed_wrong_by_difficulty: Dict[str, int] = {"基础": 0, "提高": 0, "难题": 0}
+    computed_confidence_analysis: Dict[str, int] = {
+        "sure": 0,
+        "unsure": 0,
+        "no": 0,
+        "marked_count": 0,
+        "missing_count": 0,
+        "sure_rate": 0,
+        "unsure_rate": 0,
+        "no_rate": 0,
+    }
+    computed_weak_points: List[str] = []
+    normalized_details: List[Dict[str, Any]] = []
+    computed_correct_count = 0
+
+    for index, question in enumerate(questions):
+        detail = raw_details[index] if index < len(raw_details) and isinstance(raw_details[index], dict) else {}
+        question_id = _safe_int(question.get("id"), index + 1)
+        question_type = str(detail.get("type") or question.get("type") or "").strip() or None
+        difficulty = str(detail.get("difficulty") or question.get("difficulty") or "").strip() or None
+        user_answer = str(detail.get("user_answer") or answers[index] or "").strip() or None
+        correct_answer = str(detail.get("correct_answer") or question.get("correct_answer") or "").strip() or None
+        explanation = str(detail.get("explanation") or question.get("explanation") or "").strip() or None
+        key_point = str(detail.get("key_point") or question.get("key_point") or _get_question_key_point(question, index)).strip() or None
+        related_questions = str(detail.get("related_questions") or "").strip() or None
+        normalized_confidence = _extract_submitted_confidence(confidence, index)
+        if normalized_confidence is None:
+            normalized_confidence = _normalize_marked_confidence(detail.get("confidence"))
+        is_correct = bool(detail.get("is_correct"))
+
+        normalized_detail = {
+            "id": question_id,
+            "type": question_type,
+            "difficulty": difficulty,
+            "user_answer": user_answer,
+            "correct_answer": correct_answer,
+            "is_correct": is_correct,
+            "confidence": normalized_confidence,
+            "explanation": explanation,
+            "key_point": key_point,
+            "related_questions": related_questions,
+        }
+        normalized_details.append(normalized_detail)
+
+        if is_correct:
+            computed_correct_count += 1
+        else:
+            if difficulty:
+                computed_wrong_by_difficulty[difficulty] = computed_wrong_by_difficulty.get(difficulty, 0) + 1
+            if key_point:
+                weak_point = key_point if not difficulty else f"{key_point}({difficulty})"
+                if weak_point not in computed_weak_points:
+                    computed_weak_points.append(weak_point)
+
+        if normalized_confidence is None:
+            computed_confidence_analysis["missing_count"] += 1
+        else:
+            computed_confidence_analysis[normalized_confidence] += 1
+            computed_confidence_analysis["marked_count"] += 1
+
+    correct_count = _safe_int(normalized_result.get("correct_count"), computed_correct_count)
+    total = _safe_int(normalized_result.get("total"), question_count)
+    if total <= 0:
+        total = question_count
+    wrong_count = _safe_int(normalized_result.get("wrong_count"), max(total - correct_count, 0))
+    score = _safe_int(
+        normalized_result.get("score"),
+        int(round(correct_count / total * 100)) if total > 0 else 0,
+    )
+
+    existing_wrong_by_difficulty = normalized_result.get("wrong_by_difficulty")
+    if isinstance(existing_wrong_by_difficulty, dict):
+        wrong_by_difficulty = {
+            key: _safe_int(value, computed_wrong_by_difficulty.get(key, 0))
+            for key, value in existing_wrong_by_difficulty.items()
+        }
+        for key, value in computed_wrong_by_difficulty.items():
+            wrong_by_difficulty.setdefault(key, value)
+    else:
+        wrong_by_difficulty = computed_wrong_by_difficulty
+
+    marked_count = computed_confidence_analysis["marked_count"]
+    confidence_analysis = dict(computed_confidence_analysis)
+    for level in ("sure", "unsure", "no"):
+        rate_key = f"{level}_rate"
+        confidence_analysis[rate_key] = (
+            int(round(confidence_analysis[level] / marked_count * 100))
+            if marked_count > 0
+            else 0
+        )
+
+    existing_weak_points = normalized_result.get("weak_points")
+    if isinstance(existing_weak_points, list):
+        weak_points = []
+        for item in existing_weak_points:
+            text = str(item or "").strip()
+            if text and text not in weak_points:
+                weak_points.append(text)
+    else:
+        weak_points = computed_weak_points
+
+    normalized_result["score"] = score
+    normalized_result["correct_count"] = correct_count
+    normalized_result["wrong_count"] = wrong_count
+    normalized_result["total"] = total
+    normalized_result["wrong_by_difficulty"] = wrong_by_difficulty
+    normalized_result["confidence_analysis"] = confidence_analysis
+    normalized_result["details"] = normalized_details
+    normalized_result["weak_points"] = weak_points
+    normalized_result["analysis"] = str(
+        normalized_result.get("analysis")
+        or _build_batch_submit_analysis(score, wrong_count, total)
+    ).strip()
+
+    return normalized_result
 
 
 def _aggregate_exam_wrong_questions(wrong_questions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -195,10 +373,35 @@ def _build_detail_knowledge_order(exam: Dict[str, Any], db: Session) -> Tuple[Li
         current_value = understanding_map.get(kp_name, 0.0)
         understanding_map[kp_name] = max(current_value, float(understanding or 0.0))
 
+    practice_history_map: Dict[str, Dict[str, Any]] = {}
+    if knowledge_points:
+        practice_query = db.query(
+            LearningSession.knowledge_point,
+            func.count(LearningSession.id),
+            func.max(LearningSession.completed_at),
+        ).filter(
+            LearningSession.session_type == "detail_practice",
+            LearningSession.knowledge_point.in_(knowledge_points),
+            LearningSession.completed_at.isnot(None),
+            LearningSession.status == SessionStatus.COMPLETED,
+        )
+        if chapter_id:
+            practice_query = practice_query.filter(LearningSession.chapter_id == chapter_id)
+
+        for knowledge_point, practice_count, last_practiced_at in practice_query.group_by(LearningSession.knowledge_point).all():
+            normalized_key = str(knowledge_point or "").strip()
+            if not normalized_key:
+                continue
+            practice_history_map[normalized_key] = {
+                "practice_session_count": int(practice_count or 0),
+                "last_practiced_at": last_practiced_at.isoformat() if last_practiced_at else None,
+            }
+
     stats_map: Dict[str, Dict[str, Any]] = {}
     ranked_rows = []
     for key_point in knowledge_points:
         wrong_data = wrong_summary.get(key_point, {})
+        practice_data = practice_history_map.get(key_point, {})
         understanding = min(1.0, max(0.0, float(understanding_map.get(key_point, 0.0))))
         mastery_penalty = round((1.0 - understanding) * 10, 2)
         error_count = int(wrong_data.get("error_count") or 0)
@@ -217,6 +420,8 @@ def _build_detail_knowledge_order(exam: Dict[str, Any], db: Session) -> Tuple[Li
             "mastery_penalty": mastery_penalty,
             "priority_score": priority_score,
             "original_order": original_order[key_point],
+            "practice_session_count": int(practice_data.get("practice_session_count") or 0),
+            "last_practiced_at": practice_data.get("last_practiced_at"),
         }
         stats_map[key_point] = stats
         ranked_rows.append(stats)
@@ -231,7 +436,7 @@ class GenerateRequest(BaseModel):
 
 class SubmitRequest(BaseModel):
     answers: List[str]
-    confidence: Optional[Dict[str, str]] = {}
+    confidence: Optional[Dict[str, Optional[str]]] = {}
     fuzzy_options: Optional[Dict[str, List[str]]] = {}
 
 class GenerateVariationRequest(BaseModel):
@@ -352,10 +557,11 @@ async def submit_exam(
         raise HTTPException(status_code=404, detail="试卷已过期或不存在")
 
     answers = request.answers
-    confidence = {
-        str(key): coerce_confidence(value, default="unsure")
-        for key, value in (request.confidence or {}).items()
-    }
+    confidence: Dict[str, Optional[str]] = {}
+    for key, value in (request.confidence or {}).items():
+        normalized_confidence = _normalize_marked_confidence(value)
+        if normalized_confidence is not None:
+            confidence[str(key)] = normalized_confidence
     fuzzy_options = request.fuzzy_options or {}
     questions = exam.get("questions", [])
     num_questions = exam.get("num_questions", 10)
@@ -367,6 +573,7 @@ async def submit_exam(
     
     quiz_service = get_quiz_service()
     result = quiz_service.grade_paper(questions, answers, confidence)
+    result = _normalize_batch_submit_result(result, questions, answers, confidence)
     exam_fuzzy_options = _build_fuzzy_option_cache(questions, confidence, fuzzy_options)
     result["fuzzy_options"] = exam_fuzzy_options
     exam_wrong_questions = []
@@ -431,6 +638,9 @@ async def submit_exam(
         }
         for i in range(num_questions)
     ])
+    for i, item in enumerate(normalized_answers):
+        if result["details"][i].get("confidence") is None:
+            item["confidence"] = None
 
     quiz_session = QuizSession(
         session_type=f"exam_{num_questions}",
@@ -444,7 +654,7 @@ async def submit_exam(
     )
     db.add(quiz_session)
 
-    def ensure_concept_for_wrong(q: dict, q_index: int) -> str:
+    def ensure_concept_for_question(q: dict, q_index: int) -> ConceptMastery:
         target_chapter_id = session_chapter_id or "uncategorized_ch0"
 
         chapter = db.query(Chapter).filter(Chapter.id == target_chapter_id).first()
@@ -467,6 +677,11 @@ async def submit_exam(
 
         concept = db.query(ConceptMastery).filter(ConceptMastery.concept_id == concept_id).first()
         if not concept:
+            concept = db.query(ConceptMastery).filter(
+                ConceptMastery.chapter_id == target_chapter_id,
+                ConceptMastery.name == key_point,
+            ).first()
+        if not concept:
             concept = ConceptMastery(
                 concept_id=concept_id,
                 chapter_id=target_chapter_id,
@@ -478,11 +693,144 @@ async def submit_exam(
             db.add(concept)
             db.flush()
 
-        return concept_id
+        return concept
+
+    def apply_exam_result_to_concept(concept: Optional[ConceptMastery], detail: Dict[str, Any]) -> None:
+        if concept is None:
+            return
+
+        normalized_confidence = _normalize_marked_confidence(detail.get("confidence"))
+        concept.last_tested = date.today()
+
+        if detail["is_correct"]:
+            retention_gain = {"sure": 0.12, "unsure": 0.08, "no": 0.05}.get(normalized_confidence, 0.1)
+            application_gain = {"sure": 0.10, "unsure": 0.06, "no": 0.04}.get(normalized_confidence, 0.08)
+            review_interval = {"sure": 7, "unsure": 3, "no": 2}.get(normalized_confidence, 5)
+
+            concept.retention = min(1.0, float(concept.retention or 0.0) + retention_gain)
+            concept.application = min(1.0, float(concept.application or 0.0) + application_gain)
+            concept.next_review = date.today() + timedelta(days=review_interval)
+            return
+
+        retention_drop = {"sure": 0.08, "unsure": 0.05, "no": 0.04}.get(normalized_confidence, 0.06)
+        application_drop = {"sure": 0.10, "unsure": 0.06, "no": 0.04}.get(normalized_confidence, 0.08)
+
+        concept.retention = max(0.0, float(concept.retention or 0.0) - retention_drop)
+        concept.application = max(0.0, float(concept.application or 0.0) - application_drop)
+        concept.next_review = date.today() + timedelta(days=1)
+
+    severity_order = {"normal": 0, "landmine": 1, "stubborn": 2, "critical": 3}
+
+    question_concepts = {
+        i: ensure_concept_for_question(question, i)
+        for i, question in enumerate(questions)
+    }
 
     # 错题录入：使用 WrongAnswerV2 系统（带指纹去重）
     for i, detail in enumerate(result["details"]):
-        if not detail["is_correct"]:
+        apply_exam_result_to_concept(question_concepts.get(i), detail)
+
+        question = questions[i]
+        normalized_confidence = _normalize_marked_confidence(detail.get("confidence"))
+        should_track_follow_up = (not detail["is_correct"]) or (
+            detail["is_correct"] and _is_low_confidence(normalized_confidence)
+        )
+        if not should_track_follow_up:
+            continue
+
+        key_point = _get_question_key_point(question, i)
+        event_error_count = 0 if detail["is_correct"] else 1
+        current_exam_severity = _compute_exam_follow_up_severity(
+            detail["is_correct"],
+            normalized_confidence,
+            event_error_count,
+        )
+        exam_wrong_questions.append(
+            {
+                "key_point": key_point,
+                "severity_tag": current_exam_severity,
+                "error_count": event_error_count,
+                "question_index": i,
+            }
+        )
+
+        question_text = question.get("question", "")
+        fingerprint = make_fingerprint(question_text)
+        wrong_chapter_id = session_chapter_id or "uncategorized_ch0"
+        now = datetime.now()
+
+        existing = db.query(WrongAnswerV2).filter(
+            WrongAnswerV2.question_fingerprint == fingerprint
+        ).first()
+
+        if existing:
+            existing.question_text = question_text
+            existing.options = normalize_option_map(question.get("options"))
+            existing.correct_answer = question.get("correct_answer", "")
+            existing.explanation = question.get("explanation", "")
+            existing.key_point = question.get("key_point", "") or key_point
+            existing.question_type = question.get("type", "A1")
+            existing.difficulty = question.get("difficulty", "鍩虹")
+            existing.chapter_id = wrong_chapter_id or existing.chapter_id
+            existing.encounter_count = int(existing.encounter_count or 0) + 1
+            existing.mastery_status = "active"
+
+            if not detail["is_correct"]:
+                existing.error_count = int(existing.error_count or 0) + 1
+                existing.last_wrong_at = now
+                if not existing.first_wrong_at:
+                    existing.first_wrong_at = now
+            elif not existing.first_wrong_at:
+                existing.first_wrong_at = now
+                existing.last_wrong_at = now
+
+            computed_severity = _compute_exam_follow_up_severity(
+                detail["is_correct"],
+                normalized_confidence,
+                int(existing.error_count or 0),
+            )
+            if severity_order.get(computed_severity, 0) > severity_order.get(existing.severity_tag or "normal", 0):
+                existing.severity_tag = computed_severity
+            existing.updated_at = now
+
+            print(
+                f"[WrongAnswer] 鏇存柊棰樼洰: {fingerprint[:8]}... "
+                f"(error_count={existing.error_count}, severity={existing.severity_tag})"
+            )
+            continue
+
+        severity = _compute_exam_follow_up_severity(
+            detail["is_correct"],
+            normalized_confidence,
+            event_error_count,
+        )
+        wrong = WrongAnswerV2(
+            question_fingerprint=fingerprint,
+            question_text=question_text,
+            options=normalize_option_map(question.get("options")),
+            correct_answer=question.get("correct_answer", ""),
+            explanation=question.get("explanation", ""),
+            key_point=question.get("key_point", "") or key_point,
+            question_type=question.get("type", "A1"),
+            difficulty=question.get("difficulty", "鍩虹"),
+            chapter_id=wrong_chapter_id,
+            error_count=event_error_count,
+            encounter_count=1,
+            severity_tag=severity,
+            mastery_status="active",
+            first_wrong_at=now,
+            last_wrong_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(wrong)
+        print(
+            f"[WrongAnswer] 鏂板棰樼洰: {fingerprint[:8]}... "
+            f"(error_count={event_error_count}, severity={severity})"
+        )
+        continue
+
+        if False and not detail["is_correct"]:
             question = questions[i]
             key_point = _get_question_key_point(question, i)
             current_exam_severity = _severity_from_confidence(detail.get("confidence"))
@@ -520,7 +868,7 @@ async def submit_exam(
                 print(f"[WrongAnswer] 更新已有错题: {fingerprint[:8]}... (错误次数: {existing.error_count})")
             else:
                 # 不存在：创建新错题
-                concept_id = ensure_concept_for_wrong(question, i)
+                concept_id = question_concepts[i].concept_id
                 wrong_chapter_id = session_chapter_id or "uncategorized_ch0"
 
                 # 判断初始严重度

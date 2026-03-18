@@ -58,6 +58,8 @@ class DailyUpload(Base):
     __tablename__ = "daily_uploads"
     
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
     date = Column(Date, nullable=False, index=True)
     raw_content = Column(Text, nullable=False)  # 原始讲课内容
     ai_extracted = Column(JSON)  # AI识别结果
@@ -86,6 +88,8 @@ class ConceptMastery(Base):
     """知识点掌握状态"""
     __tablename__ = "concept_mastery"
     
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
     concept_id = Column(String, primary_key=True, index=True)  # 如: "medicine_ch2-1_hf_def"
     chapter_id = Column(String, ForeignKey("chapters.id"), nullable=False)
     name = Column(String, nullable=False)  # 知识点名称
@@ -106,6 +110,8 @@ class TestRecord(Base):
     __tablename__ = "test_records"
     
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
     concept_id = Column(String, ForeignKey("concept_mastery.concept_id"))
     test_type = Column(String)  # 'ai_quiz', 'feynman', 'variation'
     
@@ -117,7 +123,7 @@ class TestRecord(Base):
     
     # 用户回答
     user_answer = Column(String)
-    confidence = Column(String)  # 'sure', 'unsure', 'dont_know'
+    confidence = Column(String)  # 'sure', 'unsure', 'no'
     
     # AI批改结果
     is_correct = Column(Boolean)

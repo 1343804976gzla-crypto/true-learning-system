@@ -18,6 +18,16 @@ from models import get_db, DailyUpload, Chapter
 router = APIRouter(prefix="/api/history", tags=["history"])
 
 
+def _compute_streak_days(study_dates):
+    normalized_dates = {item for item in study_dates if item}
+    streak = 0
+    cursor = date.today()
+    while cursor in normalized_dates:
+        streak += 1
+        cursor -= timedelta(days=1)
+    return streak
+
+
 @router.get("/uploads", response_model=HistoryUploadResponse)
 async def get_upload_history(
     days: int = 30,
@@ -88,11 +98,15 @@ async def get_learning_stats(
     latest = db.query(DailyUpload).order_by(
         DailyUpload.date.desc()
     ).first()
+
+    study_dates = [row[0] for row in db.query(DailyUpload.date).distinct().all()]
+    streak_days = _compute_streak_days(study_dates)
     
     return {
         "total_uploads": total_uploads,
         "weekly_uploads": weekly_uploads,
         "latest_study_date": latest.date.isoformat() if latest else None,
+        "streak_days": streak_days,
         "book_distribution": book_stats
     }
 

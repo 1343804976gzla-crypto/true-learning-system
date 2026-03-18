@@ -19,3 +19,9 @@ env/
 *.sqlite3
 *.log
 .gitnexus
+
+# Node / Next
+node_modules/
+.next/
+.npm-cache/
+tsconfig.tsbuildinfo

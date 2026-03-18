@@ -29,6 +29,7 @@ echo 📍 项目路径: %cd%
 echo 🌐 访问地址: http://localhost:8000
 echo.
 
+set TLS_RELOAD=1
 start /B python main.py
 
 echo.

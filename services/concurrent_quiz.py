@@ -6,6 +6,11 @@
 import asyncio
 from typing import List, Dict, Any
 from services.ai_client import get_ai_client
+from utils.data_contracts import normalize_confidence
+
+
+def _empty_confidence_stats() -> Dict[str, int]:
+    return {"sure": 0, "unsure": 0, "no": 0, "missing": 0}
 
 class ConcurrentQuizGenerator:
     """并发题目生成器"""
@@ -323,9 +328,12 @@ class AIAnalyzer:
             all_weak_points.extend(r.get("weak_points", []))
         
         # 统计信心度
-        confidence_stats = {"sure": 0, "unsure": 0, "dont_know": 0}
+        confidence_stats = _empty_confidence_stats()
         for a in answers:
-            conf = a.get("confidence", "unsure")
+            conf = normalize_confidence(a.get("confidence"))
+            if conf not in {"sure", "unsure", "no"}:
+                confidence_stats["missing"] += 1
+                continue
             confidence_stats[conf] = confidence_stats.get(conf, 0) + 1
         
         # 构建分析提示词
@@ -385,7 +393,8 @@ class AIAnalyzer:
 信心度分布:
 - 确定会: {confidence_stats.get('sure', 0)}题
 - 有点模糊: {confidence_stats.get('unsure', 0)}题
-- 完全不会: {confidence_stats.get('dont_know', 0)}题
+- 完全不会: {confidence_stats.get('no', 0)}题
+- 未标记: {confidence_stats.get('missing', 0)}题
 
 答题情况:
 {chr(10).join(answer_summary)}

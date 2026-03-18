@@ -13,6 +13,7 @@ REM 等待端口释放
 timeout /t 1 /nobreak >nul
 
 REM 启动服务器（后台运行）
+set TLS_RELOAD=1
 start /B pythonw main.py
 
 REM 等待服务器启动

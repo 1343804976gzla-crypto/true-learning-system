@@ -17,7 +17,7 @@
             <p class="text-gray-500" id="archiveSubtitle">加载中...</p>
         </div>
         <div class="flex space-x-2">
-            <button onclick="exportArchiveMarkdown()" class="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600">📝 导出Markdown</button>
+            <button onclick="downloadArchiveDailyReviewPdf(event)" class="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600">🧾 导出今日复习PDF</button>
             <button onclick="loadArchiveData()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">🔄 刷新</button>
         </div>
     </div>
@@ -179,7 +179,133 @@ function toggleKp(idx){
     else{panel.classList.add('hidden');if(hint)hint.textContent='展开 ▼';}
 }
 
+function escapeHtml(text){
+    if(text === null || text === undefined) return '';
+    var div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
+function normalizeArchiveOptionLetter(value){
+    var normalized = String(value || '').trim().toUpperCase();
+    return /^[A-E]$/.test(normalized) ? normalized : '';
+}
+
+function getArchiveOptionLetters(question){
+    var options = question && question.options ? Object.keys(question.options) : [];
+    var normalized = options.map(function(opt){ return normalizeArchiveOptionLetter(opt); }).filter(function(opt){ return !!opt; }).sort();
+    return normalized.length > 0 ? normalized : ['A','B','C','D','E'];
+}
+
+function normalizeArchiveAnswerLetters(answer, question){
+    var allowed = new Set(getArchiveOptionLetters(question));
+    var seen = new Set();
+    var matches = String(answer || '').toUpperCase().match(/[A-E]/g) || [];
+    return matches.filter(function(letter){
+        if(!allowed.has(letter) || seen.has(letter)) return false;
+        seen.add(letter);
+        return true;
+    }).sort();
+}
+
+function formatArchiveAnswerLetters(letters, emptyText){
+    return letters && letters.length > 0 ? letters.join('、') : (emptyText || '无');
+}
+
+function analyzeArchiveAnswer(question){
+    var userLetters = normalizeArchiveAnswerLetters(question.user_answer, question);
+    var correctLetters = normalizeArchiveAnswerLetters(question.correct_answer, question);
+    var missingLetters = correctLetters.filter(function(letter){ return !userLetters.includes(letter); });
+    var extraLetters = userLetters.filter(function(letter){ return !correctLetters.includes(letter); });
+    var questionType = question.question_type || question.type || '';
+    var isMultipleChoice = questionType === 'X';
+    var issueLabel = '完全正确';
+    if(!question.is_correct){
+        if(userLetters.length === 0) issueLabel = '未作答';
+        else if(missingLetters.length > 0 && extraLetters.length > 0) issueLabel = isMultipleChoice ? '少选 + 多选' : '错选';
+        else if(missingLetters.length > 0) issueLabel = isMultipleChoice ? '少选' : '错选';
+        else if(extraLetters.length > 0) issueLabel = isMultipleChoice ? '多选' : '错选';
+        else issueLabel = '答案不匹配';
+    }
+    return {
+        questionType: questionType,
+        userLetters: userLetters,
+        correctLetters: correctLetters,
+        missingLetters: missingLetters,
+        extraLetters: extraLetters,
+        issueLabel: issueLabel
+    };
+}
+
+function buildArchiveMetaHtml(review){
+    var parts = [
+        '<span>你的答案：<strong class="text-blue-700">' + escapeHtml(formatArchiveAnswerLetters(review.userLetters, '未作答')) + '</strong></span>',
+        '<span>正确答案：<strong class="text-green-600">' + escapeHtml(formatArchiveAnswerLetters(review.correctLetters, '无')) + '</strong></span>'
+    ];
+    if(review.missingLetters.length > 0) parts.push('<span>漏选：<strong class="text-yellow-700">' + escapeHtml(formatArchiveAnswerLetters(review.missingLetters)) + '</strong></span>');
+    if(review.extraLetters.length > 0) parts.push('<span>' + (review.questionType === 'X' ? '多选' : '错选') + '：<strong class="text-red-600">' + escapeHtml(formatArchiveAnswerLetters(review.extraLetters)) + '</strong></span>');
+    return parts.join('');
+}
+
+function buildArchiveOptionRowsHtml(question, review){
+    var html = '';
+    getArchiveOptionLetters(question).forEach(function(opt){
+        if(!question.options || !question.options[opt]) return;
+        var isSelected = review.userLetters.includes(opt);
+        var isCorrect = review.correctLetters.includes(opt);
+        var cls = 'bg-gray-50 border-gray-200 text-gray-700';
+        var flag = '未涉及';
+        if(isCorrect && isSelected){ cls = 'bg-green-50 border-green-200 text-green-800'; flag = '选对了'; }
+        else if(isCorrect){ cls = 'bg-yellow-50 border-yellow-200 text-yellow-800'; flag = '漏选'; }
+        else if(isSelected){ cls = 'bg-red-50 border-red-200 text-red-700'; flag = review.questionType === 'X' ? '多选了' : '错选'; }
+
+        html += '<div class="flex items-start justify-between gap-3 rounded-lg border p-3 mb-2 ' + cls + '">' +
+            '<div><span class="font-bold mr-2">' + opt + '.</span>' + escapeHtml(question.options[opt]) + '</div>' +
+            '<span class="shrink-0 text-xs font-bold">' + flag + '</span></div>';
+    });
+    return html;
+}
+
 function buildKpPanel(kp){
+    if(!kp.questions||kp.questions.length===0)return '<div class="p-4 text-gray-400 text-sm text-center">暂无题目记录</div>';
+    var modernHtml='<div class="p-4 space-y-3"><div class="text-sm text-gray-500 mb-2">共 ' + kp.questions.length + ' 道题目（按时间倒序）</div>';
+    kp.questions.forEach(function(q,qi){
+        var borderCls=q.is_correct?'border-l-green-500':'border-l-red-500';
+        var statusText=q.is_correct?'<span class="text-green-600 font-bold">✓ 正确</span>':'<span class="text-red-600 font-bold">✗ 错误</span>';
+        var diffColor=q.difficulty==='基础'?'text-green-600':(q.difficulty==='提高'?'text-yellow-600':'text-red-600');
+        var confMap={sure:'<span class="text-green-600">✓ 确定</span>',unsure:'<span class="text-yellow-600">? 模糊</span>',no:'<span class="text-red-600">✗ 不会</span>'};
+        var confLabel=confMap[q.confidence]||'<span class="text-gray-400">○ 未标记</span>';
+        var review = analyzeArchiveAnswer(q);
+        var issueChip = !q.is_correct
+            ? '<span class="px-2 py-0.5 rounded text-xs font-bold ' + (review.issueLabel.indexOf('少选') >= 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700') + '">' + review.issueLabel + '</span>'
+            : '';
+        var dateStr=q.answered_at?new Date(q.answered_at).toLocaleString('zh-CN'):'';
+        var srcLabel=q.session_type==='exam'?'整卷测验':(q.session_type==='detail_practice'?'细节测验':q.session_type||'');
+        modernHtml+='<div class="bg-gray-50 rounded-lg border-l-4 '+borderCls+' p-4">'+
+            '<div class="flex items-center justify-between mb-2 flex-wrap gap-2">'+
+            '<div class="flex items-center space-x-2 flex-wrap">'+
+            '<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-bold">第'+(qi+1)+'题</span>'+
+            '<span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">'+(q.question_type||'A1')+((q.question_type||'')==='X'?'（多选）':'')+'</span>'+
+            '<span class="'+diffColor+' text-xs font-medium">'+(q.difficulty||'')+'</span>'+
+            statusText+issueChip+confLabel+'</div>'+
+            '<div class="text-xs text-gray-400">'+dateStr+(srcLabel?' · '+srcLabel:'')+'</div></div>'+
+            '<p class="text-sm font-medium leading-relaxed mb-3">'+escapeHtml(q.question||'')+'</p>'+
+            '<div class="grid gap-2 text-xs text-gray-600 mb-3 sm:grid-cols-2 xl:grid-cols-4">'+
+            '<div class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">你的答案：<strong class="text-blue-700">'+escapeHtml(formatArchiveAnswerLetters(review.userLetters,'未作答'))+'</strong></div>'+
+            '<div class="rounded-lg border border-green-200 bg-green-50 px-3 py-2">正确答案：<strong class="text-green-700">'+escapeHtml(formatArchiveAnswerLetters(review.correctLetters,'无'))+'</strong></div>'+
+            (review.missingLetters.length>0?'<div class="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2">漏选：<strong class="text-yellow-800">'+escapeHtml(formatArchiveAnswerLetters(review.missingLetters))+'</strong></div>':'')+
+            (review.extraLetters.length>0?'<div class="rounded-lg border border-red-200 bg-red-50 px-3 py-2">'+(review.questionType==='X'?'多选':'错选')+'：<strong class="text-red-700">'+escapeHtml(formatArchiveAnswerLetters(review.extraLetters))+'</strong></div>':'')+
+            '</div>'+
+            '<div class="mb-3">'+buildArchiveOptionRowsHtml(q, review)+'</div>'+
+            '<div class="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">'+
+            buildArchiveMetaHtml(review)+
+            (q.time_spent_seconds>0?'<span>用时：'+q.time_spent_seconds+'秒</span>':'')+
+            '</div>'+
+            (q.explanation?'<div class="bg-blue-50 border border-blue-200 rounded p-3 mt-3"><div class="font-medium text-blue-800 text-xs mb-1">解析</div><p class="text-xs text-blue-700">'+escapeHtml(q.explanation)+'</p></div>':'')+
+            '</div>';
+    });
+    modernHtml+='</div>';
+    return modernHtml;
     if(!kp.questions||kp.questions.length===0)return '<div class="p-4 text-gray-400 text-sm text-center">暂无题目记录</div>';
     var html='<div class="p-4 space-y-3"><div class="text-sm text-gray-500 mb-2">共 '+kp.questions.length+' 道题目（按时间倒序）</div>';
     kp.questions.forEach(function(q,qi){
@@ -223,9 +349,101 @@ function buildKpPanel(kp){
     return html;
 }
 
+async function downloadArchiveDailyReviewPdf(event){
+    var button = event && event.currentTarget ? event.currentTarget : null;
+    var originalText = button ? button.innerHTML : '';
+    if(button){
+        button.disabled = true;
+        button.classList.add('opacity-70','cursor-not-allowed');
+        button.innerHTML = '⏳ 正在导出PDF...';
+    }
+
+    try{
+        var response = await fetch('/api/wrong-answers/daily-review-pdf?force_regenerate=true');
+        if(!response.ok){
+            var message = '导出失败';
+            try{
+                var errorData = await response.json();
+                message = typeof errorData.detail === 'string' ? errorData.detail : (errorData.detail && errorData.detail.message) || message;
+            }catch(_){}
+            throw new Error(message);
+        }
+
+        var blob = await response.blob();
+        var downloadUrl = URL.createObjectURL(blob);
+        var filename = 'daily-review.pdf';
+        var disposition = response.headers.get('content-disposition') || '';
+        var utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        var plainMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+        if(utf8Match && utf8Match[1]) filename = decodeURIComponent(utf8Match[1]);
+        else if(plainMatch && plainMatch[1]) filename = plainMatch[1];
+
+        var link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function(){ URL.revokeObjectURL(downloadUrl); }, 1000);
+    }catch(error){
+        console.error('PDF导出失败:', error);
+        alert(error && error.message ? error.message : 'PDF导出失败');
+    }finally{
+        if(button){
+            button.disabled = false;
+            button.classList.remove('opacity-70','cursor-not-allowed');
+            button.innerHTML = originalText;
+        }
+    }
+}
+
 function exportArchiveMarkdown(){
     var kps=getFilteredAndSorted();
     if(kps.length===0){alert('没有可导出的数据');return;}
+    var archiveMd='# 全局知识点归档报告\n\n';
+    archiveMd+='**导出时间**: '+new Date().toLocaleString('zh-CN')+'\n';
+    archiveMd+='**知识点数**: '+kps.length+'\n\n---\n\n';
+    kps.forEach(function(kp,ki){
+        archiveMd+='## '+(ki+1)+'. '+kp.name+'\n\n';
+        archiveMd+='- 正确率: **'+kp.accuracy+'%** ('+kp.correct+'/'+kp.total+')\n';
+        archiveMd+='- 错误率: '+kp.error_rate+'% | 错题数: '+kp.wrong+'\n\n';
+        if(kp.questions&&kp.questions.length>0){
+            kp.questions.forEach(function(q,qi){
+                var review = analyzeArchiveAnswer(q);
+                archiveMd+='### 第'+(qi+1)+'题 '+(q.is_correct?'✓ 正确':'✗ 错误')+' ['+(q.question_type||'A1')+'] ['+(q.difficulty||'')+']\n\n';
+                archiveMd+='**'+escapeHtml(q.question||'')+'**\n\n';
+                getArchiveOptionLetters(q).forEach(function(opt){
+                    if(!q.options || !q.options[opt]) return;
+                    var mark='[ ]';
+                    if(review.correctLetters.includes(opt) && review.userLetters.includes(opt)) mark='[选对]';
+                    else if(review.correctLetters.includes(opt)) mark='[漏选]';
+                    else if(review.userLetters.includes(opt)) mark=(review.questionType==='X'?'[多选]':'[错选]');
+                    archiveMd+=mark+' '+opt+'. '+q.options[opt]+'\n';
+                });
+                archiveMd+='\n';
+                archiveMd+='- 你的答案: **'+formatArchiveAnswerLetters(review.userLetters,'未作答')+'**\n';
+                archiveMd+='- 正确答案: **'+formatArchiveAnswerLetters(review.correctLetters,'无')+'**\n';
+                if(!q.is_correct){
+                    archiveMd+='- 错因: **'+review.issueLabel+'**\n';
+                    if(review.missingLetters.length>0) archiveMd+='- 漏选: **'+formatArchiveAnswerLetters(review.missingLetters)+'**\n';
+                    if(review.extraLetters.length>0) archiveMd+='- '+(review.questionType==='X'?'多选':'错选')+': **'+formatArchiveAnswerLetters(review.extraLetters)+'**\n';
+                }
+                if(q.explanation) archiveMd+='\n> **解析**: '+escapeHtml(q.explanation)+'\n';
+                archiveMd+='\n';
+            });
+        }
+        archiveMd+='---\n\n';
+    });
+    navigator.clipboard.writeText(archiveMd).then(function(){
+        alert('Markdown报告已复制到剪贴板');
+    }).catch(function(){
+        var blob=new Blob([archiveMd],{type:'text/markdown;charset=utf-8;'});
+        var link=document.createElement('a');
+        link.href=URL.createObjectURL(blob);
+        link.download='知识点归档_'+new Date().toISOString().slice(0,10)+'.md';
+        link.click();
+    });
+    return;
     var totalQ=0,totalCorrect=0;
     kps.forEach(function(kp){totalQ+=kp.total;totalCorrect+=kp.correct;});
     var overallAcc=totalQ>0?Math.round(totalCorrect/totalQ*100):0;

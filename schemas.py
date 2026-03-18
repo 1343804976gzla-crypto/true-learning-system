@@ -117,7 +117,7 @@ class QuizSubmission(BaseModel):
     """提交答案请求"""
     test_id: int
     user_answer: Literal["A", "B", "C", "D"]
-    confidence: Literal["sure", "unsure", "dont_know"]
+    confidence: Literal["sure", "unsure", "no", "dont_know"]
 
 
 class QuizResult(BaseModel):
@@ -135,7 +135,7 @@ class QuizResult(BaseModel):
     # 用户回答
     user_answer: str
     is_correct: bool
-    confidence: str
+    confidence: Optional[str]
     
     # AI反馈
     ai_feedback: str
@@ -154,7 +154,7 @@ class QuizHistoryItem(BaseModel):
     test_type: str
     is_correct: Optional[bool]
     score: int
-    confidence: str
+    confidence: Optional[str]
     tested_at: datetime
     
     class Config:
@@ -269,7 +269,7 @@ class QuizAnswerRequest(BaseModel):
     question_index: int
     user_answer: str
     time_spent: int = 0  # 答题用时（秒）
-    confidence: str = "unsure"  # sure, unsure, dont_know
+    confidence: Optional[str] = None  # sure, unsure, no
 
 
 class QuizSubmitRequest(BaseModel):

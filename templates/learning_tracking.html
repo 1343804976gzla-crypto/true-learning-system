@@ -2857,6 +2857,82 @@ function toggleAllCards() {
     });
 }
 
+function normalizeTrackingOptionLetter(value) {
+    var normalized = String(value || '').trim().toUpperCase();
+    return /^[A-E]$/.test(normalized) ? normalized : '';
+}
+
+function getTrackingOptionLetters(question) {
+    var options = question && question.options ? Object.keys(question.options) : [];
+    var normalized = options
+        .map(function(opt) { return normalizeTrackingOptionLetter(opt); })
+        .filter(function(opt) { return !!opt; })
+        .sort();
+    return normalized.length > 0 ? normalized : ['A', 'B', 'C', 'D', 'E'];
+}
+
+function normalizeTrackingAnswerLetters(answer, question) {
+    var allowed = new Set(getTrackingOptionLetters(question));
+    var seen = new Set();
+    var matches = String(answer || '').toUpperCase().match(/[A-E]/g) || [];
+    return matches.filter(function(letter) {
+        if (!allowed.has(letter) || seen.has(letter)) return false;
+        seen.add(letter);
+        return true;
+    }).sort();
+}
+
+function formatTrackingAnswerLetters(letters, emptyText) {
+    return letters && letters.length > 0 ? letters.join('、') : (emptyText || '无');
+}
+
+function analyzeTrackingAnswer(question) {
+    var userLetters = normalizeTrackingAnswerLetters(question.user_answer, question);
+    var correctLetters = normalizeTrackingAnswerLetters(question.correct_answer, question);
+    var missingLetters = correctLetters.filter(function(letter) { return !userLetters.includes(letter); });
+    var extraLetters = userLetters.filter(function(letter) { return !correctLetters.includes(letter); });
+    var questionType = question.type || question.question_type || '';
+    var isMultipleChoice = questionType === 'X';
+    var issueLabel = '完全正确';
+
+    if (!question.is_correct) {
+        if (userLetters.length === 0) issueLabel = '未作答';
+        else if (missingLetters.length > 0 && extraLetters.length > 0) issueLabel = isMultipleChoice ? '少选 + 多选' : '错选';
+        else if (missingLetters.length > 0) issueLabel = isMultipleChoice ? '少选' : '错选';
+        else if (extraLetters.length > 0) issueLabel = isMultipleChoice ? '多选' : '错选';
+        else issueLabel = '答案不匹配';
+    }
+
+    return {
+        questionType: questionType,
+        userLetters: userLetters,
+        correctLetters: correctLetters,
+        missingLetters: missingLetters,
+        extraLetters: extraLetters,
+        issueLabel: issueLabel
+    };
+}
+
+function buildTrackingOptionRowsHtml(question, review) {
+    var html = '';
+    getTrackingOptionLetters(question).forEach(function(opt) {
+        if (!question.options || !question.options[opt]) return;
+        var isSelected = review.userLetters.includes(opt);
+        var isCorrect = review.correctLetters.includes(opt);
+        var cls = 'bg-gray-50 border-gray-200 text-gray-700';
+        var flag = '未涉及';
+        if (isCorrect && isSelected) { cls = 'bg-green-50 border-green-200 text-green-800'; flag = '选对了'; }
+        else if (isCorrect) { cls = 'bg-yellow-50 border-yellow-200 text-yellow-800'; flag = '漏选'; }
+        else if (isSelected) { cls = 'bg-red-50 border-red-200 text-red-700'; flag = review.questionType === 'X' ? '多选了' : '错选'; }
+
+        html += '<div class="flex items-start justify-between gap-3 rounded-lg border p-3 mb-2 ' + cls + '">' +
+            '<div><span class="font-bold mr-2">' + opt + '.</span>' + escapeHtml(question.options[opt]) + '</div>' +
+            '<span class="shrink-0 text-xs font-bold">' + flag + '</span>' +
+            '</div>';
+    });
+    return html;
+}
+
 // ========== Detail Modal ==========
 async function showDetail(sessionId) {
     currentSessionId = sessionId;
@@ -2896,16 +2972,26 @@ async function showDetail(sessionId) {
                     '<span class="text-red-600 font-bold">\u2717 \u9519\u8bef</span>';
                 var confMap = {'sure': '\u2713 \u786e\u5b9a', 'unsure': '? \u6a21\u7cca', 'no': '\u2717 \u4e0d\u4f1a'};
                 var conf = confMap[q.confidence] || '\u25cb \u672a\u6807\u8bb0';
+                var review = analyzeTrackingAnswer(q);
+                var issueChip = !q.is_correct
+                    ? '<span class="px-2 py-0.5 rounded text-xs font-bold ' + (review.issueLabel.indexOf('\u5c11\u9009') >= 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700') + '">' + review.issueLabel + '</span>'
+                    : '';
 
                 html += '<div class="p-4 bg-gray-50 rounded border-l-4 ' + (q.is_correct ? 'border-green-500' : 'border-red-500') + '">' +
-                    '<div class="flex justify-between mb-2">' +
-                    '<span class="font-medium">\u7b2c ' + (i + 1) + ' \u9898 [' + (q.type || 'A1') + '] ' + conf + '</span>' + status + '</div>' +
-                    '<p class="text-sm mb-2">' + escapeHtml(q.question) + '</p>' +
-                    '<div class="text-sm">' +
-                    '<span class="' + (q.is_correct ? 'text-green-600' : 'text-red-600') + '">\u4f60\u7684\u7b54\u6848\uff1a' + escapeHtml(q.user_answer) + '</span>' +
-                    ' | <span class="text-green-600">\u6b63\u786e\u7b54\u6848\uff1a' + q.correct_answer + '</span>' +
-                    (q.key_point ? ' | \u77e5\u8bc6\u70b9\uff1a' + q.key_point : '') +
-                    '</div></div>';
+                    '<div class="flex justify-between mb-3 gap-3 flex-wrap">' +
+                    '<div class="flex items-center gap-2 flex-wrap">' +
+                    '<span class="font-medium">\u7b2c ' + (i + 1) + ' \u9898 [' + (q.type || 'A1') + ']' + ((q.type || '') === 'X' ? '\uff08\u591a\u9009\uff09' : '') + '</span>' + conf + status + issueChip + '</div>' +
+                    (q.key_point ? '<span class="text-xs text-gray-400">\u77e5\u8bc6\u70b9\uff1a' + escapeHtml(q.key_point) + '</span>' : '') +
+                    '</div>' +
+                    '<p class="text-sm mb-3">' + escapeHtml(q.question || '') + '</p>' +
+                    '<div class="grid gap-2 text-sm text-gray-600 mb-3 sm:grid-cols-2 xl:grid-cols-4">' +
+                    '<div class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">\u4f60\u7684\u7b54\u6848\uff1a<strong class="text-blue-700">' + escapeHtml(formatTrackingAnswerLetters(review.userLetters, '\u672a\u4f5c\u7b54')) + '</strong></div>' +
+                    '<div class="rounded-lg border border-green-200 bg-green-50 px-3 py-2">\u6b63\u786e\u7b54\u6848\uff1a<strong class="text-green-700">' + escapeHtml(formatTrackingAnswerLetters(review.correctLetters, '\u65e0')) + '</strong></div>' +
+                    (review.missingLetters.length > 0 ? '<div class="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2">\u6f0f\u9009\uff1a<strong class="text-yellow-800">' + escapeHtml(formatTrackingAnswerLetters(review.missingLetters)) + '</strong></div>' : '') +
+                    (review.extraLetters.length > 0 ? '<div class="rounded-lg border border-red-200 bg-red-50 px-3 py-2">' + (review.questionType === 'X' ? '\u591a\u9009' : '\u9519\u9009') + '\uff1a<strong class="text-red-700">' + escapeHtml(formatTrackingAnswerLetters(review.extraLetters)) + '</strong></div>' : '') +
+                    '</div>' +
+                    '<div class="mb-3">' + buildTrackingOptionRowsHtml(q, review) + '</div>' +
+                    '</div>';
             });
             html += '</div></div>';
         }

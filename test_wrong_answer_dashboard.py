@@ -284,6 +284,29 @@ def test_wrong_answer_dashboard_api_returns_expected_metrics(client, db_session)
     ]
 
 
+def test_dashboard_stats_returns_null_estimate_when_plan_cannot_clear_backlog(client, db_session):
+    now = datetime.now()
+
+    for index in range(14):
+        _create_wrong_answer(
+            db_session,
+            question_text=f"Backlog question {index}",
+            created_at=now - timedelta(hours=index),
+            updated_at=now - timedelta(hours=index),
+            mastery_status="active",
+        )
+
+    db_session.commit()
+
+    response = client.get("/api/dashboard/stats", params={"daily_planned_review": 1})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["can_clear"] is False
+    assert data["estimated_days_to_clear"] is None
+    assert "无法清仓" in data["clear_message"]
+
+
 def test_wrong_answers_page_renders_embedded_dashboard(client):
     response = client.get("/wrong-answers")
 

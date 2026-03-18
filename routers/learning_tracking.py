@@ -38,8 +38,9 @@ from learning_tracking_models import (
 from utils.data_contracts import (
     canonicalize_answer_changes,
     canonicalize_learning_activity_data,
-    coerce_confidence,
+    normalize_confidence,
 )
+from services.data_identity import build_device_scope_aliases, resolve_query_identity
 
 router = APIRouter(prefix="/api/tracking", tags=["learning_tracking"])
 
@@ -214,8 +215,11 @@ def _normalize_question_options(options: Any) -> Dict[str, str]:
     return {key: normalized[key] for key in ["A", "B", "C", "D", "E"] if key in normalized}
 
 
-def _normalize_confidence_value(value: Optional[str]) -> str:
-    return coerce_confidence(value, default="unsure")
+def _normalize_confidence_value(value: Optional[str]) -> Optional[str]:
+    normalized = normalize_confidence(value)
+    if normalized in {"sure", "unsure", "no"}:
+        return normalized
+    return None
 
 
 def _build_question_record_fingerprint(record: QuestionRecord) -> str:
@@ -453,6 +457,21 @@ def _resolve_period_bounds(
         end_date = datetime.combine(last_day, datetime.max.time())
 
     return start_date, end_date
+
+
+def _apply_actor_scope(query, model, *, user_id: Optional[str], device_id: Optional[str]):
+    user_id, device_id = resolve_query_identity(user_id, device_id)
+    device_ids = build_device_scope_aliases(user_id, device_id)
+    if user_id and hasattr(model, "user_id"):
+        query = query.filter(model.user_id == user_id)
+    if device_ids and hasattr(model, "device_id"):
+        if len(device_ids) == 1:
+            query = query.filter(model.device_id == device_ids[0])
+        else:
+            query = query.filter(model.device_id.in_(device_ids))
+    elif device_id and hasattr(model, "device_id"):
+        query = query.filter(model.device_id == device_id)
+    return query
 
 
 def _normalize_ocr_line(line: str) -> str:
@@ -1432,6 +1451,8 @@ async def export_session_report(
 async def get_stats(
     period: str = "all",  # 'day', 'week', 'month', 'all'
     date_str: Optional[str] = None,  # 具体日期 YYYY-MM-DD
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -1439,7 +1460,12 @@ async def get_stats(
     """
     start_date, end_date = _resolve_period_bounds(period, date_str)
 
-    session_query = db.query(LearningSession)
+    session_query = _apply_actor_scope(
+        db.query(LearningSession),
+        LearningSession,
+        user_id=user_id,
+        device_id=device_id,
+    )
     if start_date and end_date:
         session_query = session_query.filter(
             LearningSession.started_at >= start_date,
@@ -1482,7 +1508,14 @@ async def get_stats(
             knowledge_points[key_point]["wrong"] += 1
 
         normalized_confidence = _normalize_confidence_value(qr.confidence)
-        conf_score = 1.0 if normalized_confidence == "sure" else (0.5 if normalized_confidence == "unsure" else 0.0)
+        conf_score = None
+        if normalized_confidence == "sure":
+            conf_score = 1.0
+        elif normalized_confidence == "unsure":
+            conf_score = 0.5
+        elif normalized_confidence == "no":
+            conf_score = 0.0
+
         if conf_score is not None:
             kp_confidence.setdefault(key_point, []).append(conf_score)
 
@@ -1554,10 +1587,22 @@ async def get_stats(
     this_week_start = now_date - timedelta(days=now_date.weekday())
     last_week_start = this_week_start - timedelta(days=7)
 
-    wow_this_sessions = db.query(LearningSession).filter(
+    wow_this_query = _apply_actor_scope(
+        db.query(LearningSession),
+        LearningSession,
+        user_id=user_id,
+        device_id=device_id,
+    )
+    wow_last_query = _apply_actor_scope(
+        db.query(LearningSession),
+        LearningSession,
+        user_id=user_id,
+        device_id=device_id,
+    )
+    wow_this_sessions = wow_this_query.filter(
         LearningSession.started_at >= datetime.combine(this_week_start, datetime.min.time())
     ).all()
-    wow_last_sessions = db.query(LearningSession).filter(
+    wow_last_sessions = wow_last_query.filter(
         LearningSession.started_at >= datetime.combine(last_week_start, datetime.min.time()),
         LearningSession.started_at < datetime.combine(this_week_start, datetime.min.time())
     ).all()
@@ -1737,6 +1782,8 @@ async def get_ocr_plan_board(
 async def get_progress_board(
     period: str = "all",
     date_str: Optional[str] = None,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -1747,7 +1794,13 @@ async def get_progress_board(
     - 会话类型分布
     - 薄弱知识点排行
     """
-    stats = await get_stats(period=period, date_str=date_str, db=db)
+    stats = await get_stats(
+        period=period,
+        date_str=date_str,
+        user_id=user_id,
+        device_id=device_id,
+        db=db,
+    )
 
     summary = stats.get("summary", {})
     sessions = stats.get("sessions", [])

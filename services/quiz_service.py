@@ -98,7 +98,7 @@ class QuizService:
             options: 选项
             correct_answer: 正确答案
             user_answer: 用户答案
-            confidence: 信心度 (sure/unsure/dont_know)
+            confidence: 信心度 (sure/unsure/no)
 
         Returns:
             {
@@ -122,7 +122,7 @@ class QuizService:
         confidence_analysis = analyze_confidence_accuracy(is_correct, confidence)
         
         # 如果有特殊问题，调用AI分析
-        if not is_correct or confidence == "unsure":
+        if not is_correct or confidence in {"unsure", "no"}:
             return await self._analyze_mistake(
                 question, options, correct_answer, 
                 user_answer, confidence, score

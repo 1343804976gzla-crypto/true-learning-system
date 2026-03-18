@@ -3,6 +3,7 @@
 实时计算错题消耗进度和预期清仓时间
 """
 
+import math
 from datetime import datetime, date, timedelta
 from typing import Optional
 
@@ -13,13 +14,31 @@ from sqlalchemy.orm import Session
 from api_contracts import DashboardStatsResponse
 from models import get_db
 from learning_tracking_models import WrongAnswerV2, WrongAnswerRetry
+from services.data_identity import build_device_scope_aliases, resolve_query_identity
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+
+def _apply_actor_scope(query, model, *, user_id: str | None = None, device_id: str | None = None):
+    user_id, device_id = resolve_query_identity(user_id, device_id)
+    device_ids = build_device_scope_aliases(user_id, device_id)
+    if user_id and hasattr(model, "user_id"):
+        query = query.filter(model.user_id == user_id)
+    if device_ids and hasattr(model, "device_id"):
+        if len(device_ids) == 1:
+            query = query.filter(model.device_id == device_ids[0])
+        else:
+            query = query.filter(model.device_id.in_(device_ids))
+    elif device_id and hasattr(model, "device_id"):
+        query = query.filter(model.device_id == device_id)
+    return query
 
 
 @router.get("/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(
     daily_planned_review: int = Query(default=20, ge=1, description="每日计划复习量"),
+    user_id: str | None = Query(default=None),
+    device_id: str | None = Query(default=None),
     db: Session = Depends(get_db)
 ):
     """
@@ -46,7 +65,12 @@ async def get_dashboard_stats(
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_end = datetime.combine(date.today(), datetime.max.time())
 
-    today_eliminated = db.query(WrongAnswerV2).filter(
+    today_eliminated = _apply_actor_scope(
+        db.query(WrongAnswerV2),
+        WrongAnswerV2,
+        user_id=user_id,
+        device_id=device_id,
+    ).filter(
         WrongAnswerV2.mastery_status == "archived",
         WrongAnswerV2.archived_at >= today_start,
         WrongAnswerV2.archived_at <= today_end
@@ -55,7 +79,12 @@ async def get_dashboard_stats(
 
     # ========== 2. 今日重做量 ==========
     # 统计今天重做的错题数量（不论对错）
-    today_retried = db.query(WrongAnswerRetry).filter(
+    today_retried = _apply_actor_scope(
+        db.query(WrongAnswerRetry),
+        WrongAnswerRetry,
+        user_id=user_id,
+        device_id=device_id,
+    ).filter(
         WrongAnswerRetry.retried_at >= today_start,
         WrongAnswerRetry.retried_at <= today_end
     ).count()
@@ -65,7 +94,12 @@ async def get_dashboard_stats(
     # 统计过去 7 天内新创建的错题总数 ÷ 7
     seven_days_ago = datetime.now() - timedelta(days=7)
 
-    new_in_7days = db.query(WrongAnswerV2).filter(
+    new_in_7days = _apply_actor_scope(
+        db.query(WrongAnswerV2),
+        WrongAnswerV2,
+        user_id=user_id,
+        device_id=device_id,
+    ).filter(
         WrongAnswerV2.created_at >= seven_days_ago
     ).count()
 
@@ -74,7 +108,12 @@ async def get_dashboard_stats(
 
     # ========== 4. 当前错题积压量 ==========
     # 目前尚未归档的、处于活跃状态的错题总数
-    current_backlog = db.query(WrongAnswerV2).filter(
+    current_backlog = _apply_actor_scope(
+        db.query(WrongAnswerV2),
+        WrongAnswerV2,
+        user_id=user_id,
+        device_id=device_id,
+    ).filter(
         WrongAnswerV2.mastery_status == "active"
     ).count()
 
@@ -92,7 +131,7 @@ async def get_dashboard_stats(
         # 分母为 0 或负数：无法清仓
         can_clear = False
         clear_message = "⚠️ 无法清仓：新增速度 ≥ 复习速度，请提高每日计划复习量"
-        estimated_days_to_clear = float('inf')  # 无穷大
+        estimated_days_to_clear = None
     elif current_backlog == 0:
         # 没有积压，已清仓
         can_clear = True
@@ -102,6 +141,9 @@ async def get_dashboard_stats(
         # 正常计算
         estimated_days_to_clear = round(current_backlog / net_daily_progress, 1)
         clear_message = f"✅ 按当前速度，预计 {estimated_days_to_clear} 天后清仓"
+
+    if isinstance(estimated_days_to_clear, (int, float)) and not math.isfinite(float(estimated_days_to_clear)):
+        estimated_days_to_clear = None
 
     # 计算需做错题数（为了达到清仓目标，每天需要做多少题）
     # 如果当前无法清仓，建议增加复习量
@@ -115,7 +157,12 @@ async def get_dashboard_stats(
     # ========== 6. 严重度分布统计（额外数据） ==========
     severity_counts = {}
     for tag in ["critical", "stubborn", "landmine", "normal"]:
-        count = db.query(WrongAnswerV2).filter(
+        count = _apply_actor_scope(
+            db.query(WrongAnswerV2),
+            WrongAnswerV2,
+            user_id=user_id,
+            device_id=device_id,
+        ).filter(
             WrongAnswerV2.mastery_status == "active",
             WrongAnswerV2.severity_tag == tag
         ).count()
@@ -130,12 +177,22 @@ async def get_dashboard_stats(
         day_start = datetime.combine(day, datetime.min.time())
         day_end = datetime.combine(day, datetime.max.time())
 
-        new_count = db.query(WrongAnswerV2).filter(
+        new_count = _apply_actor_scope(
+            db.query(WrongAnswerV2),
+            WrongAnswerV2,
+            user_id=user_id,
+            device_id=device_id,
+        ).filter(
             WrongAnswerV2.created_at >= day_start,
             WrongAnswerV2.created_at <= day_end
         ).count()
 
-        eliminated_count = db.query(WrongAnswerV2).filter(
+        eliminated_count = _apply_actor_scope(
+            db.query(WrongAnswerV2),
+            WrongAnswerV2,
+            user_id=user_id,
+            device_id=device_id,
+        ).filter(
             WrongAnswerV2.mastery_status == "archived",
             WrongAnswerV2.archived_at >= day_start,
             WrongAnswerV2.archived_at <= day_end

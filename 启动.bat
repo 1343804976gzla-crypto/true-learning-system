@@ -16,6 +16,7 @@ taskkill /F /IM python.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 echo [2/4] 启动服务器...
+set TLS_RELOAD=1
 start /B python main.py > server.log 2>&1
 
 echo [3/4] 等待服务器启动...

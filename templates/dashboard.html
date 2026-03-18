@@ -93,6 +93,7 @@
         z-index: 2;
         display: flex;
         height: 100%;
+        min-width: 0;
         flex-direction: column;
         justify-content: space-between;
         gap: 1.25rem;
@@ -101,6 +102,7 @@
 
     .dashboard-bento-card__copy {
         display: flex;
+        min-width: 0;
         flex-direction: column;
         gap: 0.8rem;
         transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
@@ -144,14 +146,94 @@
         font-size: 1.6rem;
         font-weight: 700;
         line-height: 1.15;
-        max-width: 14ch;
+        max-width: min(16ch, 100%);
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
 
     .dashboard-bento-card__desc {
-        max-width: 34rem;
+        max-width: 100%;
         color: rgba(248, 246, 241, 0.82);
         line-height: 1.7;
         font-size: 0.96rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+        overflow: hidden;
+    }
+
+    .dashboard-bento-card__details {
+        display: grid;
+        gap: 0.85rem;
+        margin-top: auto;
+        min-width: 0;
+    }
+
+    .dashboard-bento-card__metrics {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem 1.1rem;
+        align-items: start;
+        min-width: 0;
+    }
+
+    .dashboard-bento-card__metric {
+        min-width: 0;
+    }
+
+    .dashboard-bento-card__metric + .dashboard-bento-card__metric {
+        padding-left: 1.1rem;
+        border-left: 1px solid rgba(255,255,255,0.18);
+    }
+
+    .dashboard-bento-card__metric-label {
+        display: block;
+        font-size: 0.65rem;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: rgba(248, 246, 241, 0.64);
+    }
+
+    .dashboard-bento-card__metric-value {
+        display: block;
+        margin-top: 0.25rem;
+        font-family: 'Noto Serif SC', Georgia, serif;
+        font-size: clamp(1.02rem, 2vw, 1.35rem);
+        line-height: 1.15;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: #ffffff;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+    }
+
+    .dashboard-bento-card__note {
+        max-width: 100%;
+        font-size: 0.82rem;
+        line-height: 1.65;
+        color: rgba(248, 246, 241, 0.84);
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+    }
+
+    .dashboard-bento-card__note::before {
+        content: "／ ";
+        color: rgba(248, 246, 241, 0.48);
+    }
+
+    .dashboard-bento-card__note::before {
+        content: "/ ";
     }
 
     .dashboard-bento-card__footer {
@@ -166,6 +248,7 @@
         display: inline-flex;
         flex-wrap: wrap;
         gap: 0.55rem;
+        min-width: 0;
     }
 
     .dashboard-bento-card__chip {
@@ -238,7 +321,7 @@
     @media (min-width: 1024px) {
         .dashboard-bento {
             grid-template-columns: repeat(3, minmax(0, 1fr));
-            grid-auto-rows: 9rem;
+            grid-auto-rows: 9.6rem;
             grid-auto-flow: dense;
             gap: 1.25rem;
         }
@@ -281,6 +364,20 @@
             font-size: 1.35rem;
         }
 
+        .dashboard-bento-card__metrics {
+            grid-template-columns: 1fr;
+            gap: 0.8rem;
+        }
+
+        .dashboard-bento-card__metric {
+            min-width: 0;
+        }
+
+        .dashboard-bento-card__metric + .dashboard-bento-card__metric {
+            padding-left: 0;
+            border-left: none;
+        }
+
         .dashboard-bento-card__cta {
             opacity: 1;
             transform: translateY(0);
@@ -290,6 +387,66 @@
 {% endblock %}
 
 {% block content %}
+{% set fallback_launchpad = {
+    "exam": {
+        "metric_1_label": "累计整卷",
+        "metric_1_value": 0,
+        "metric_2_label": "最近测验",
+        "metric_2_value": "未开始",
+        "note": "重启服务后会显示最新整卷数据"
+    },
+    "wrong": {
+        "metric_1_label": "活跃错题",
+        "metric_1_value": 0,
+        "metric_2_label": "今日到期",
+        "metric_2_value": 0,
+        "note": "重启服务后会显示错题修复状态"
+    },
+    "upload": {
+        "metric_1_label": "累计上传",
+        "metric_1_value": 0,
+        "metric_2_label": "本周新增",
+        "metric_2_value": 0,
+        "note": "重启服务后会显示最新上传沉淀"
+    },
+    "tracking": {
+        "metric_1_label": "累计做题",
+        "metric_1_value": 0,
+        "metric_2_label": "平均正确率",
+        "metric_2_value": "0%",
+        "note": "重启服务后会显示学习轨迹统计"
+    },
+    "archive": {
+        "metric_1_label": "知识点",
+        "metric_1_value": 0,
+        "metric_2_label": "待修补",
+        "metric_2_value": 0,
+        "note": "重启服务后会显示知识归档汇总"
+    },
+    "history": {
+        "metric_1_label": "累计记录",
+        "metric_1_value": 0,
+        "metric_2_label": "连续学习",
+        "metric_2_value": "0 天",
+        "note": "重启服务后会显示历史沉淀统计"
+    }
+} %}
+{% set launchpad = launchpad if launchpad is defined else fallback_launchpad %}
+{% macro launchpad_details(item) -%}
+<div class="dashboard-bento-card__details">
+    <div class="dashboard-bento-card__metrics">
+        <div class="dashboard-bento-card__metric">
+            <span class="dashboard-bento-card__metric-label">{{ item.metric_1_label }}</span>
+            <span class="dashboard-bento-card__metric-value">{{ item.metric_1_value }}</span>
+        </div>
+        <div class="dashboard-bento-card__metric">
+            <span class="dashboard-bento-card__metric-label">{{ item.metric_2_label }}</span>
+            <span class="dashboard-bento-card__metric-value">{{ item.metric_2_value }}</span>
+        </div>
+    </div>
+    <p class="dashboard-bento-card__note">{{ item.note }}</p>
+</div>
+{%- endmacro %}
 <!-- ===== HERO SECTION WITH GLOWY WAVES ===== -->
 <div class="relative -mx-6 -mt-8 mb-12 overflow-hidden" style="height: 480px;">
     <canvas id="waveCanvas" class="absolute inset-0 w-full h-full"></canvas>
@@ -510,6 +667,7 @@
                     <h3 class="dashboard-bento-card__title">整卷测验</h3>
                     <p class="dashboard-bento-card__desc">把一段讲义或课堂笔记直接压进系统，AI 生成整套试卷、难度梯度与题目变式，快速建立完整的检验回路。</p>
                 </div>
+                {{ launchpad_details(launchpad.exam) }}
                 <div class="dashboard-bento-card__footer">
                     <div class="dashboard-bento-card__meta">
                         <span class="dashboard-bento-card__chip">整套试卷</span>
@@ -544,6 +702,7 @@
                     <h3 class="dashboard-bento-card__title">错题本</h3>
                     <p class="dashboard-bento-card__desc">把反复失分的知识点集中起来处理，按严重度、重做批次和变式题重新打磨薄弱环节。</p>
                 </div>
+                {{ launchpad_details(launchpad.wrong) }}
                 <div class="dashboard-bento-card__footer">
                     <div class="dashboard-bento-card__meta">
                         <span class="dashboard-bento-card__chip">重做批次</span>
@@ -576,6 +735,7 @@
                     <h3 class="dashboard-bento-card__title">内容上传</h3>
                     <p class="dashboard-bento-card__desc">导入课堂记录、教材片段与复习笔记，让系统先把原料吃进去。</p>
                 </div>
+                {{ launchpad_details(launchpad.upload) }}
                 <div class="dashboard-bento-card__footer">
                     <span class="dashboard-bento-card__chip">原始资料</span>
                     <span class="dashboard-bento-card__cta">上传资料
@@ -609,6 +769,7 @@
                     <h3 class="dashboard-bento-card__title">学习轨迹</h3>
                     <p class="dashboard-bento-card__desc">把学习时长、正确率、活动记录和复盘结果拉成时间轴，直观看见节奏变化与进步斜率。</p>
                 </div>
+                {{ launchpad_details(launchpad.tracking) }}
                 <div class="dashboard-bento-card__footer">
                     <div class="dashboard-bento-card__meta">
                         <span class="dashboard-bento-card__chip">趋势分析</span>
@@ -642,6 +803,7 @@
                     <h3 class="dashboard-bento-card__title">知识归档</h3>
                     <p class="dashboard-bento-card__desc">把知识点掌握度汇总成一份能直接复习的全局清单。</p>
                 </div>
+                {{ launchpad_details(launchpad.archive) }}
                 <div class="dashboard-bento-card__footer">
                     <span class="dashboard-bento-card__chip">掌握度</span>
                     <span class="dashboard-bento-card__cta">打开归档
@@ -672,6 +834,7 @@
                     <h3 class="dashboard-bento-card__title">上传历史</h3>
                     <p class="dashboard-bento-card__desc">回看你投喂给系统的每一份资料，核对内容来源、上传节奏与累计沉淀。</p>
                 </div>
+                {{ launchpad_details(launchpad.history) }}
                 <div class="dashboard-bento-card__footer">
                     <div class="dashboard-bento-card__meta">
                         <span class="dashboard-bento-card__chip">时间线</span>
@@ -734,6 +897,19 @@
     <div class="divide-y">
         {% if recent_sessions %}
             {% for s in recent_sessions %}
+            {% if s.dashboard_accuracy_pct is defined %}
+                {% set acc_pct = s.dashboard_accuracy_pct %}
+            {% elif s.accuracy is not none %}
+                {% set raw_acc = s.accuracy %}
+                {% set acc_pct = ((raw_acc * 100) if raw_acc <= 1 else raw_acc) | round(1) %}
+            {% else %}
+                {% set acc_pct = none %}
+            {% endif %}
+            {% if s.dashboard_answer_total is defined %}
+                {% set answer_total = s.dashboard_answer_total %}
+            {% else %}
+                {% set answer_total = (s.correct_count or 0) + (s.wrong_count or 0) %}
+            {% endif %}
             <div class="px-6 py-4 hover:bg-gray-50 transition-colors">
                 <div class="flex justify-between items-center mb-1">
                     <div class="flex items-center space-x-2">
@@ -745,8 +921,7 @@
                         <span class="font-medium">{{ s.title }}</span>
                     </div>
                     <div class="flex items-center space-x-3 text-sm">
-                        {% if s.accuracy is not none %}
-                            {% set acc_pct = (s.accuracy * 100) | round(1) %}
+                        {% if acc_pct is not none %}
                             <span class="font-bold {% if acc_pct >= 80 %}text-green-600{% elif acc_pct >= 60 %}text-yellow-600{% else %}text-red-600{% endif %}">
                                 {{ acc_pct }}%
                             </span>
@@ -756,13 +931,12 @@
                         </span>
                     </div>
                 </div>
-                {% if s.accuracy is not none %}
+                {% if acc_pct is not none %}
                 <div class="flex items-center mt-1">
                     <div class="flex-1 bg-gray-200 rounded-full h-1.5">
-                        {% set acc_pct = (s.accuracy * 100) | round(1) %}
                         <div class="h-1.5 rounded-full transition-all {% if acc_pct >= 80 %}bg-green-500{% elif acc_pct >= 60 %}bg-yellow-500{% else %}bg-red-500{% endif %}" style="width:{{ acc_pct }}%"></div>
                     </div>
-                    <span class="text-xs text-gray-400 ml-3">{{ s.correct_count or 0 }}/{{ (s.correct_count or 0) + (s.wrong_count or 0) }}</span>
+                    <span class="text-xs text-gray-400 ml-3">{{ s.correct_count or 0 }}/{{ answer_total or 0 }}</span>
                 </div>
                 {% endif %}
             </div>

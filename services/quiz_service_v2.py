@@ -1821,9 +1821,19 @@ class QuizService:
 
                 valid_variations.append(v)
 
-            # 不足时不再用原题冒充变式，直接返回实际数量
+            # 若 AI 去重后数量不足，则用保底变式补齐，确保前端始终拿到完整练习集。
             if len(valid_variations) < num_variations:
-                print(f"[Variation] 有效变式题 {len(valid_variations)}/{num_variations}，返回实际数量（不补充伪变式）")
+                print(f"[Variation] 有效变式题 {len(valid_variations)}/{num_variations}，开始补齐保底变式")
+                fallback_seed = 1
+                while len(valid_variations) < num_variations:
+                    candidate = self._create_variation_from_base(fallback_seed, key_point, base_question)
+                    fallback_seed += 1
+                    q_key = self._question_dedup_key(candidate.get("question", ""))
+                    if not q_key or q_key in seen_questions:
+                        continue
+                    seen_questions.add(q_key)
+                    candidate["id"] = len(valid_variations) + 1
+                    valid_variations.append(candidate)
 
             return valid_variations[:num_variations]
 
@@ -1846,19 +1856,34 @@ class QuizService:
         return ''.join(chars)[:60]  # 取前60字符作为指纹
 
     def _create_variation_from_base(self, id: int, key_point: str, base_question: Dict) -> Dict:
-        """基于原题创建变式（保留原题选项）"""
+        """基于原题创建保底变式，确保题量稳定。"""
         variation_types = ["概念变式", "病例变式", "机制变式", "鉴别变式", "应用变式"]
+        fallback_templates = [
+            "围绕“{key_point}”的核心概念，下列哪项判断最准确？",
+            "若把原题考点换成临床场景，关于“{key_point}”最可能考查哪一项？",
+            "从机制层面追问“{key_point}”，下列哪项最符合题干逻辑？",
+            "针对“{key_point}”的易混淆点，下列哪项最需要优先鉴别？",
+            "如果把“{key_point}”放进处理决策中，下列哪项应用最恰当？",
+        ]
         vtype = variation_types[(id - 1) % len(variation_types)]
+        template = fallback_templates[(id - 1) % len(fallback_templates)]
+        base_question_text = str(base_question.get("question", "") or "").strip()
+        key_label = str(key_point or "").strip() or "该知识点"
+        fallback_question = template.format(key_point=key_label)
+        if base_question_text:
+            fallback_question += f" 原题参考考法：{base_question_text}"
+        base_explanation = str(base_question.get("explanation", "") or "").strip()
+        fallback_explanation = base_explanation or "请结合原题考点回看这一知识点的核心定义、机制和临床应用。"
 
         return {
             "id": id,
             "type": base_question.get("type", "A1"),
             "difficulty": base_question.get("difficulty", "基础"),
             "variation_type": vtype,
-            "question": f"【{vtype}】{base_question.get('question', '')}",
-            "options": base_question.get("options", {}),  # 使用原题的真实选项
+            "question": fallback_question,
+            "options": copy.deepcopy(base_question.get("options", {})),  # 使用原题的真实选项
             "correct_answer": base_question.get("correct_answer", "A"),
-            "explanation": base_question.get("explanation", "")
+            "explanation": fallback_explanation
         }
 
 

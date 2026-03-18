@@ -1270,7 +1270,7 @@ def canonicalize_learning_activity_data(data: Any) -> Dict[str, Any]:
             normalized[field] = max(_coerce_int(raw.get(field), default=0), 0)
 
     if "confidence" in raw:
-        normalized["confidence"] = coerce_confidence(raw.get("confidence"), default="unsure")
+        normalized["confidence"] = normalize_confidence(raw.get("confidence"))
     if "options" in raw:
         normalized["options"] = normalize_option_map(raw.get("options"))
     if "selected_options" in raw:
@@ -1367,7 +1367,7 @@ def canonicalize_quiz_answer(item: Any, *, question_index: Optional[int] = None)
             normalize_answer(raw.get("correct_answer")) or raw.get("correct_answer")
         ) or ""
     if "confidence" in raw or question_index is not None:
-        normalized["confidence"] = coerce_confidence(raw.get("confidence"), default="unsure")
+        normalized["confidence"] = normalize_confidence(raw.get("confidence"))
 
     for field in ["feedback", "explanation", "error_type", "confidence_analysis", "rationale_text"]:
         if field in raw:

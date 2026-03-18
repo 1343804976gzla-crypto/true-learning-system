@@ -75,9 +75,9 @@
 
                         <button
                             type="button"
-                            data-confidence="dont_know"
+                            data-confidence="no"
                             class="confidence-btn p-3 border-2 rounded-lg text-center transition hover:border-red-500"
-                            onclick="selectConfidence('dont_know')">
+                            onclick="selectConfidence('no')">
                             <div class="text-2xl mb-1">❌</div>
                             <div class="font-medium">不会</div>
                             <div class="text-xs text-gray-500">需要学习</div>
@@ -272,7 +272,7 @@
             if (btn.dataset.confidence === confidence) {
                 if (confidence === 'sure') btn.classList.add('border-green-500', 'bg-green-50');
                 if (confidence === 'unsure') btn.classList.add('border-yellow-500', 'bg-yellow-50');
-                if (confidence === 'dont_know') btn.classList.add('border-red-500', 'bg-red-50');
+                if (confidence === 'no') btn.classList.add('border-red-500', 'bg-red-50');
             }
         });
         updateSubmitButton();
@@ -397,7 +397,7 @@
         const map = {
             sure: '确定',
             unsure: '模糊',
-            dont_know: '不会'
+            no: '不会'
         };
         return map[confidence] || confidence;
     }
@@ -445,7 +445,7 @@
         const keyLower = key.toLowerCase();
         if (keyLower === 'q') { selectConfidence('sure'); e.preventDefault(); }
         if (keyLower === 'w') { selectConfidence('unsure'); e.preventDefault(); }
-        if (keyLower === 'e') { selectConfidence('dont_know'); e.preventDefault(); }
+        if (keyLower === 'e') { selectConfidence('no'); e.preventDefault(); }
 
         // Enter 提交答案
         if (key === 'Enter') {

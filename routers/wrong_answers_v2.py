@@ -4,13 +4,17 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Form, File, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, or_, case
 from datetime import datetime, date, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set, Tuple
 from pydantic import BaseModel
 from pathlib import Path
 from difflib import SequenceMatcher
+from dataclasses import dataclass
+from urllib.parse import quote
+from xml.sax.saxutils import escape as xml_escape
 import io
 import math
 import re
@@ -36,10 +40,19 @@ from api_contracts import (
     WrongAnswerChapterListResponse,
 )
 from services.content_parser_v2 import get_content_parser
+from services.data_identity import (
+    DEFAULT_DEVICE_ID,
+    build_device_scope_aliases,
+    build_actor_key_aliases,
+    build_actor_key,
+    get_request_identity,
+    resolve_actor_identity,
+    resolve_query_identity,
+)
 
 from models import get_db, Chapter
 from learning_tracking_models import (
-    QuestionRecord, LearningSession, WrongAnswerV2, WrongAnswerRetry,
+    DailyReviewPaper, DailyReviewPaperItem, QuestionRecord, LearningSession, WrongAnswerV2, WrongAnswerRetry,
     make_fingerprint, INVALID_CHAPTER_IDS
 )
 from utils.data_contracts import (
@@ -47,6 +60,7 @@ from utils.data_contracts import (
     canonicalize_linked_record_ids,
     canonicalize_variant_data,
     coerce_confidence,
+    normalize_confidence,
 )
 
 router = APIRouter(prefix="/api/wrong-answers", tags=["wrong_answers_v2"])
@@ -104,8 +118,11 @@ def _trend_description(direction: str) -> str:
     return mapping.get(direction, "趋势待观察")
 
 
-def _normalize_confidence_value(value: Optional[str]) -> str:
-    return coerce_confidence(value, default="unsure")
+def _normalize_confidence_value(value: Optional[str]) -> Optional[str]:
+    normalized = normalize_confidence(value)
+    if normalized in {"sure", "unsure", "no"}:
+        return normalized
+    return None
 
 
 # ========== Pydantic Models ==========
@@ -238,6 +255,948 @@ def _normalize_match_text(text: str) -> str:
     return re.sub(r"[\s\-—_:：，,。.;；（）()【】\[\]/\\]+", "", str(text or "").lower())
 
 
+DAILY_REVIEW_TARGET_COUNT = 10
+DAILY_REVIEW_MIN_MULTI = 5
+DAILY_REVIEW_MIN_HARD = 5
+DAILY_REVIEW_MAX_PER_KEY_POINT = 2
+DAILY_REVIEW_RECENT_EXCLUDE_DAYS = 5
+
+DAILY_REVIEW_SEVERITY_PRIORITY = {
+    "critical": 0,
+    "stubborn": 1,
+    "landmine": 2,
+    "normal": 3,
+}
+
+DAILY_REVIEW_SEVERITY_LABEL = {
+    "critical": "致命",
+    "stubborn": "顽固",
+    "landmine": "地雷",
+    "normal": "普通",
+}
+
+DAILY_REVIEW_SOURCE_LABEL = {
+    "due": "到期复习",
+    "supplement": "补题",
+}
+
+DAILY_REVIEW_TYPE_LABEL = {
+    "A1": "单选题",
+    "A2": "病例单选",
+    "A3": "共用题干",
+    "X": "多选题",
+}
+
+
+@dataclass(frozen=True)
+class ReviewCandidate:
+    wrong_answer_id: int
+    stem_fingerprint: str
+    normalized_stem: str
+    source_bucket: str
+    next_review_date: Optional[date]
+    severity_tag: str
+    question_type: str
+    difficulty: str
+    knowledge_key: str
+    is_multi: bool
+    is_hard: bool
+    error_count: int
+    first_wrong_at: Optional[datetime]
+    last_wrong_at: Optional[datetime]
+    recently_used: bool
+    snapshot: Dict[str, Any]
+
+
+def _daily_review_severity_rank(tag: Optional[str]) -> int:
+    return DAILY_REVIEW_SEVERITY_PRIORITY.get(str(tag or "").strip(), 99)
+
+
+def _daily_review_severity_label(tag: Optional[str]) -> str:
+    return DAILY_REVIEW_SEVERITY_LABEL.get(str(tag or "").strip(), "普通")
+
+
+def _daily_review_source_label(source_bucket: Optional[str]) -> str:
+    return DAILY_REVIEW_SOURCE_LABEL.get(str(source_bucket or "").strip(), "补题")
+
+
+def _daily_review_type_label(question_type: Optional[str]) -> str:
+    normalized = str(question_type or "").strip().upper()
+    return DAILY_REVIEW_TYPE_LABEL.get(normalized, normalized or "题目")
+
+
+def _strip_daily_review_variant_prefixes(question_text: Optional[str]) -> str:
+    text = str(question_text or "").strip()
+    if not text:
+        return ""
+
+    previous = None
+    while text != previous:
+        previous = text
+        text = re.sub(r"^\s*[【\[]?(概念|病例|机制|鉴别|应用|直接|综合)变式[】\]]?\s*", "", text)
+        text = re.sub(r"^\s*[（(]接上题[）)]\s*", "", text)
+        text = re.sub(r"^\s*(第[一二三四五六七八九十百千0-9]+题|[0-9]+[.、])\s*", "", text)
+        text = text.strip()
+
+    return text
+
+
+def _normalize_daily_review_stem(question_text: Optional[str]) -> str:
+    raw_text = _strip_daily_review_variant_prefixes(question_text)
+    normalized = _normalize_match_text(raw_text)
+    return normalized or raw_text.lower()
+
+
+def _build_daily_review_stem_fingerprint(question_text: Optional[str]) -> str:
+    normalized = _normalize_daily_review_stem(question_text)
+    if not normalized:
+        normalized = str(question_text or "").strip().lower()
+    if not normalized:
+        normalized = "__empty_stem__"
+    return make_fingerprint(normalized)
+
+
+def _normalize_daily_review_key_point(raw_key_point: Optional[str], chapter_id: Optional[str], wrong_answer_id: int) -> str:
+    key_point = str(raw_key_point or "").strip()
+    if key_point:
+        normalized = _normalize_match_text(key_point)
+        return normalized or key_point.lower()
+
+    chapter = str(chapter_id or "").strip().lower()
+    if chapter:
+        return f"chapter:{chapter}"
+
+    return f"wa:{wrong_answer_id}"
+
+
+def _ordered_option_items(options: Optional[Dict[str, Any]]) -> List[Tuple[str, str]]:
+    normalized = _normalize_option_map(options or {})
+    ordered: List[Tuple[str, str]] = []
+    for key in ["A", "B", "C", "D", "E"]:
+        value = normalized.get(key)
+        if value:
+            ordered.append((key, value))
+    for key, value in normalized.items():
+        if key not in {"A", "B", "C", "D", "E"} and value:
+            ordered.append((key, value))
+    return ordered
+
+
+def _build_daily_review_snapshot(wa: WrongAnswerV2, source_bucket: str) -> Dict[str, Any]:
+    return {
+        "wrong_answer_id": wa.id,
+        "question_text": wa.question_text or "",
+        "options": _normalize_option_map(wa.options or {}),
+        "correct_answer": (wa.correct_answer or "").strip(),
+        "explanation": (wa.explanation or "").strip(),
+        "key_point": (wa.key_point or "").strip(),
+        "question_type": (wa.question_type or "A1").strip() or "A1",
+        "difficulty": (wa.difficulty or "基础").strip() or "基础",
+        "severity_tag": (wa.severity_tag or "normal").strip() or "normal",
+        "severity_label": _daily_review_severity_label(wa.severity_tag),
+        "source_bucket": source_bucket,
+        "source_label": _daily_review_source_label(source_bucket),
+        "next_review_date": wa.next_review_date.isoformat() if wa.next_review_date else None,
+        "chapter_id": wa.chapter_id,
+        "first_wrong_at": wa.first_wrong_at.isoformat() if wa.first_wrong_at else None,
+        "last_wrong_at": wa.last_wrong_at.isoformat() if wa.last_wrong_at else None,
+    }
+
+
+def _candidate_from_wrong_answer(
+    wa: WrongAnswerV2,
+    source_bucket: str,
+    recently_used_stems: Set[str],
+) -> ReviewCandidate:
+    normalized_stem = _normalize_daily_review_stem(wa.question_text)
+    stem_fingerprint = _build_daily_review_stem_fingerprint(wa.question_text)
+    question_type = (wa.question_type or "A1").strip() or "A1"
+    difficulty = (wa.difficulty or "基础").strip() or "基础"
+
+    return ReviewCandidate(
+        wrong_answer_id=wa.id,
+        stem_fingerprint=stem_fingerprint,
+        normalized_stem=normalized_stem,
+        source_bucket=source_bucket,
+        next_review_date=wa.next_review_date,
+        severity_tag=(wa.severity_tag or "normal").strip() or "normal",
+        question_type=question_type,
+        difficulty=difficulty,
+        knowledge_key=_normalize_daily_review_key_point(wa.key_point, wa.chapter_id, wa.id),
+        is_multi=question_type == "X",
+        is_hard=difficulty == "难题",
+        error_count=int(wa.error_count or 0),
+        first_wrong_at=wa.first_wrong_at,
+        last_wrong_at=wa.last_wrong_at,
+        recently_used=stem_fingerprint in recently_used_stems,
+        snapshot=_build_daily_review_snapshot(wa, source_bucket),
+    )
+
+
+def _sort_due_candidates(candidates: List[ReviewCandidate]) -> List[ReviewCandidate]:
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate.next_review_date or date.max,
+            candidate.first_wrong_at or candidate.last_wrong_at or datetime.max,
+            _daily_review_severity_rank(candidate.severity_tag),
+            -(candidate.error_count or 0),
+            0 if candidate.is_multi else 1,
+            0 if candidate.is_hard else 1,
+            candidate.wrong_answer_id,
+        ),
+    )
+
+
+def _sort_supplement_candidates(candidates: List[ReviewCandidate]) -> List[ReviewCandidate]:
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            0 if candidate.next_review_date else 1,
+            candidate.next_review_date or date.max,
+            candidate.first_wrong_at or candidate.last_wrong_at or datetime.max,
+            _daily_review_severity_rank(candidate.severity_tag),
+            -(candidate.error_count or 0),
+            0 if candidate.is_multi else 1,
+            0 if candidate.is_hard else 1,
+            candidate.wrong_answer_id,
+        ),
+    )
+
+
+def _get_recent_daily_review_stems(
+    db: Session,
+    paper_date: date,
+    exclude_days: int = DAILY_REVIEW_RECENT_EXCLUDE_DAYS,
+    *,
+    actor_key: Optional[str] = None,
+    actor_keys: Optional[List[str]] = None,
+) -> Set[str]:
+    start_date = paper_date - timedelta(days=exclude_days)
+    query = (
+        db.query(DailyReviewPaperItem.stem_fingerprint)
+        .join(DailyReviewPaper, DailyReviewPaper.id == DailyReviewPaperItem.paper_id)
+        .filter(
+            DailyReviewPaper.paper_date >= start_date,
+            DailyReviewPaper.paper_date < paper_date,
+        )
+    )
+    if actor_keys:
+        query = query.filter(DailyReviewPaper.actor_key.in_(actor_keys))
+    elif actor_key:
+        query = query.filter(DailyReviewPaper.actor_key == actor_key)
+    rows = query.distinct().all()
+    return {row[0] for row in rows if row and row[0]}
+
+
+def _apply_learning_actor_scope(
+    query,
+    model,
+    *,
+    user_id: Optional[str],
+    device_id: Optional[str],
+    device_ids: Optional[List[str]] = None,
+):
+    user_id, device_id = resolve_query_identity(user_id, device_id)
+    scoped_device_ids = [
+        str(item).strip()
+        for item in (device_ids or [])
+        if str(item or "").strip()
+    ]
+    if user_id and hasattr(model, "user_id"):
+        query = query.filter(model.user_id == user_id)
+    if scoped_device_ids and hasattr(model, "device_id"):
+        if len(scoped_device_ids) == 1:
+            query = query.filter(model.device_id == scoped_device_ids[0])
+        else:
+            query = query.filter(model.device_id.in_(scoped_device_ids))
+    elif device_id and hasattr(model, "device_id"):
+        query = query.filter(model.device_id == device_id)
+    return query
+
+
+def _resolve_daily_review_actor(
+    *,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    request_user_id, request_device_id = get_request_identity()
+    candidate_user_id = user_id or request_user_id
+    candidate_device_id = device_id or (
+        request_device_id
+        if request_device_id and (request_device_id != DEFAULT_DEVICE_ID or not candidate_user_id)
+        else None
+    )
+    paper_user_id, paper_device_id = resolve_actor_identity(candidate_user_id, candidate_device_id)
+    has_explicit_scope = bool(
+        user_id
+        or device_id
+        or request_user_id
+        or (request_device_id and request_device_id != DEFAULT_DEVICE_ID)
+    )
+    scope_user_id, scope_device_id = resolve_query_identity(
+        candidate_user_id if has_explicit_scope else None,
+        candidate_device_id if has_explicit_scope else None,
+    )
+    scope_device_ids = build_device_scope_aliases(scope_user_id, scope_device_id)
+    return {
+        "paper_user_id": paper_user_id,
+        "paper_device_id": paper_device_id,
+        "scope_user_id": scope_user_id,
+        "scope_device_id": scope_device_id,
+        "scope_device_ids": scope_device_ids,
+        "actor_key": build_actor_key(candidate_user_id, candidate_device_id),
+        "actor_keys": build_actor_key_aliases(candidate_user_id, candidate_device_id),
+    }
+
+
+def _should_try_legacy_anonymous_daily_review_actor(
+    *,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+) -> bool:
+    request_user_id, request_device_id = get_request_identity()
+    return (
+        not user_id
+        and not device_id
+        and not request_user_id
+        and bool(request_device_id)
+        and request_device_id != DEFAULT_DEVICE_ID
+        and str(request_device_id).startswith("local-")
+    )
+
+
+def _query_daily_review_paper(
+    db: Session,
+    *,
+    paper_date: date,
+    actor_key: str,
+    actor_keys: Optional[List[str]] = None,
+):
+    query = db.query(DailyReviewPaper).filter(DailyReviewPaper.paper_date == paper_date)
+    if actor_keys:
+        query = query.filter(DailyReviewPaper.actor_key.in_(actor_keys))
+    else:
+        query = query.filter(DailyReviewPaper.actor_key == actor_key)
+    return query.order_by(desc(DailyReviewPaper.updated_at), desc(DailyReviewPaper.id))
+
+
+def _build_daily_review_candidates(
+    db: Session,
+    paper_date: date,
+    *,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    device_ids: Optional[List[str]] = None,
+    actor_key: Optional[str] = None,
+    actor_keys: Optional[List[str]] = None,
+) -> List[ReviewCandidate]:
+    active_items = (
+        _apply_learning_actor_scope(
+            db.query(WrongAnswerV2),
+            WrongAnswerV2,
+            user_id=user_id,
+            device_id=device_id,
+            device_ids=device_ids,
+        )
+        .filter(WrongAnswerV2.mastery_status == "active")
+        .all()
+    )
+    recent_stems = _get_recent_daily_review_stems(db, paper_date, actor_key=actor_key, actor_keys=actor_keys)
+
+    due_candidates: List[ReviewCandidate] = []
+    supplement_candidates: List[ReviewCandidate] = []
+    for wrong_answer in active_items:
+        is_due = bool(wrong_answer.next_review_date and wrong_answer.next_review_date <= paper_date)
+        source_bucket = "due" if is_due else "supplement"
+        candidate = _candidate_from_wrong_answer(wrong_answer, source_bucket, recent_stems)
+        if is_due:
+            due_candidates.append(candidate)
+        else:
+            supplement_candidates.append(candidate)
+
+    due_strict = _sort_due_candidates([candidate for candidate in due_candidates if not candidate.recently_used])
+    supplement_strict = _sort_supplement_candidates([candidate for candidate in supplement_candidates if not candidate.recently_used])
+    due_relaxed = _sort_due_candidates([candidate for candidate in due_candidates if candidate.recently_used])
+    supplement_relaxed = _sort_supplement_candidates([candidate for candidate in supplement_candidates if candidate.recently_used])
+
+    return due_strict + supplement_strict + due_relaxed + supplement_relaxed
+
+
+def _simulate_candidate_capacity(
+    candidates: List[ReviewCandidate],
+    selected_ids: Set[int],
+    selected_stems: Set[str],
+    key_point_counts: Dict[str, int],
+    limit: int,
+    *,
+    max_per_key_point: Optional[int] = DAILY_REVIEW_MAX_PER_KEY_POINT,
+) -> Tuple[int, int, int]:
+    if limit <= 0:
+        return 0, 0, 0
+
+    local_ids = set(selected_ids)
+    local_stems = set(selected_stems)
+    local_key_points = dict(key_point_counts)
+    total = 0
+    multi_total = 0
+    hard_total = 0
+
+    for candidate in candidates:
+        if candidate.wrong_answer_id in local_ids:
+            continue
+        if candidate.stem_fingerprint in local_stems:
+            continue
+        if (
+            max_per_key_point is not None
+            and local_key_points.get(candidate.knowledge_key, 0) >= max_per_key_point
+        ):
+            continue
+
+        local_ids.add(candidate.wrong_answer_id)
+        local_stems.add(candidate.stem_fingerprint)
+        local_key_points[candidate.knowledge_key] = local_key_points.get(candidate.knowledge_key, 0) + 1
+
+        total += 1
+        multi_total += int(candidate.is_multi)
+        hard_total += int(candidate.is_hard)
+
+        if total >= limit:
+            break
+
+    return total, multi_total, hard_total
+
+
+def _count_relaxed_key_point_items(selected: List[ReviewCandidate]) -> int:
+    key_point_counts: Dict[str, int] = {}
+    relaxed_count = 0
+
+    for candidate in selected:
+        next_count = key_point_counts.get(candidate.knowledge_key, 0) + 1
+        key_point_counts[candidate.knowledge_key] = next_count
+        if next_count > DAILY_REVIEW_MAX_PER_KEY_POINT:
+            relaxed_count += 1
+
+    return relaxed_count
+
+
+def _export_daily_review_pdf_for_actor(
+    db: Session,
+    *,
+    target_date: date,
+    actor: Dict[str, Any],
+    force_regenerate: bool,
+) -> bytes:
+    paper = _query_daily_review_paper(
+        db,
+        paper_date=target_date,
+        actor_key=actor["actor_key"],
+        actor_keys=actor.get("actor_keys"),
+    ).first()
+
+    if paper and not force_regenerate:
+        paper_items = sorted(paper.items, key=lambda item: item.position)
+        return _build_daily_review_pdf(target_date, paper_items, paper.config or {})
+
+    active_count = (
+        _apply_learning_actor_scope(
+            db.query(WrongAnswerV2),
+            WrongAnswerV2,
+            user_id=actor["scope_user_id"],
+            device_id=actor["scope_device_id"],
+            device_ids=actor.get("scope_device_ids"),
+        )
+        .filter(WrongAnswerV2.mastery_status == "active")
+        .count()
+    )
+    if active_count == 0:
+        raise HTTPException(status_code=404, detail="褰撳墠娌℃湁 active 鐘舵€佺殑閿欓锛屾棤娉曞鍑烘瘡鏃ュ涔犲嵎")
+
+    ordered_candidates = _build_daily_review_candidates(
+        db,
+        target_date,
+        user_id=actor["scope_user_id"],
+        device_id=actor["scope_device_id"],
+        device_ids=actor.get("scope_device_ids"),
+        actor_key=actor["actor_key"] if actor["scope_user_id"] or actor["scope_device_id"] else None,
+        actor_keys=actor.get("actor_keys") if actor["scope_user_id"] or actor["scope_device_id"] else None,
+    )
+    selected_candidates = _select_daily_review_candidates(ordered_candidates)
+    if not selected_candidates:
+        raise HTTPException(status_code=404, detail="褰撳墠娌℃湁婊¤冻鏉′欢鐨勯敊棰橈紝鏃犳硶鐢熸垚姣忔棩澶嶄範鍗?")
+
+    config = _build_daily_review_config(target_date, selected_candidates)
+
+    if paper is None:
+        paper = DailyReviewPaper(
+            user_id=actor["paper_user_id"],
+            device_id=actor["paper_device_id"],
+            actor_key=actor["actor_key"],
+            paper_date=target_date,
+        )
+        db.add(paper)
+        db.flush()
+    else:
+        paper.items.clear()
+        db.flush()
+
+    paper.user_id = actor["paper_user_id"]
+    if not paper.device_id:
+        paper.device_id = actor["paper_device_id"]
+    if not paper.actor_key:
+        paper.actor_key = actor["actor_key"]
+    paper.total_questions = len(selected_candidates)
+    paper.config = config
+    paper.updated_at = datetime.now()
+
+    for position, candidate in enumerate(selected_candidates, start=1):
+        paper.items.append(DailyReviewPaperItem(
+            wrong_answer_id=candidate.wrong_answer_id,
+            position=position,
+            stem_fingerprint=candidate.stem_fingerprint,
+            source_bucket=candidate.source_bucket,
+            snapshot=candidate.snapshot,
+        ))
+
+    db.commit()
+    db.refresh(paper)
+
+    paper_items = sorted(paper.items, key=lambda item: item.position)
+    return _build_daily_review_pdf(target_date, paper_items, config)
+
+
+def _select_daily_review_candidates(
+    ordered_candidates: List[ReviewCandidate],
+    target_count: int = DAILY_REVIEW_TARGET_COUNT,
+    min_multi: int = DAILY_REVIEW_MIN_MULTI,
+    min_hard: int = DAILY_REVIEW_MIN_HARD,
+) -> List[ReviewCandidate]:
+    selected: List[ReviewCandidate] = []
+    selected_ids: Set[int] = set()
+    selected_stems: Set[str] = set()
+    key_point_counts: Dict[str, int] = {}
+    multi_count = 0
+    hard_count = 0
+
+    def accept(candidate: ReviewCandidate) -> None:
+        nonlocal multi_count, hard_count
+        selected.append(candidate)
+        selected_ids.add(candidate.wrong_answer_id)
+        selected_stems.add(candidate.stem_fingerprint)
+        key_point_counts[candidate.knowledge_key] = key_point_counts.get(candidate.knowledge_key, 0) + 1
+        multi_count += int(candidate.is_multi)
+        hard_count += int(candidate.is_hard)
+
+    def is_eligible(
+        candidate: ReviewCandidate,
+        *,
+        max_per_key_point: Optional[int] = DAILY_REVIEW_MAX_PER_KEY_POINT,
+    ) -> bool:
+        if candidate.wrong_answer_id in selected_ids:
+            return False
+        if candidate.stem_fingerprint in selected_stems:
+            return False
+        if (
+            max_per_key_point is not None
+            and key_point_counts.get(candidate.knowledge_key, 0) >= max_per_key_point
+        ):
+            return False
+        return True
+
+    def fill_remaining(*, max_per_key_point: Optional[int]) -> None:
+        for candidate in ordered_candidates:
+            if len(selected) >= target_count:
+                break
+            if not is_eligible(candidate, max_per_key_point=max_per_key_point):
+                continue
+            accept(candidate)
+
+    for index, candidate in enumerate(ordered_candidates):
+        if len(selected) >= target_count:
+            break
+        if not is_eligible(candidate):
+            continue
+
+        next_ids = set(selected_ids)
+        next_ids.add(candidate.wrong_answer_id)
+        next_stems = set(selected_stems)
+        next_stems.add(candidate.stem_fingerprint)
+        next_key_points = dict(key_point_counts)
+        next_key_points[candidate.knowledge_key] = next_key_points.get(candidate.knowledge_key, 0) + 1
+
+        remaining_slots = target_count - (len(selected) + 1)
+        future_total, future_multi, future_hard = _simulate_candidate_capacity(
+            ordered_candidates[index + 1:],
+            next_ids,
+            next_stems,
+            next_key_points,
+            remaining_slots,
+            max_per_key_point=DAILY_REVIEW_MAX_PER_KEY_POINT,
+        )
+
+        if len(selected) + 1 + future_total < target_count:
+            accept(candidate)
+            continue
+
+        need_multi = max(0, min_multi - (multi_count + int(candidate.is_multi)))
+        need_hard = max(0, min_hard - (hard_count + int(candidate.is_hard)))
+
+        if need_multi > future_multi or need_hard > future_hard:
+            continue
+
+        accept(candidate)
+
+    fill_remaining(max_per_key_point=DAILY_REVIEW_MAX_PER_KEY_POINT)
+    fill_remaining(max_per_key_point=None)
+
+    order_rank = {
+        candidate.wrong_answer_id: index
+        for index, candidate in enumerate(ordered_candidates)
+    }
+    return sorted(
+        selected,
+        key=lambda candidate: order_rank.get(candidate.wrong_answer_id, len(order_rank)),
+    )
+
+
+def _build_daily_review_config(
+    paper_date: date,
+    selected: List[ReviewCandidate],
+    *,
+    target_count: int = DAILY_REVIEW_TARGET_COUNT,
+) -> Dict[str, Any]:
+    return {
+        "paper_date": paper_date.isoformat(),
+        "target_count": target_count,
+        "selected_count": len(selected),
+        "min_multi": DAILY_REVIEW_MIN_MULTI,
+        "min_hard": DAILY_REVIEW_MIN_HARD,
+        "max_per_key_point": DAILY_REVIEW_MAX_PER_KEY_POINT,
+        "recent_exclude_days": DAILY_REVIEW_RECENT_EXCLUDE_DAYS,
+        "due_count": sum(1 for candidate in selected if candidate.source_bucket == "due"),
+        "supplement_count": sum(1 for candidate in selected if candidate.source_bucket == "supplement"),
+        "multi_count": sum(1 for candidate in selected if candidate.is_multi),
+        "hard_count": sum(1 for candidate in selected if candidate.is_hard),
+        "relaxed_recent_count": sum(1 for candidate in selected if candidate.recently_used),
+        "relaxed_key_point_count": _count_relaxed_key_point_items(selected),
+    }
+
+
+def _paragraphize_pdf_text(value: Optional[str]) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return xml_escape(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br/>")
+
+
+def _get_embedded_pdf_font_name() -> str:
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    cached = getattr(_get_embedded_pdf_font_name, "_cached", None)
+    if cached:
+        return cached
+
+    font_candidates = [
+        ("MicrosoftYaHei", Path("C:/Windows/Fonts/msyh.ttc"), {"subfontIndex": 0}),
+        ("SimSun", Path("C:/Windows/Fonts/simsun.ttc"), {"subfontIndex": 0}),
+        ("SimHei", Path("C:/Windows/Fonts/simhei.ttf"), {}),
+    ]
+
+    for font_name, font_path, font_kwargs in font_candidates:
+        if not font_path.exists():
+            continue
+        try:
+            try:
+                pdfmetrics.getFont(font_name)
+            except KeyError:
+                pdfmetrics.registerFont(TTFont(font_name, str(font_path), **font_kwargs))
+            _get_embedded_pdf_font_name._cached = font_name
+            return font_name
+        except Exception:
+            continue
+
+    fallback_name = "STSong-Light"
+    try:
+        pdfmetrics.getFont(fallback_name)
+    except KeyError:
+        pdfmetrics.registerFont(UnicodeCIDFont(fallback_name))
+    _get_embedded_pdf_font_name._cached = fallback_name
+    return fallback_name
+
+
+def _build_daily_review_pdf(
+    paper_date: date,
+    paper_items: List[DailyReviewPaperItem],
+    config: Optional[Dict[str, Any]] = None,
+) -> bytes:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        BaseDocTemplate,
+        Frame,
+        HRFlowable,
+        KeepTogether,
+        NextPageTemplate,
+        PageBreak,
+        PageTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    font_name = _get_embedded_pdf_font_name()
+
+    buffer = io.BytesIO()
+    doc = BaseDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=18 * mm,
+        bottomMargin=12 * mm,
+        title=f"每日复习卷 {paper_date.isoformat()}",
+        author="True Learning System",
+    )
+
+    page_width, page_height = A4
+    usable_width = page_width - doc.leftMargin - doc.rightMargin
+    usable_height = page_height - doc.topMargin - doc.bottomMargin
+    column_gap = 6 * mm
+    question_column_width = (usable_width - column_gap) / 2
+    first_page_summary_height = 38 * mm
+    first_page_gap = 4 * mm
+    first_page_question_height = usable_height - first_page_summary_height - first_page_gap
+
+    question_frames = [
+        Frame(doc.leftMargin, doc.bottomMargin, question_column_width, usable_height, id="question-col-1", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0),
+        Frame(doc.leftMargin + question_column_width + column_gap, doc.bottomMargin, question_column_width, usable_height, id="question-col-2", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0),
+    ]
+    first_page_frames = [
+        Frame(
+            doc.leftMargin,
+            doc.bottomMargin + first_page_question_height + first_page_gap,
+            usable_width,
+            first_page_summary_height,
+            id="first-summary",
+            leftPadding=0,
+            rightPadding=0,
+            topPadding=0,
+            bottomPadding=0,
+        ),
+        Frame(doc.leftMargin, doc.bottomMargin, question_column_width, first_page_question_height, id="first-question-col-1", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0),
+        Frame(doc.leftMargin + question_column_width + column_gap, doc.bottomMargin, question_column_width, first_page_question_height, id="first-question-col-2", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0),
+    ]
+    appendix_frames = [
+        Frame(doc.leftMargin, doc.bottomMargin, usable_width, usable_height, id="appendix-col", leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0),
+    ]
+
+    def draw_question_page(canvas, current_doc):
+        canvas.saveState()
+        canvas.setFont(font_name, 9)
+        canvas.setFillColor(colors.HexColor("#5B6472"))
+        canvas.drawString(current_doc.leftMargin, page_height - 9 * mm, "知识归档 · 每日复习卷")
+        canvas.drawRightString(page_width - current_doc.rightMargin, page_height - 9 * mm, paper_date.strftime("%Y-%m-%d"))
+        canvas.setStrokeColor(colors.HexColor("#D0D7DE"))
+        canvas.line(current_doc.leftMargin, page_height - 10.8 * mm, page_width - current_doc.rightMargin, page_height - 10.8 * mm)
+        canvas.drawRightString(page_width - current_doc.rightMargin, 7 * mm, f"第 {canvas.getPageNumber()} 页")
+        canvas.restoreState()
+
+    def draw_appendix_page(canvas, current_doc):
+        canvas.saveState()
+        canvas.setFont(font_name, 9)
+        canvas.setFillColor(colors.HexColor("#5B6472"))
+        canvas.drawString(current_doc.leftMargin, page_height - 9 * mm, "知识归档 · 答案解析附页")
+        canvas.drawRightString(page_width - current_doc.rightMargin, page_height - 9 * mm, paper_date.strftime("%Y-%m-%d"))
+        canvas.setStrokeColor(colors.HexColor("#D0D7DE"))
+        canvas.line(current_doc.leftMargin, page_height - 10.8 * mm, page_width - current_doc.rightMargin, page_height - 10.8 * mm)
+        canvas.drawRightString(page_width - current_doc.rightMargin, 7 * mm, f"第 {canvas.getPageNumber()} 页")
+        canvas.restoreState()
+
+    doc.addPageTemplates([
+        PageTemplate(id="first-questions", frames=first_page_frames, onPage=draw_question_page, autoNextPageTemplate="questions"),
+        PageTemplate(id="questions", frames=question_frames, onPage=draw_question_page),
+        PageTemplate(id="appendix", frames=appendix_frames, onPage=draw_appendix_page),
+    ])
+
+    sample_styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "DailyReviewTitle",
+        parent=sample_styles["Title"],
+        fontName=font_name,
+        fontSize=16.5,
+        leading=19,
+        textColor=colors.HexColor("#1F2937"),
+        spaceAfter=3,
+    )
+    subtitle_style = ParagraphStyle(
+        "DailyReviewSubtitle",
+        parent=sample_styles["Normal"],
+        fontName=font_name,
+        fontSize=8.8,
+        leading=11.4,
+        textColor=colors.HexColor("#5B6472"),
+        wordWrap="CJK",
+        spaceAfter=4,
+    )
+    summary_line_style = ParagraphStyle(
+        "DailyReviewSummaryLine",
+        parent=sample_styles["Normal"],
+        fontName=font_name,
+        fontSize=8.8,
+        leading=11.2,
+        textColor=colors.HexColor("#334155"),
+        wordWrap="CJK",
+        spaceAfter=0,
+    )
+    question_meta_style = ParagraphStyle(
+        "DailyReviewQuestionMeta",
+        parent=sample_styles["Normal"],
+        fontName=font_name,
+        fontSize=8.6,
+        leading=11.2,
+        textColor=colors.HexColor("#3B4A5A"),
+        spaceAfter=2,
+    )
+    question_text_style = ParagraphStyle(
+        "DailyReviewQuestionText",
+        parent=sample_styles["BodyText"],
+        fontName=font_name,
+        fontSize=9.8,
+        leading=13.2,
+        textColor=colors.HexColor("#0F172A"),
+        wordWrap="CJK",
+        spaceAfter=3,
+    )
+    option_style = ParagraphStyle(
+        "DailyReviewOption",
+        parent=sample_styles["BodyText"],
+        fontName=font_name,
+        fontSize=8.9,
+        leading=11.8,
+        leftIndent=8,
+        firstLineIndent=-8,
+        textColor=colors.HexColor("#334155"),
+        wordWrap="CJK",
+        spaceAfter=1,
+    )
+    answer_line_style = ParagraphStyle(
+        "DailyReviewAnswerLine",
+        parent=sample_styles["Normal"],
+        fontName=font_name,
+        fontSize=8.6,
+        leading=12,
+        textColor=colors.HexColor("#5B6472"),
+        spaceAfter=6,
+    )
+    appendix_title_style = ParagraphStyle(
+        "DailyReviewAppendixTitle",
+        parent=sample_styles["Heading1"],
+        fontName=font_name,
+        fontSize=15,
+        leading=18,
+        textColor=colors.HexColor("#111827"),
+        spaceAfter=6,
+    )
+    appendix_item_style = ParagraphStyle(
+        "DailyReviewAppendixItem",
+        parent=sample_styles["BodyText"],
+        fontName=font_name,
+        fontSize=9.4,
+        leading=12.8,
+        textColor=colors.HexColor("#1F2937"),
+        wordWrap="CJK",
+        spaceAfter=3,
+    )
+    appendix_answer_style = ParagraphStyle(
+        "DailyReviewAppendixAnswer",
+        parent=appendix_item_style,
+        textColor=colors.HexColor("#0F766E"),
+        spaceAfter=4,
+    )
+
+    config = config or {}
+    sorted_items = sorted(paper_items, key=lambda item: item.position)
+
+    summary_table = Table(
+        [[Paragraph(line, summary_line_style)] for line in [
+            f"日期：{paper_date.strftime('%Y-%m-%d')}    题量：{config.get('selected_count', len(sorted_items))} / {config.get('target_count', DAILY_REVIEW_TARGET_COUNT)}",
+            f"题源：仅 active 错题 · 原始题目    结构：到期 {config.get('due_count', 0)} 题 / 补题 {config.get('supplement_count', 0)} 题",
+            f"偏好：多选 {config.get('multi_count', 0)} 题 / 难题 {config.get('hard_count', 0)} 题    避重：近 {config.get('recent_exclude_days', DAILY_REVIEW_RECENT_EXCLUDE_DAYS)} 天放宽使用 {config.get('relaxed_recent_count', 0)} 题    同知识点放宽 {config.get('relaxed_key_point_count', 0)} 题",
+        ]],
+        colWidths=[usable_width],
+    )
+    summary_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), font_name),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.8),
+        ("LEADING", (0, 0), (-1, -1), 11.2),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#334155")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+
+    story = [
+        Paragraph("每日复习卷", title_style),
+        Paragraph("用于打印复习。题目仅来自 active 错题，题干保持原始内容，答案解析集中放在附页。", subtitle_style),
+        summary_table,
+        Spacer(1, 2.5 * mm),
+    ]
+
+    for index, item in enumerate(sorted_items, start=1):
+        snapshot = item.snapshot or {}
+        type_label = _daily_review_type_label(snapshot.get("question_type"))
+        difficulty = snapshot.get("difficulty") or "基础"
+        source_label = snapshot.get("source_label") or _daily_review_source_label(snapshot.get("source_bucket"))
+        question_flowables = [
+            Paragraph(f"第 {index} 题 · {type_label} · {difficulty} · {source_label}", question_meta_style),
+            Paragraph(_paragraphize_pdf_text(snapshot.get("question_text")), question_text_style),
+        ]
+        for option_key, option_value in _ordered_option_items(snapshot.get("options")):
+            question_flowables.append(Paragraph(f"{option_key}. {_paragraphize_pdf_text(option_value)}", option_style))
+        question_flowables.append(Paragraph("作答：____________________", answer_line_style))
+        question_flowables.append(HRFlowable(width="100%", thickness=0.4, color=colors.HexColor("#D7DEE7"), spaceBefore=0, spaceAfter=4))
+        story.append(KeepTogether(question_flowables))
+
+    story.extend([
+        NextPageTemplate("appendix"),
+        PageBreak(),
+        Paragraph("答案解析附页", appendix_title_style),
+        Paragraph("附页包含标准答案、解析、知识点和原错因标签，便于打印后对照复盘。", subtitle_style),
+    ])
+
+    for index, item in enumerate(sorted_items, start=1):
+        snapshot = item.snapshot or {}
+        type_label = _daily_review_type_label(snapshot.get("question_type"))
+        difficulty = snapshot.get("difficulty") or "基础"
+        source_label = snapshot.get("source_label") or _daily_review_source_label(snapshot.get("source_bucket"))
+        severity_label = snapshot.get("severity_label") or _daily_review_severity_label(snapshot.get("severity_tag"))
+        appendix_block = [
+            Paragraph(f"第 {index} 题 · {type_label} · {difficulty} · {source_label}", question_meta_style),
+            Paragraph(f"题干：{_paragraphize_pdf_text(snapshot.get('question_text'))}", appendix_item_style),
+            Paragraph(f"答案：{xml_escape(str(snapshot.get('correct_answer') or '未记录'))}", appendix_answer_style),
+            Paragraph(f"知识点：{xml_escape(str(snapshot.get('key_point') or '未标注'))}", appendix_item_style),
+            Paragraph(f"原错因标签：{xml_escape(severity_label)}", appendix_item_style),
+            Paragraph(f"当前排期：{xml_escape(str(snapshot.get('next_review_date') or '未排期'))}", appendix_item_style),
+            Paragraph(f"解析：{_paragraphize_pdf_text(snapshot.get('explanation') or '暂无解析')}", appendix_item_style),
+            Spacer(1, 2 * mm),
+            HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CBD5E1"), spaceBefore=0, spaceAfter=4),
+        ]
+        story.append(KeepTogether(appendix_block))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
 def _resolve_chapter_id(db: Session, chapter_name: Optional[str], book_name: Optional[str]) -> Optional[str]:
     chapter_name = (chapter_name or "").strip()
     book_name = (book_name or "").strip()
@@ -291,7 +1250,7 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
         LearningSession, QuestionRecord.session_id == LearningSession.id
     ).filter(
         (QuestionRecord.is_correct == False) |
-        (QuestionRecord.confidence.in_(["unsure", "no"]))
+        (QuestionRecord.confidence.in_(["unsure", "no", "dont_know"]))
     ).all()
 
     # 按指纹分组
@@ -1330,6 +2289,49 @@ async def get_retry_batch(
         ]
     }
 
+
+# ========== GET /daily-review-pdf ==========
+
+@router.get("/daily-review-pdf", response_model=None, response_class=StreamingResponse)
+async def export_daily_review_pdf(
+    paper_date: Optional[date] = Query(default=None),
+    force_regenerate: bool = Query(default=False),
+    user_id: Optional[str] = Query(default=None),
+    device_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    target_date = paper_date or date.today()
+    actors_to_try = [_resolve_daily_review_actor(user_id=user_id, device_id=device_id)]
+    if _should_try_legacy_anonymous_daily_review_actor(user_id=user_id, device_id=device_id):
+        legacy_actor = _resolve_daily_review_actor(device_id=DEFAULT_DEVICE_ID)
+        if legacy_actor["actor_key"] != actors_to_try[0]["actor_key"]:
+            actors_to_try.append(legacy_actor)
+
+    last_not_found: Optional[HTTPException] = None
+    for actor in actors_to_try:
+        try:
+            pdf_bytes = _export_daily_review_pdf_for_actor(
+                db,
+                target_date=target_date,
+                actor=actor,
+                force_regenerate=force_regenerate,
+            )
+            filename = f"daily-review-{target_date.isoformat()}.pdf"
+            return StreamingResponse(
+                io.BytesIO(pdf_bytes),
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}",
+                    "Cache-Control": "no-store",
+                },
+            )
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            db.rollback()
+            last_not_found = exc
+
+    raise last_not_found or HTTPException(status_code=404, detail="褰撳墠娌℃湁婊¤冻鏉′欢鐨勯敊棰橈紝鏃犳硶鐢熸垚姣忔棩澶嶄範鍗?")
 
 # ========== GET /export ==========
 

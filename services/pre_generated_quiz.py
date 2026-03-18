@@ -8,6 +8,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from services.ai_client import get_ai_client
+from utils.data_contracts import normalize_confidence
+
+
+def _empty_confidence_stats() -> Dict[str, int]:
+    return {"sure": 0, "unsure": 0, "no": 0, "missing": 0}
 
 
 class PreGeneratedQuizService:
@@ -201,9 +206,12 @@ class ComprehensiveAnalyzer:
         wrong_count = total - correct_count
         score = int(correct_count / total * 100)
 
-        confidence_stats = {"sure": 0, "unsure": 0, "dont_know": 0}
+        confidence_stats = _empty_confidence_stats()
         for a in answers:
-            c = a.get("confidence", "unsure")
+            c = normalize_confidence(a.get("confidence"))
+            if c not in {"sure", "unsure", "no"}:
+                confidence_stats["missing"] += 1
+                continue
             confidence_stats[c] = confidence_stats.get(c, 0) + 1
 
         all_weak_points: List[str] = []
@@ -320,7 +328,7 @@ class ComprehensiveAnalyzer:
             "score": score,
             "correct_count": correct_count,
             "wrong_count": wrong_count,
-            "confidence_stats": {"sure": 0, "unsure": 0, "dont_know": 0},
+            "confidence_stats": _empty_confidence_stats(),
             "error_types": {"blind_spot": 0, "knowledge_gap": 0, "unknown": 0},
             "weak_points_summary": list(set(weak_points)),
         }

@@ -86,6 +86,7 @@ def get_confidence_text(confidence: str) -> str:
     mapping = {
         'sure': '确定会',
         'unsure': '有点模糊',
+        'no': '完全不会',
         'dont_know': '完全不会'
     }
     return mapping.get(confidence, confidence)
@@ -96,6 +97,7 @@ def get_confidence_color(confidence: str) -> str:
     mapping = {
         'sure': 'green',
         'unsure': 'yellow',
+        'no': 'red',
         'dont_know': 'red'
     }
     return mapping.get(confidence, 'gray')
@@ -180,7 +182,7 @@ def analyze_confidence_accuracy(is_correct: bool, confidence: str) -> Dict[str, 
                 'diagnosis': '低信心 + 错误 = 正常盲区',
                 'suggestion': '继续学习该知识点，从基础概念开始'
             }
-    else:  # dont_know
+    else:  # no / dont_know
         return {
             'type': 'aware_weak',
             'diagnosis': '完全不会',

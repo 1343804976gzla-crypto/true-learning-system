@@ -251,6 +251,193 @@
         return div.innerHTML;
     }
 
+    function normalizeExamOptionLetter(value) {
+        const normalized = String(value || '').trim().toUpperCase();
+        return /^[A-E]$/.test(normalized) ? normalized : '';
+    }
+
+    function getExamOptionLetters(question) {
+        const options = question && question.options ? Object.keys(question.options) : [];
+        const normalized = options
+            .map(function(opt) { return normalizeExamOptionLetter(opt); })
+            .filter(function(opt) { return !!opt; })
+            .sort();
+        return normalized.length > 0 ? normalized : ['A', 'B', 'C', 'D', 'E'];
+    }
+
+    function normalizeExamAnswerLetters(answer, question) {
+        const allowed = new Set(getExamOptionLetters(question));
+        const seen = new Set();
+        const matches = String(answer || '').toUpperCase().match(/[A-E]/g) || [];
+
+        return matches.filter(function(letter) {
+            if (!allowed.has(letter) || seen.has(letter)) {
+                return false;
+            }
+            seen.add(letter);
+            return true;
+        }).sort();
+    }
+
+    function formatExamAnswerLetters(letters, emptyText) {
+        return letters && letters.length > 0 ? letters.join('、') : (emptyText || '无');
+    }
+
+    function analyzeExamAnswer(question, userAnswer, correctAnswer, isCorrect) {
+        const userLetters = normalizeExamAnswerLetters(userAnswer, question);
+        const correctLetters = normalizeExamAnswerLetters(correctAnswer, question);
+        const missingLetters = correctLetters.filter(function(letter) {
+            return !userLetters.includes(letter);
+        });
+        const extraLetters = userLetters.filter(function(letter) {
+            return !correctLetters.includes(letter);
+        });
+        const isMultipleChoice = !!(question && question.type === 'X');
+        let issueLabel = '完全正确';
+        let issueTone = 'success';
+        let issueNarrative = '你的答案与标准答案一致。';
+
+        if (!isCorrect) {
+            if (userLetters.length === 0) {
+                issueLabel = '未作答';
+                issueTone = 'neutral';
+                issueNarrative = '这题未作答，正确答案是 ' + formatExamAnswerLetters(correctLetters, '无') + '。';
+            } else if (missingLetters.length > 0 && extraLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '少选 + 多选' : '错选';
+                issueTone = 'danger';
+                issueNarrative = '这题漏选 ' + formatExamAnswerLetters(missingLetters) +
+                    '，同时' + (isMultipleChoice ? '多选 ' : '错选 ') + formatExamAnswerLetters(extraLetters) + '。';
+            } else if (missingLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '少选' : '错选';
+                issueTone = 'warning';
+                issueNarrative = isMultipleChoice
+                    ? '这题漏选 ' + formatExamAnswerLetters(missingLetters) + '。'
+                    : '这题没有选到正确答案 ' + formatExamAnswerLetters(missingLetters) + '。';
+            } else if (extraLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '多选' : '错选';
+                issueTone = 'danger';
+                issueNarrative = '这题' + (isMultipleChoice ? '多选 ' : '错选 ') + formatExamAnswerLetters(extraLetters) + '。';
+            } else {
+                issueLabel = '答案不匹配';
+                issueTone = 'danger';
+                issueNarrative = '这题答案与标准答案不一致，请结合解析复盘。';
+            }
+        }
+
+        return {
+            isCorrect: !!isCorrect,
+            questionType: question && question.type ? question.type : '',
+            userLetters: userLetters,
+            correctLetters: correctLetters,
+            missingLetters: missingLetters,
+            extraLetters: extraLetters,
+            issueLabel: issueLabel,
+            issueTone: issueTone,
+            issueNarrative: issueNarrative
+        };
+    }
+
+    function buildExamAnswerSummaryCard(label, value, tone) {
+        const toneClassMap = {
+            user: 'bg-blue-50 border-blue-200 text-blue-700',
+            correct: 'bg-green-50 border-green-200 text-green-700',
+            missing: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+            extra: 'bg-red-50 border-red-200 text-red-700'
+        };
+        const toneClass = toneClassMap[tone] || 'bg-gray-50 border-gray-200 text-gray-700';
+
+        return '<div class="rounded-xl border px-4 py-3 ' + toneClass + '">' +
+            '<div class="text-xs font-semibold tracking-wide opacity-75">' + escapeHtml(label) + '</div>' +
+            '<div class="mt-2 text-base font-bold">' + escapeHtml(value) + '</div>' +
+            '</div>';
+    }
+
+    function buildExamAnswerSummaryHtml(review) {
+        const cards = [
+            buildExamAnswerSummaryCard('你的答案', formatExamAnswerLetters(review.userLetters, '未作答'), 'user'),
+            buildExamAnswerSummaryCard('正确答案', formatExamAnswerLetters(review.correctLetters, '无'), 'correct')
+        ];
+
+        if (!review.isCorrect && review.missingLetters.length > 0) {
+            cards.push(buildExamAnswerSummaryCard('漏选项', formatExamAnswerLetters(review.missingLetters), 'missing'));
+        }
+
+        if (!review.isCorrect && review.extraLetters.length > 0) {
+            cards.push(buildExamAnswerSummaryCard(
+                review.questionType === 'X' ? '多选项' : '错选项',
+                formatExamAnswerLetters(review.extraLetters),
+                'extra'
+            ));
+        }
+
+        return '<div class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">' + cards.join('') + '</div>';
+    }
+
+    function buildExamAnswerIssueHtml(review) {
+        if (review.isCorrect) {
+            return '';
+        }
+
+        const toneClassMap = {
+            warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+            danger: 'bg-red-50 border-red-200 text-red-700',
+            neutral: 'bg-gray-50 border-gray-200 text-gray-700'
+        };
+        const toneClass = toneClassMap[review.issueTone] || toneClassMap.neutral;
+
+        return '<div class="mb-4 rounded-xl border px-4 py-3 ' + toneClass + '">' +
+            '<div class="flex flex-wrap items-center gap-2">' +
+            '<span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs font-bold">错因：' +
+            escapeHtml(review.issueLabel) + '</span>' +
+            '<span class="text-sm font-medium">' + escapeHtml(review.issueNarrative) + '</span>' +
+            '</div></div>';
+    }
+
+    function buildExamAnswerOptionRowHtml(question, optionLetter, review) {
+        const options = question && question.options ? question.options : {};
+        const optionText = escapeHtml(options[optionLetter] || ('选项 ' + optionLetter));
+        const isSelected = review.userLetters.includes(optionLetter);
+        const isCorrect = review.correctLetters.includes(optionLetter);
+        let rowClass = 'bg-gray-50 border-gray-200';
+        let flagClass = 'bg-white border border-gray-200 text-gray-500';
+        let letterClass = 'bg-gray-200 text-gray-600';
+        let flagText = '未涉及';
+
+        if (isCorrect && isSelected) {
+            rowClass = 'bg-green-50 border-green-200';
+            flagClass = 'bg-green-100 text-green-700';
+            letterClass = 'bg-green-600 text-white';
+            flagText = '选对了';
+        } else if (isCorrect) {
+            rowClass = 'bg-yellow-50 border-yellow-200';
+            flagClass = 'bg-yellow-100 text-yellow-800';
+            letterClass = 'bg-yellow-500 text-white';
+            flagText = '漏选';
+        } else if (isSelected) {
+            rowClass = 'bg-red-50 border-red-200';
+            flagClass = 'bg-red-100 text-red-700';
+            letterClass = 'bg-red-500 text-white';
+            flagText = review.questionType === 'X' ? '多选了' : '错选';
+        }
+
+        return '<div class="flex flex-col gap-3 rounded-xl border px-4 py-3 sm:flex-row sm:items-start sm:justify-between ' + rowClass + '">' +
+            '<div class="flex min-w-0 items-start gap-3">' +
+            '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ' + letterClass + '">' +
+            optionLetter + '</span>' +
+            '<span class="min-w-0 text-sm leading-6 text-gray-800">' + optionText + '</span>' +
+            '</div>' +
+            '<span class="inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-bold ' + flagClass + '">' +
+            flagText + '</span>' +
+            '</div>';
+    }
+
+    function buildExamAnswerOptionsHtml(question, review) {
+        const rows = getExamOptionLetters(question).map(function(optionLetter) {
+            return buildExamAnswerOptionRowHtml(question, optionLetter, review);
+        });
+        return '<div class="mb-4 space-y-2">' + rows.join('') + '</div>';
+    }
+
     function handleFetchError(error, userMessage, showAlert = true) {
         console.error('API Error:', error);
         const message = userMessage || '操作失败，请稍后重试';
@@ -526,7 +713,41 @@
         // 详细解析
         const container = document.getElementById('answerDetails');
         container.innerHTML = '';
-        
+
+        result.details.forEach((d, i) => {
+            const q = questions[i] || {};
+            const review = analyzeExamAnswer(q, d.user_answer || '', d.correct_answer || '', !!d.is_correct);
+            const div = document.createElement('div');
+            div.className = 'p-6';
+
+            div.innerHTML = `
+                <div class="flex items-center justify-between mb-3 gap-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-bold">第${i + 1}题</span>
+                        <span class="${d.is_correct ? 'text-green-600' : 'text-red-600'} font-bold">${d.is_correct ? '✓ 正确' : '✗ 错误'}</span>
+                        ${!d.is_correct ? `<span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold ${
+                            review.issueTone === 'warning' ? 'bg-yellow-100 text-yellow-800' :
+                            review.issueTone === 'neutral' ? 'bg-gray-100 text-gray-700' : 'bg-red-100 text-red-700'
+                        }">${escapeHtml(review.issueLabel)}</span>` : ''}
+                    </div>
+                    <span class="text-sm text-gray-500">${q.type || ''}${q.type === 'X' ? '（多选）' : ''} · ${d.difficulty || ''}</span>
+                </div>
+                <p class="mb-3 text-gray-800 leading-7">${escapeHtml(q.question || '').replace(/\n/g, '<br>')}</p>
+                ${buildExamAnswerSummaryHtml(review)}
+                ${buildExamAnswerIssueHtml(review)}
+                ${buildExamAnswerOptionsHtml(q, review)}
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="font-medium text-gray-700 mb-2">解析</div>
+                    <p class="text-gray-600 text-sm">${escapeHtml(d.explanation || '暂无解析')}</p>
+                    <div class="mt-2 text-sm text-blue-600"><span class="font-medium">核心考点：</span>${escapeHtml(d.key_point || '未标注')}</div>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+
+        completeTrackingSession(result.score, result.total);
+        return;
+
         result.details.forEach((d, i) => {
             const q = questions[i];
             const div = document.createElement('div');

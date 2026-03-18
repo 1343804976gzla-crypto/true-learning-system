@@ -15,7 +15,7 @@ End If
 
 ' 启动服务器
 WshShell.CurrentDirectory = ProjectPath
-WshShell.Run "cmd /c python main.py", 0, False
+WshShell.Run "python -m uvicorn main:app --host 0.0.0.0 --port 8000 --no-access-log", 0, False
 
 ' 等待服务器启动
 WScript.Sleep 3000
