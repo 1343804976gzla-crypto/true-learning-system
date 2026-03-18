@@ -97,6 +97,7 @@ def _agent_error_response(exc: Exception) -> HTTPException:
 def _sse_done_payload(result: AgentChatResponse) -> dict:
     return {
         "session": result.session.model_dump(mode="json"),
+        "user_message": result.user_message.model_dump(mode="json"),
         "assistant_message": result.assistant_message.model_dump(mode="json"),
         "tool_calls": [tool_call.model_dump(mode="json") for tool_call in result.tool_calls],
         "context_usage": result.context_usage.model_dump(mode="json"),

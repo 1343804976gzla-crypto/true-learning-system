@@ -1246,12 +1246,14 @@ def test_agent_chat_reuses_same_client_request_id_without_session_id(monkeypatch
     assert len([item for item in sessions if item["id"] == session_id]) == 1
 
 
-def test_agent_tools_scope_learning_data_by_device():
+def test_agent_tools_scope_learning_data_by_device(monkeypatch):
     from learning_tracking_models import LearningSession, QuestionRecord, WrongAnswerRetry, WrongAnswerV2
     from models import Chapter, ConceptMastery, DailyUpload, SessionLocal, TestRecord, init_db
     from services.agent_tools import execute_agent_tool
-    from services.data_identity import ensure_learning_identity_schema
+    from services.data_identity import clear_identity_caches_for_tests, ensure_learning_identity_schema
 
+    monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+    clear_identity_caches_for_tests()
     init_db()
     ensure_learning_identity_schema()
 
@@ -1515,6 +1517,421 @@ def test_agent_tools_scope_learning_data_by_device():
     assert [item["name"] for item in mastery_payload["weak_concepts"]] == ["Cardiac output"]
     assert review_payload["due_wrong_answers"] == 1
     assert review_payload["recent_test_accuracy"] == 100.0
+
+
+def test_agent_wrong_answer_tool_reports_total_count_and_aggregate_weak_points(monkeypatch):
+    from learning_tracking_models import WrongAnswerV2
+    from models import Chapter, SessionLocal, init_db
+    from services.agent_runtime import build_source_cards
+    from services.agent_tools import execute_agent_tool
+    from services.data_identity import clear_identity_caches_for_tests, ensure_learning_identity_schema
+
+    monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+    clear_identity_caches_for_tests()
+    init_db()
+    ensure_learning_identity_schema()
+    device_id = f"agent-wrong-summary-{uuid4().hex}"
+    today = date.today()
+    now = datetime.now()
+    chapter_a = f"{device_id}-chapter-a"
+    chapter_b = f"{device_id}-chapter-b"
+
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                Chapter(
+                    id=chapter_a,
+                    book="Internal Medicine",
+                    edition="1",
+                    chapter_number="1",
+                    chapter_title="Circulation",
+                    concepts=[],
+                    first_uploaded=today,
+                ),
+                Chapter(
+                    id=chapter_b,
+                    book="Internal Medicine",
+                    edition="1",
+                    chapter_number="2",
+                    chapter_title="Inflammation",
+                    concepts=[],
+                    first_uploaded=today,
+                ),
+                WrongAnswerV2(
+                    device_id=device_id,
+                    question_fingerprint=f"wa-1-{uuid4().hex}",
+                    question_text="Hemodynamics 1",
+                    options={"A": "1", "B": "2", "C": "3", "D": "4"},
+                    correct_answer="A",
+                    explanation="A",
+                    key_point="Hemodynamics",
+                    question_type="A1",
+                    difficulty="基础",
+                    chapter_id=chapter_a,
+                    error_count=3,
+                    encounter_count=3,
+                    severity_tag="critical",
+                    mastery_status="active",
+                    next_review_date=today,
+                    first_wrong_at=now - timedelta(days=2),
+                    last_wrong_at=now - timedelta(hours=1),
+                ),
+                WrongAnswerV2(
+                    device_id=device_id,
+                    question_fingerprint=f"wa-2-{uuid4().hex}",
+                    question_text="Hemodynamics 2",
+                    options={"A": "1", "B": "2", "C": "3", "D": "4"},
+                    correct_answer="A",
+                    explanation="B",
+                    key_point="Hemodynamics",
+                    question_type="A2",
+                    difficulty="提高",
+                    chapter_id=chapter_a,
+                    error_count=2,
+                    encounter_count=2,
+                    severity_tag="critical",
+                    mastery_status="active",
+                    next_review_date=today - timedelta(days=1),
+                    first_wrong_at=now - timedelta(days=3),
+                    last_wrong_at=now - timedelta(hours=2),
+                ),
+                WrongAnswerV2(
+                    device_id=device_id,
+                    question_fingerprint=f"wa-3-{uuid4().hex}",
+                    question_text="Inflammation 1",
+                    options={"A": "1", "B": "2", "C": "3", "D": "4"},
+                    correct_answer="A",
+                    explanation="C",
+                    key_point="Inflammation",
+                    question_type="A3",
+                    difficulty="难题",
+                    chapter_id=chapter_b,
+                    error_count=1,
+                    encounter_count=1,
+                    severity_tag="stubborn",
+                    mastery_status="active",
+                    next_review_date=None,
+                    first_wrong_at=now - timedelta(days=4),
+                    last_wrong_at=now - timedelta(hours=3),
+                ),
+            ]
+        )
+        db.commit()
+
+    with SessionLocal() as db:
+        _, wrong_payload, _ = asyncio.run(
+            execute_agent_tool("get_wrong_answers", db, {"limit": 2}, device_id=device_id)
+        )
+
+    assert wrong_payload["count"] == 3
+    assert wrong_payload["returned_count"] == 2
+    assert wrong_payload["sampled"] is True
+    assert len(wrong_payload["items"]) == 2
+    assert wrong_payload["severity_counts"]["critical"] == 2
+    assert wrong_payload["severity_counts"]["stubborn"] == 1
+    assert wrong_payload["due_count"] == 2
+    assert [item["name"] for item in wrong_payload["top_key_points"][:2]] == ["Hemodynamics", "Inflammation"]
+    assert wrong_payload["top_key_points"][0]["count"] == 2
+    assert wrong_payload["top_key_points"][0]["error_total"] == 5
+    assert wrong_payload["top_chapters"][0]["count"] == 2
+    assert "Circulation" in wrong_payload["top_chapters"][0]["chapter_label"]
+
+    cards = build_source_cards(["get_wrong_answers"], {"get_wrong_answers": wrong_payload})
+    assert len(cards) == 1
+    card = cards[0]
+    assert card.count == 3
+    assert "最近 2 条样本" in card.summary
+    assert any("高频薄弱点" in bullet for bullet in card.bullets)
+
+
+def test_agent_study_history_uses_session_uploaded_content_as_fallback(monkeypatch):
+    from learning_tracking_models import LearningSession
+    from models import Chapter, SessionLocal, init_db
+    from services.agent_tools import execute_agent_tool
+    from services.data_identity import clear_identity_caches_for_tests, ensure_learning_identity_schema
+
+    monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+    clear_identity_caches_for_tests()
+    init_db()
+    ensure_learning_identity_schema()
+    device_id = f"agent-history-fallback-{uuid4().hex}"
+    yesterday = date.today() - timedelta(days=1)
+    now = datetime.now()
+    chapter_id = f"{device_id}-chapter"
+
+    with SessionLocal() as db:
+        db.add(
+            Chapter(
+                id=chapter_id,
+                book="生理学",
+                edition="1",
+                chapter_number="5",
+                chapter_title="肺通气",
+                concepts=[],
+                first_uploaded=yesterday,
+            )
+        )
+        db.add(
+            LearningSession(
+                id=f"session-{uuid4().hex}",
+                device_id=device_id,
+                session_type="exam",
+                chapter_id=chapter_id,
+                title="医学考研模拟试卷（分段生成）",
+                uploaded_content="肺通气原始讲义内容" * 30,
+                status="completed",
+                total_questions=10,
+                correct_count=6,
+                wrong_count=4,
+                score=60,
+                accuracy=0.6,
+                started_at=now - timedelta(days=1),
+                completed_at=now - timedelta(days=1, minutes=-20),
+                duration_seconds=1200,
+            )
+        )
+        db.commit()
+
+    with SessionLocal() as db:
+        _, history_payload, _ = asyncio.run(
+            execute_agent_tool("get_study_history", db, {"days": 7, "limit": 3}, device_id=device_id)
+        )
+
+    assert history_payload["total_uploads_in_window"] == 1
+    assert history_payload["weekly_uploads"] == 1
+    assert history_payload["streak_days"] == 0
+    assert history_payload["latest_study_date"] == yesterday.isoformat()
+    assert history_payload["session_fallback_count_in_window"] == 1
+    assert history_payload["daily_upload_count_in_window"] == 0
+    assert history_payload["recent_uploads"][0]["source"] == "learning_session"
+    assert history_payload["recent_uploads"][0]["book"] == "生理学"
+    assert history_payload["recent_uploads"][0]["chapter_title"] == "肺通气"
+
+
+def test_tracking_session_start_records_daily_upload_snapshot(monkeypatch):
+    from models import Chapter, DailyUpload, SessionLocal, init_db
+    from services.data_identity import clear_identity_caches_for_tests, ensure_learning_identity_schema
+
+    monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+    clear_identity_caches_for_tests()
+    init_db()
+    ensure_learning_identity_schema()
+
+    client = TestClient(app)
+    device_id = f"tracking-upload-{uuid4().hex}"
+    chapter_id = f"{device_id}-chapter"
+    today = date.today()
+    uploaded_content = "肺通气原始讲义内容" * 20
+
+    with SessionLocal() as db:
+        db.add(
+            Chapter(
+                id=chapter_id,
+                book="生理学",
+                edition="1",
+                chapter_number="5",
+                chapter_title="肺通气",
+                concepts=[{"id": "kp-1", "name": "肺通气"}],
+                first_uploaded=today,
+            )
+        )
+        db.commit()
+
+    headers = {"x-tls-device-id": device_id}
+    response = client.post(
+        "/api/tracking/session/start",
+        json={
+            "session_type": "exam",
+            "chapter_id": chapter_id,
+            "title": "医学考研模拟试卷（分段生成）",
+            "uploaded_content": uploaded_content,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+    duplicate_response = client.post(
+        "/api/tracking/session/start",
+        json={
+            "session_type": "exam",
+            "chapter_id": chapter_id,
+            "title": "医学考研模拟试卷（分段生成）",
+            "uploaded_content": uploaded_content,
+        },
+        headers=headers,
+    )
+    assert duplicate_response.status_code == 200
+
+    with SessionLocal() as db:
+        uploads = db.query(DailyUpload).filter(DailyUpload.device_id == device_id).all()
+
+    assert len(uploads) == 1
+    upload = uploads[0]
+    assert upload.date == today
+    assert upload.raw_content == uploaded_content
+    assert upload.ai_extracted["book"] == "生理学"
+    assert upload.ai_extracted["chapter_title"] == "肺通气"
+    assert upload.ai_extracted["chapter_id"] == chapter_id
+
+
+def test_agent_runtime_derives_topic_overrides_for_cell_electricity(monkeypatch):
+    from models import Chapter, SessionLocal, init_db
+    from services.agent_runtime import _derive_topic_tool_overrides
+    from services.data_identity import clear_identity_caches_for_tests, ensure_learning_identity_schema
+
+    monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+    clear_identity_caches_for_tests()
+    init_db()
+    ensure_learning_identity_schema()
+
+    chapter_a = f"topic-{uuid4().hex}-a"
+    chapter_b = f"topic-{uuid4().hex}-b"
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                Chapter(
+                    id=chapter_a,
+                    book="生理学",
+                    edition="1",
+                    chapter_number="04",
+                    chapter_title="专题细胞电活动",
+                    concepts=[],
+                    first_uploaded=date.today(),
+                ),
+                Chapter(
+                    id=chapter_b,
+                    book="生理学",
+                    edition="1",
+                    chapter_number="10",
+                    chapter_title="专题心肌电活动和特性",
+                    concepts=[],
+                    first_uploaded=date.today(),
+                ),
+            ]
+        )
+        db.commit()
+
+        overrides = _derive_topic_tool_overrides(
+            db,
+            "我最近是不是专题细胞电活动学得不太好",
+            ["get_learning_sessions", "get_wrong_answers", "get_knowledge_mastery", "get_study_history"],
+        )
+
+    assert overrides["get_learning_sessions"]["query"] == "专题细胞电活动"
+    assert overrides["get_wrong_answers"]["query"] == "专题细胞电活动"
+    assert set(overrides["get_learning_sessions"]["chapter_ids"]) >= {chapter_a, chapter_b}
+    assert set(overrides["get_wrong_answers"]["chapter_ids"]) >= {chapter_a, chapter_b}
+    assert set(overrides["get_knowledge_mastery"]["chapter_ids"]) >= {chapter_a, chapter_b}
+
+
+def test_agent_chat_auto_expands_tools_for_topic_queries(monkeypatch):
+    from learning_tracking_models import LearningSession, WrongAnswerV2
+    from models import Chapter, SessionLocal, init_db
+    from services import agent_runtime
+    from services.data_identity import clear_identity_caches_for_tests, ensure_learning_identity_schema
+
+    monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+    clear_identity_caches_for_tests()
+    init_db()
+    ensure_learning_identity_schema()
+    monkeypatch.setattr(agent_runtime, "get_ai_client", lambda: _FakeAIClient())
+    monkeypatch.setattr(agent_runtime, "resolve_requested_tools", lambda message, requested_tools: ["get_progress_summary"])
+
+    device_id = f"agent-topic-chat-{uuid4().hex}"
+    chapter_a = f"{device_id}-chapter-a"
+    chapter_b = f"{device_id}-chapter-b"
+    now = datetime.now()
+    today = date.today()
+
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                Chapter(
+                    id=chapter_a,
+                    book="生理学",
+                    edition="1",
+                    chapter_number="04",
+                    chapter_title="细胞电活动",
+                    concepts=[],
+                    first_uploaded=today,
+                ),
+                Chapter(
+                    id=chapter_b,
+                    book="生理学",
+                    edition="1",
+                    chapter_number="10",
+                    chapter_title="心肌电活动和特性",
+                    concepts=[],
+                    first_uploaded=today,
+                ),
+                LearningSession(
+                    id=f"session-{uuid4().hex}",
+                    device_id=device_id,
+                    session_type="exam",
+                    chapter_id=chapter_a,
+                    title="细胞电活动专项测试",
+                    uploaded_content="动作电位与静息电位讲义" * 20,
+                    status="completed",
+                    total_questions=10,
+                    correct_count=4,
+                    wrong_count=6,
+                    score=40,
+                    accuracy=0.4,
+                    started_at=now - timedelta(days=1),
+                    completed_at=now - timedelta(days=1, minutes=-15),
+                    duration_seconds=900,
+                ),
+                WrongAnswerV2(
+                    device_id=device_id,
+                    question_fingerprint=f"topic-wa-{uuid4().hex}",
+                    question_text="关于动作电位0期去极化机制的判断，正确的是？",
+                    options={"A": "1", "B": "2", "C": "3", "D": "4"},
+                    correct_answer="A",
+                    explanation="A",
+                    key_point="动作电位",
+                    question_type="A1",
+                    difficulty="基础",
+                    chapter_id=chapter_b,
+                    error_count=2,
+                    encounter_count=2,
+                    severity_tag="critical",
+                    mastery_status="active",
+                    next_review_date=today,
+                    first_wrong_at=now - timedelta(days=1),
+                    last_wrong_at=now - timedelta(days=1),
+                ),
+            ]
+        )
+        db.commit()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/agent/chat",
+        json={
+            "device_id": device_id,
+            "message": "我最近是不是细胞电活动学得不太好",
+            "agent_type": "tutor",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    structured = payload["assistant_message"]["content_structured"]
+    assert "get_progress_summary" in structured["selected_tools"]
+    assert "get_learning_sessions" in structured["selected_tools"]
+    assert "get_wrong_answers" in structured["selected_tools"]
+    assert "get_study_history" in structured["selected_tools"]
+    assert "get_knowledge_mastery" in structured["selected_tools"]
+
+    learning_call = next(item for item in payload["tool_calls"] if item["tool_name"] == "get_learning_sessions")
+    wrong_call = next(item for item in payload["tool_calls"] if item["tool_name"] == "get_wrong_answers")
+    mastery_call = next(item for item in payload["tool_calls"] if item["tool_name"] == "get_knowledge_mastery")
+
+    assert learning_call["tool_args"]["query"] == "细胞电活动"
+    assert set(learning_call["tool_args"]["chapter_ids"]) >= {chapter_a, chapter_b}
+    assert wrong_call["tool_args"]["query"] == "细胞电活动"
+    assert set(wrong_call["tool_args"]["chapter_ids"]) >= {chapter_a, chapter_b}
+    assert set(mastery_call["tool_args"]["chapter_ids"]) >= {chapter_a, chapter_b}
 
 
 def test_agent_chat_auto_expands_tools_for_plan_requests(monkeypatch):

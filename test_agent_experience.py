@@ -119,6 +119,15 @@ def test_agent_template_recovers_failed_send_and_guards_message_races():
     assert "await loadSessions(state.currentSessionId, { preserveStatus: true });" in template
 
 
+def test_agent_template_optimistically_renders_user_messages_while_streaming():
+    template = _read_agent_template()
+
+    assert "function insertOptimisticUserMessage(content, traceId)" in template
+    assert "String(item.id || '').startsWith('temp-user-')" in template
+    assert "const optimisticUserMessageId = insertOptimisticUserMessage(message, clientRequestId);" in template
+    assert "removeMessageById(optimisticUserMessageId);" in template
+
+
 def test_agent_page_renders_minimal_shell():
     client = TestClient(app)
 

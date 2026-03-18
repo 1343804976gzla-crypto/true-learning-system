@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from datetime import date, datetime, timedelta
 from time import perf_counter
 from typing import Any, Dict, List, Literal, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 from sqlalchemy.orm import Session
 
 from learning_tracking_models import INVALID_CHAPTER_IDS, LearningSession, WrongAnswerRetry, WrongAnswerV2
@@ -31,11 +32,15 @@ class _ToolArgsModel(BaseModel):
 class WrongAnswersArgs(_ToolArgsModel):
     status: Literal["active", "archived", "all"] = "active"
     limit: int = Field(default=6, ge=1, le=12)
+    query: str = Field(default="", max_length=120)
+    chapter_ids: List[str] = Field(default_factory=list)
 
 
 class LearningSessionsArgs(_ToolArgsModel):
     limit: int = Field(default=5, ge=1, le=10)
     session_type: Literal["exam", "detail_practice", "all"] = "all"
+    query: str = Field(default="", max_length=120)
+    chapter_ids: List[str] = Field(default_factory=list)
 
 
 class ProgressSummaryArgs(_ToolArgsModel):
@@ -45,11 +50,14 @@ class ProgressSummaryArgs(_ToolArgsModel):
 class KnowledgeMasteryArgs(_ToolArgsModel):
     limit: int = Field(default=6, ge=3, le=12)
     due_days: int = Field(default=7, ge=0, le=30)
+    chapter_ids: List[str] = Field(default_factory=list)
 
 
 class StudyHistoryArgs(_ToolArgsModel):
     days: int = Field(default=30, ge=7, le=180)
     limit: int = Field(default=6, ge=1, le=12)
+    query: str = Field(default="", max_length=120)
+    chapter_ids: List[str] = Field(default_factory=list)
 
 
 class ReviewPressureArgs(_ToolArgsModel):
@@ -270,20 +278,41 @@ async def _run_wrong_answers(
     device_id: str | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     args = WrongAnswersArgs.model_validate(overrides or {})
-    query = _apply_actor_scope(
+    query_text = _normalize_query_text(args.query)
+    chapter_ids = _normalize_chapter_ids(args.chapter_ids)
+    base_query = _apply_actor_scope(
         db.query(WrongAnswerV2),
         WrongAnswerV2,
         user_id=user_id,
         device_id=device_id,
-    ).order_by(
+    )
+    if chapter_ids:
+        base_query = base_query.filter(WrongAnswerV2.chapter_id.in_(chapter_ids))
+    if query_text:
+        like = f"%{query_text}%"
+        base_query = (
+            base_query.outerjoin(Chapter, WrongAnswerV2.chapter_id == Chapter.id)
+            .filter(
+                or_(
+                    WrongAnswerV2.key_point.ilike(like),
+                    WrongAnswerV2.question_text.ilike(like),
+                    Chapter.chapter_title.ilike(like),
+                    Chapter.book.ilike(like),
+                )
+            )
+        )
+    if args.status != "all":
+        base_query = base_query.filter(WrongAnswerV2.mastery_status == args.status)
+
+    query = base_query.order_by(
         desc(WrongAnswerV2.updated_at),
         desc(WrongAnswerV2.last_wrong_at),
         desc(WrongAnswerV2.id),
     )
-    if args.status != "all":
-        query = query.filter(WrongAnswerV2.mastery_status == args.status)
 
     items = query.limit(args.limit).all()
+    total_count = int(base_query.count())
+    returned_count = len(items)
     chapter_ids = [item.chapter_id for item in items if item.chapter_id]
     chapters = db.query(Chapter).filter(Chapter.id.in_(chapter_ids)).all() if chapter_ids else []
     chapter_map = {chapter.id: chapter for chapter in chapters}
@@ -293,10 +322,95 @@ async def _run_wrong_answers(
         user_id=user_id,
         device_id=device_id,
     )
+    severity_rows = (
+        base_query.with_entities(
+            WrongAnswerV2.severity_tag,
+            func.count(WrongAnswerV2.id).label("item_count"),
+        )
+        .group_by(WrongAnswerV2.severity_tag)
+        .all()
+    )
+    severity_counts = {
+        str(tag or "unknown"): int(item_count or 0)
+        for tag, item_count in severity_rows
+    }
+
+    due_query = base_query
+    if args.status == "all":
+        due_query = due_query.filter(WrongAnswerV2.mastery_status == "active")
+    due_count = int(
+        due_query.filter(
+            WrongAnswerV2.next_review_date.isnot(None),
+            WrongAnswerV2.next_review_date <= date.today(),
+        ).count()
+    )
+
+    key_point_count_expr = func.count(WrongAnswerV2.id)
+    key_point_error_expr = func.sum(WrongAnswerV2.error_count)
+    top_key_point_rows = (
+        base_query.with_entities(
+            WrongAnswerV2.key_point,
+            key_point_count_expr.label("item_count"),
+            key_point_error_expr.label("error_total"),
+        )
+        .filter(
+            WrongAnswerV2.key_point.isnot(None),
+            func.trim(WrongAnswerV2.key_point) != "",
+        )
+        .group_by(WrongAnswerV2.key_point)
+        .order_by(desc(key_point_count_expr), desc(key_point_error_expr), WrongAnswerV2.key_point.asc())
+        .limit(5)
+        .all()
+    )
+
+    top_chapter_count_expr = func.count(WrongAnswerV2.id)
+    top_chapter_error_expr = func.sum(WrongAnswerV2.error_count)
+    top_chapter_rows = (
+        base_query.with_entities(
+            WrongAnswerV2.chapter_id,
+            top_chapter_count_expr.label("item_count"),
+            top_chapter_error_expr.label("error_total"),
+        )
+        .filter(
+            WrongAnswerV2.chapter_id.isnot(None),
+            func.trim(WrongAnswerV2.chapter_id) != "",
+        )
+        .group_by(WrongAnswerV2.chapter_id)
+        .order_by(desc(top_chapter_count_expr), desc(top_chapter_error_expr), WrongAnswerV2.chapter_id.asc())
+        .limit(3)
+        .all()
+    )
+    top_chapter_ids = [str(chapter_id) for chapter_id, _, _ in top_chapter_rows if chapter_id]
+    top_chapters = db.query(Chapter).filter(Chapter.id.in_(top_chapter_ids)).all() if top_chapter_ids else []
+    top_chapter_map = {chapter.id: chapter for chapter in top_chapters}
 
     payload = {
         "status": args.status,
-        "count": len(items),
+        "query": query_text,
+        "chapter_ids": chapter_ids,
+        "count": total_count,
+        "returned_count": returned_count,
+        "sampled": total_count > returned_count,
+        "severity_counts": severity_counts,
+        "due_count": due_count,
+        "top_key_points": [
+            {
+                "name": str(key_point),
+                "count": int(item_count or 0),
+                "error_total": int(error_total or 0),
+            }
+            for key_point, item_count, error_total in top_key_point_rows
+            if str(key_point or "").strip()
+        ],
+        "top_chapters": [
+            {
+                "chapter_id": chapter_id,
+                "chapter_label": _chapter_label(top_chapter_map.get(chapter_id or "")) or (chapter_id or "未标记章节"),
+                "count": int(item_count or 0),
+                "error_total": int(error_total or 0),
+            }
+            for chapter_id, item_count, error_total in top_chapter_rows
+        ],
         "items": [
             {
                 "id": int(item.id),
@@ -328,6 +442,8 @@ async def _run_learning_sessions(
     device_id: str | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     args = LearningSessionsArgs.model_validate(overrides or {})
+    query_text = _normalize_query_text(args.query)
+    chapter_ids = _normalize_chapter_ids(args.chapter_ids)
     query = _apply_actor_scope(
         db.query(LearningSession),
         LearningSession,
@@ -336,9 +452,27 @@ async def _run_learning_sessions(
     ).order_by(desc(LearningSession.started_at), desc(LearningSession.id))
     if args.session_type != "all":
         query = query.filter(LearningSession.session_type == args.session_type)
+    if chapter_ids:
+        query = query.filter(LearningSession.chapter_id.in_(chapter_ids))
+    if query_text:
+        like = f"%{query_text}%"
+        query = (
+            query.outerjoin(Chapter, LearningSession.chapter_id == Chapter.id)
+            .filter(
+                or_(
+                    LearningSession.title.ilike(like),
+                    LearningSession.knowledge_point.ilike(like),
+                    LearningSession.uploaded_content.ilike(like),
+                    Chapter.chapter_title.ilike(like),
+                    Chapter.book.ilike(like),
+                )
+            )
+        )
 
     sessions = query.limit(args.limit).all()
     payload = {
+        "query": query_text,
+        "chapter_ids": chapter_ids,
         "count": len(sessions),
         "items": [
             {
@@ -422,6 +556,111 @@ def _compute_streak_days(study_dates: List[date]) -> int:
     return streak
 
 
+def _normalize_query_text(value: str | None) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _normalize_chapter_ids(values: List[str] | None, *, limit: int = 8) -> List[str]:
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for raw in values or []:
+        chapter_id = str(raw or "").strip()
+        if not chapter_id or chapter_id in seen:
+            continue
+        seen.add(chapter_id)
+        normalized.append(chapter_id)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def _record_matches_query(record: Dict[str, Any], query_text: str) -> bool:
+    if not query_text:
+        return True
+    return any(
+        query_text in str(record.get(field) or "")
+        for field in ("book", "chapter_title", "chapter_id", "main_topic", "summary")
+    )
+
+
+def _study_session_date(session: LearningSession) -> date | None:
+    if session.started_at:
+        return session.started_at.date()
+    if session.created_at:
+        return session.created_at.date()
+    return None
+
+
+def _stable_synthetic_upload_id(source_id: str) -> int:
+    return -int(hashlib.sha1(source_id.encode("utf-8")).hexdigest()[:12], 16)
+
+
+def _merge_study_history_records(
+    uploads: List[DailyUpload],
+    session_uploads: List[LearningSession],
+    chapter_map: Dict[str, Chapter],
+) -> Tuple[List[Dict[str, Any]], int]:
+    explicit_records: List[Dict[str, Any]] = []
+    explicit_dates: set[date] = set()
+    for upload in uploads:
+        if upload.date:
+            explicit_dates.add(upload.date)
+        ai_data = upload.ai_extracted or {}
+        explicit_records.append(
+            {
+                "id": int(upload.id),
+                "date": upload.date,
+                "book": ai_data.get("book") or "未知",
+                "chapter_title": ai_data.get("chapter_title") or "未识别章节",
+                "chapter_id": ai_data.get("chapter_id") or "",
+                "concept_count": len(ai_data.get("concepts") or []),
+                "summary": (ai_data.get("summary") or "")[:160],
+                "main_topic": ai_data.get("main_topic") or "",
+                "sort_datetime": upload.created_at or datetime.combine(upload.date, datetime.min.time()),
+                "source": "daily_upload",
+            }
+        )
+
+    fallback_records: Dict[Tuple[date, str], Dict[str, Any]] = {}
+    for session in session_uploads:
+        study_date = _study_session_date(session)
+        if not study_date or study_date in explicit_dates:
+            continue
+        raw_content = str(session.uploaded_content or "").strip()
+        if not raw_content:
+            continue
+        content_signature = hashlib.sha1(raw_content.encode("utf-8")).hexdigest()
+        dedupe_key = (study_date, content_signature)
+        chapter = chapter_map.get(str(session.chapter_id or "").strip())
+        sort_datetime = session.started_at or session.created_at or datetime.combine(study_date, datetime.min.time())
+        record = {
+            "id": _stable_synthetic_upload_id(session.id),
+            "date": study_date,
+            "book": getattr(chapter, "book", None) or "未识别",
+            "chapter_title": getattr(chapter, "chapter_title", None) or (session.title or "未识别章节"),
+            "chapter_id": str(session.chapter_id or ""),
+            "concept_count": len(getattr(chapter, "concepts", None) or []),
+            "summary": raw_content[:160],
+            "main_topic": session.knowledge_point or "",
+            "sort_datetime": sort_datetime,
+            "source": "learning_session",
+        }
+        existing = fallback_records.get(dedupe_key)
+        if existing is None or sort_datetime > existing["sort_datetime"]:
+            fallback_records[dedupe_key] = record
+
+    combined = explicit_records + list(fallback_records.values())
+    combined.sort(
+        key=lambda item: (
+            item.get("date") or date.min,
+            item.get("sort_datetime") or datetime.min,
+            int(item.get("id") or 0),
+        ),
+        reverse=True,
+    )
+    return combined, len(fallback_records)
+
+
 async def _run_knowledge_mastery(
     db: Session,
     overrides: Dict[str, Any],
@@ -430,12 +669,15 @@ async def _run_knowledge_mastery(
     device_id: str | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     args = KnowledgeMasteryArgs.model_validate(overrides or {})
+    chapter_ids = _normalize_chapter_ids(args.chapter_ids)
     concepts = _apply_actor_scope(
         db.query(ConceptMastery),
         ConceptMastery,
         user_id=user_id,
         device_id=device_id,
     ).all()
+    if chapter_ids:
+        concepts = [item for item in concepts if str(item.chapter_id or "") in chapter_ids]
     usable_concepts = [item for item in concepts if not _is_placeholder_chapter_id(item.chapter_id)]
     reported_concepts = usable_concepts or concepts
     today = date.today()
@@ -520,6 +762,7 @@ async def _run_knowledge_mastery(
 
     payload = {
         "generated_at": datetime.now().isoformat(),
+        "chapter_ids": chapter_ids,
         "total_concepts": total_concepts,
         "measured_concepts": measured_count,
         "unmeasured_concepts": max(total_concepts - measured_count, 0),
@@ -544,6 +787,8 @@ async def _run_study_history(
     device_id: str | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     args = StudyHistoryArgs.model_validate(overrides or {})
+    query_text = _normalize_query_text(args.query)
+    requested_chapter_ids = set(_normalize_chapter_ids(args.chapter_ids))
     cutoff = date.today() - timedelta(days=args.days - 1)
     uploads = (
         _apply_actor_scope(
@@ -556,7 +801,7 @@ async def _run_study_history(
         .order_by(desc(DailyUpload.date), desc(DailyUpload.id))
         .all()
     )
-    all_upload_dates = [
+    all_upload_dates = {
         row[0]
         for row in _apply_actor_scope(
             db.query(DailyUpload.date),
@@ -564,45 +809,108 @@ async def _run_study_history(
             user_id=user_id,
             device_id=device_id,
         ).distinct().all()
+        if row[0]
+    }
+    session_uploads = (
+        _apply_actor_scope(
+            db.query(LearningSession),
+            LearningSession,
+            user_id=user_id,
+            device_id=device_id,
+        )
+        .filter(
+            LearningSession.uploaded_content.isnot(None),
+            func.trim(LearningSession.uploaded_content) != "",
+        )
+        .order_by(
+            desc(LearningSession.started_at),
+            desc(LearningSession.created_at),
+            desc(LearningSession.id),
+        )
+        .all()
+    )
+    session_upload_dates = {
+        study_date
+        for session in session_uploads
+        if (study_date := _study_session_date(session)) is not None
+    }
+    window_session_uploads = [
+        session
+        for session in session_uploads
+        if (study_date := _study_session_date(session)) is not None and study_date >= cutoff
     ]
+    session_chapter_ids = list(
+        {
+            str(session.chapter_id).strip()
+            for session in window_session_uploads
+            if str(session.chapter_id or "").strip()
+        }
+    )
+    chapters = db.query(Chapter).filter(Chapter.id.in_(session_chapter_ids)).all() if session_chapter_ids else []
+    chapter_map = {chapter.id: chapter for chapter in chapters}
+    merged_records, _session_fallback_count = _merge_study_history_records(
+        uploads,
+        window_session_uploads,
+        chapter_map,
+    )
+    if requested_chapter_ids:
+        merged_records = [
+            record for record in merged_records if str(record.get("chapter_id") or "") in requested_chapter_ids
+        ]
+    if query_text:
+        merged_records = [
+            record for record in merged_records if _record_matches_query(record, query_text)
+        ]
     weekly_cutoff = date.today() - timedelta(days=6)
-    weekly_uploads = _apply_actor_scope(
-        db.query(DailyUpload),
-        DailyUpload,
-        user_id=user_id,
-        device_id=device_id,
-    ).filter(DailyUpload.date >= weekly_cutoff).count()
+    weekly_uploads = sum(
+        1 for record in merged_records if record.get("date") and record["date"] >= weekly_cutoff
+    )
 
     book_distribution: Dict[str, int] = {}
-    for upload in uploads:
-        extracted = upload.ai_extracted or {}
-        book = str(extracted.get("book") or "未知")
+    for record in merged_records:
+        book = str(record.get("book") or "未知")
         book_distribution[book] = book_distribution.get(book, 0) + 1
     book_distribution = dict(
         sorted(book_distribution.items(), key=lambda item: (-item[1], item[0]))[:6]
     )
 
     recent_uploads = []
-    for upload in uploads[: args.limit]:
-        ai_data = upload.ai_extracted or {}
+    for record in merged_records[: args.limit]:
         recent_uploads.append(
             {
-                "id": int(upload.id),
-                "date": upload.date.isoformat() if upload.date else None,
-                "book": ai_data.get("book") or "未知",
-                "chapter_title": ai_data.get("chapter_title") or "未识别章节",
-                "chapter_id": ai_data.get("chapter_id"),
-                "main_topic": ai_data.get("main_topic"),
-                "summary": (ai_data.get("summary") or "")[:160],
+                "id": int(record["id"]),
+                "date": record["date"].isoformat() if record.get("date") else None,
+                "book": record.get("book") or "未知",
+                "chapter_title": record.get("chapter_title") or "未识别章节",
+                "chapter_id": record.get("chapter_id"),
+                "main_topic": record.get("main_topic"),
+                "summary": (record.get("summary") or "")[:160],
+                "source": record.get("source"),
             }
         )
 
+    all_study_dates = sorted(all_upload_dates | session_upload_dates)
+    filtered_study_dates = sorted(
+        {
+            record["date"]
+            for record in merged_records
+            if record.get("date")
+        }
+    )
     payload = {
         "days": args.days,
         "generated_at": datetime.now().isoformat(),
-        "total_uploads_in_window": len(uploads),
+        "query": query_text,
+        "chapter_ids": list(requested_chapter_ids),
+        "total_uploads_in_window": len(merged_records),
         "weekly_uploads": weekly_uploads,
-        "streak_days": _compute_streak_days(all_upload_dates),
+        "streak_days": _compute_streak_days(filtered_study_dates if (query_text or requested_chapter_ids) else all_study_dates),
+        "latest_study_date": (
+            (filtered_study_dates[-1] if filtered_study_dates else None) if (query_text or requested_chapter_ids)
+            else (all_study_dates[-1] if all_study_dates else None)
+        ).isoformat() if ((filtered_study_dates if (query_text or requested_chapter_ids) else all_study_dates)) else None,
+        "daily_upload_count_in_window": sum(1 for record in merged_records if record.get("source") == "daily_upload"),
+        "session_fallback_count_in_window": sum(1 for record in merged_records if record.get("source") == "learning_session"),
         "book_distribution": book_distribution,
         "recent_uploads": recent_uploads,
     }

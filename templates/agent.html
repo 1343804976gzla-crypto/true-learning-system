@@ -5,15 +5,16 @@
 {% block extra_css %}
 <style>
     body.tls-agent-page {
+        --agent-page-max: 1480px;
         min-height: 100dvh;
         overflow: hidden;
     }
 
     body.tls-agent-page main.max-w-6xl {
-        max-width: 1280px;
+        max-width: var(--agent-page-max);
         height: calc(100dvh - 6rem);
         min-height: calc(100dvh - 6rem);
-        padding: 1.1rem 1.25rem 1.1rem;
+        padding: 1rem 0.9rem 1rem;
         overflow: hidden;
     }
 
@@ -22,7 +23,7 @@
     }
 
     .site-nav-inner {
-        max-width: 1280px;
+        max-width: var(--agent-page-max);
     }
 
     .site-brand,
@@ -94,12 +95,9 @@
         max-height: 100%;
         overflow: hidden;
         border-radius: 2.25rem;
-        border: 1px solid rgba(255, 255, 255, 0.7);
-        background:
-            radial-gradient(circle at 0% 0%, rgba(189, 210, 229, 0.62), transparent 36%),
-            radial-gradient(circle at 88% 12%, rgba(255, 255, 255, 0.7), transparent 24%),
-            linear-gradient(140deg, rgba(247, 249, 252, 0.98) 0%, rgba(236, 241, 246, 0.96) 48%, rgba(226, 233, 239, 0.98) 100%);
-        box-shadow: 0 28px 70px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+        border: 0;
+        background: linear-gradient(140deg, rgba(247, 249, 252, 0.98) 0%, rgba(239, 243, 247, 0.97) 48%, rgba(232, 237, 242, 0.98) 100%);
+        box-shadow: 0 28px 70px rgba(15, 23, 42, 0.12);
         color: var(--ink);
     }
 
@@ -107,11 +105,9 @@
         content: "";
         position: absolute;
         inset: 0;
-        background:
-            linear-gradient(180deg, rgba(255, 255, 255, 0.56), transparent 34%),
-            repeating-linear-gradient(90deg, rgba(148, 163, 184, 0.08) 0, rgba(148, 163, 184, 0.08) 1px, transparent 1px, transparent 138px);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), transparent 34%);
         mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.8), transparent 72%);
-        opacity: 0.42;
+        opacity: 0.18;
         pointer-events: none;
     }
 
@@ -137,29 +133,57 @@
         height: 100%;
         min-height: inherit;
         grid-template-columns: var(--panel) minmax(0, 1fr);
-        transition: grid-template-columns 0.28s ease;
+        overflow: hidden;
+        transition: grid-template-columns 0.34s cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .agent-shell.is-history-collapsed .agent-layout {
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: 0 minmax(0, 1fr);
     }
 
     .agent-history-panel {
         display: flex;
         flex-direction: column;
         min-width: 0;
+        overflow: hidden;
         border-right: 1px solid rgba(15, 23, 42, 0.06);
         background: linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(236, 241, 246, 0.68));
         backdrop-filter: blur(24px);
         box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.6);
-        transition: transform 0.28s ease, opacity 0.2s ease;
+        transform-origin: left center;
+        will-change: transform, opacity, filter;
+        transition:
+            transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+            opacity 0.22s ease,
+            filter 0.32s ease,
+            border-color 0.32s ease,
+            visibility 0s linear 0s;
     }
 
     .agent-shell.is-history-collapsed .agent-history-panel {
-        display: none;
-        transform: translateX(calc(-100% - 1rem));
+        transform: translateX(-1rem) scaleX(0.98);
         opacity: 0;
+        filter: blur(4px);
+        visibility: hidden;
+        border-right-color: transparent;
         pointer-events: none;
+        transition:
+            transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+            opacity 0.22s ease,
+            filter 0.32s ease,
+            border-color 0.32s ease,
+            visibility 0s linear 0.32s;
+    }
+
+    .agent-history-head,
+    .agent-history-list {
+        transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+    }
+
+    .agent-shell.is-history-collapsed .agent-history-head,
+    .agent-shell.is-history-collapsed .agent-history-list {
+        transform: translateX(-0.8rem);
+        opacity: 0;
     }
 
     .agent-history-head,
@@ -180,6 +204,15 @@
         justify-content: space-between;
         padding: 1.35rem 1.1rem 1.05rem;
         border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    }
+
+    .agent-history-head > div:first-child {
+        min-width: 0;
+    }
+
+    .agent-history-actions {
+        flex-wrap: nowrap;
+        flex-shrink: 0;
     }
 
     .agent-eyebrow {
@@ -223,14 +256,25 @@
 
     .agent-button {
         cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         border-radius: 999px;
         font-size: 0.82rem;
         font-weight: 700;
+        line-height: 1;
+        white-space: nowrap;
+        writing-mode: horizontal-tb;
         color: var(--ink);
         background: rgba(255, 255, 255, 0.62);
         border-color: rgba(15, 23, 42, 0.08);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
         padding: 0.72rem 1.02rem;
+    }
+
+    .agent-history-actions .agent-button {
+        min-width: 4.6rem;
+        flex: 0 0 auto;
     }
 
     .agent-button:hover,
@@ -360,15 +404,15 @@
         min-height: 0;
         grid-template-rows: auto minmax(0, 1fr) auto;
         gap: clamp(1.15rem, 2.2vh, 1.8rem);
-        padding: 1.3rem 1.45rem 1.15rem;
+        padding: 1.2rem 0.95rem 1.05rem;
         overflow: hidden;
     }
 
     .agent-toolbar,
     .agent-stage,
     .agent-composer {
-        width: min(100%, 64rem);
-        margin: 0 auto;
+        width: 100%;
+        margin: 0;
     }
 
     .agent-toolbar {
@@ -419,13 +463,81 @@
     .agent-hero {
         flex: 0 1 auto;
         min-height: auto;
-        display: flex;
-        flex-direction: column;
+        width: 100%;
+        margin: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(18rem, 0.92fr);
+        gap: 1.35rem;
+        align-items: stretch;
+        padding: 0;
+        text-align: left;
+    }
+
+    .agent-hero-copydeck,
+    .agent-hero-board {
+        position: relative;
+        overflow: hidden;
+        border-radius: 1.7rem;
+        border: 1px solid rgba(255, 255, 255, 0.74);
+        backdrop-filter: saturate(140%) blur(18px);
+        -webkit-backdrop-filter: saturate(140%) blur(18px);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.94), 0 22px 44px rgba(34, 58, 83, 0.08);
+    }
+
+    .agent-hero-copydeck {
+        padding: clamp(1.35rem, 2.5vw, 2.2rem);
+        background:
+            radial-gradient(circle at 0% 0%, rgba(126, 169, 214, 0.32), transparent 34%),
+            linear-gradient(145deg, rgba(242, 247, 252, 0.96), rgba(228, 237, 246, 0.84));
+        animation: agentHeroRise 0.72s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    .agent-hero-copydeck::after {
+        content: "";
+        position: absolute;
+        right: -1.4rem;
+        bottom: -2.4rem;
+        width: 8.5rem;
+        height: 8.5rem;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(102, 153, 206, 0.18), rgba(102, 153, 206, 0));
+        pointer-events: none;
+    }
+
+    .agent-hero-board {
+        padding: 1.15rem;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(237, 243, 249, 0.82));
+        animation: agentHeroRise 0.72s cubic-bezier(0.2, 0.8, 0.2, 1) 0.08s both;
+    }
+
+    .agent-hero-signal {
+        display: inline-flex;
         align-items: center;
-        justify-content: center;
-        text-align: center;
-        gap: 1rem;
-        padding: 0 0.4rem;
+        gap: 0.62rem;
+        width: fit-content;
+        max-width: 100%;
+        margin: 0.7rem 0 0.95rem;
+        padding: 0.56rem 0.82rem;
+        border-radius: 999px;
+        border: 1px solid rgba(55, 90, 120, 0.1);
+        background: rgba(255, 255, 255, 0.66);
+        color: #35526c;
+        box-shadow: 0 12px 28px rgba(52, 81, 110, 0.08);
+    }
+
+    .agent-hero-signal-dot {
+        width: 0.52rem;
+        height: 0.52rem;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #5c89b6, #345d83);
+        box-shadow: 0 0 0 0.28rem rgba(92, 137, 182, 0.14);
+        flex: 0 0 auto;
+    }
+
+    .agent-hero-signal-text {
+        font-size: 0.83rem;
+        line-height: 1.45;
+        letter-spacing: 0.02em;
     }
 
     .agent-hero-title {
@@ -458,7 +570,7 @@
     }
 
     .agent-hero-copy {
-        max-width: 38rem;
+        max-width: 35rem;
         font-size: 1.05rem;
         line-height: 1.78;
         color: rgba(52, 69, 88, 0.84);
@@ -468,14 +580,81 @@
     .agent-chip-row {
         display: flex;
         flex-wrap: wrap;
-        justify-content: center;
+        justify-content: flex-start;
         gap: 0.65rem;
-        margin-top: 0.45rem;
+        margin-top: 0.55rem;
     }
 
     .agent-chip-label {
         font-size: 0.92rem;
         color: #193146;
+    }
+
+    .agent-hero-board-head {
+        margin-bottom: 0.95rem;
+    }
+
+    .agent-hero-board-copy {
+        margin: 0.4rem 0 0;
+        font-size: 0.92rem;
+        line-height: 1.65;
+        color: rgba(55, 73, 93, 0.8);
+    }
+
+    .agent-prompt-grid {
+        display: grid;
+        gap: 0.72rem;
+    }
+
+    .agent-prompt-card {
+        appearance: none;
+        width: 100%;
+        padding: 0.95rem 1rem;
+        border: 1px solid rgba(55, 90, 120, 0.1);
+        border-radius: 1.18rem;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(237, 243, 249, 0.72));
+        text-align: left;
+        cursor: pointer;
+        transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+
+    .agent-prompt-card:hover,
+    .agent-prompt-card:focus-visible {
+        transform: translateY(-2px);
+        border-color: rgba(55, 90, 120, 0.22);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(234, 241, 248, 0.84));
+        box-shadow: 0 18px 34px rgba(34, 58, 83, 0.1);
+        outline: none;
+    }
+
+    .agent-prompt-kicker {
+        display: inline-flex;
+        align-items: center;
+        margin-bottom: 0.5rem;
+        padding: 0.26rem 0.55rem;
+        border-radius: 999px;
+        background: rgba(197, 214, 231, 0.72);
+        color: #36526b;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    .agent-prompt-title {
+        display: block;
+        font-family: "Noto Serif SC", Georgia, serif;
+        font-size: 1.06rem;
+        line-height: 1.38;
+        color: #132033;
+    }
+
+    .agent-prompt-copy {
+        display: block;
+        margin-top: 0.32rem;
+        font-size: 0.86rem;
+        line-height: 1.62;
+        color: rgba(52, 69, 88, 0.8);
     }
 
     .agent-chat-stream {
@@ -498,23 +677,24 @@
     }
 
     .agent-shell:not(.has-messages) .agent-main {
-        grid-template-rows: auto auto auto 1fr;
-        align-content: start;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        align-content: stretch;
+        padding-bottom: 0.35rem;
     }
 
     .agent-shell:not(.has-messages) .agent-stage {
-        justify-content: center;
+        justify-content: flex-end;
         padding-top: clamp(1.4rem, 4.4vh, 4rem);
-        padding-bottom: 0.8rem;
+        padding-bottom: clamp(0.35rem, 1.2vh, 0.65rem);
+    }
+
+    .agent-shell:not(.has-messages) .agent-composer {
+        padding-bottom: 0.15rem;
     }
 
     .agent-shell:not(.has-messages) .agent-hero {
-        width: min(100%, 60rem);
-        margin: 0 auto;
-        align-items: flex-start;
-        text-align: left;
-        gap: 0.95rem;
-        padding: 0.2rem 1rem 0 0.5rem;
+        width: 100%;
+        padding: 0.2rem 0 0;
     }
 
     .agent-shell:not(.has-messages) .agent-hero-title {
@@ -523,7 +703,7 @@
     }
 
     .agent-shell:not(.has-messages) .agent-hero-copy {
-        max-width: 40rem;
+        max-width: 34rem;
         font-size: 1.02rem;
     }
 
@@ -745,9 +925,14 @@
         position: relative;
         overflow: hidden;
         border-radius: 2rem;
-        border: 1px solid rgba(133, 155, 179, 0.18);
-        background: linear-gradient(180deg, rgba(245, 248, 252, 0.78), rgba(236, 241, 246, 0.82));
-        box-shadow: 0 18px 40px rgba(8, 15, 24, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.52);
+        border: 0;
+        background: rgba(17, 24, 39, 0.045);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        box-shadow:
+            inset 0 0 0 1px rgba(20, 35, 52, 0.14),
+            inset 0 1px 0 rgba(255, 255, 255, 0.56),
+            0 16px 36px rgba(8, 15, 24, 0.08);
     }
 
     .agent-composer-shell::before {
@@ -755,7 +940,7 @@
         position: absolute;
         inset: 0;
         border-radius: inherit;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0));
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.02));
         opacity: 1;
         pointer-events: none;
     }
@@ -766,38 +951,43 @@
         inset: 1px;
         border-radius: inherit;
         background:
-            radial-gradient(circle at top right, rgba(181, 202, 224, 0.18), transparent 28%),
-            radial-gradient(circle at bottom left, rgba(255, 255, 255, 0.28), transparent 34%);
+            radial-gradient(circle at top right, rgba(255, 255, 255, 0.18), transparent 26%),
+            radial-gradient(circle at bottom left, rgba(176, 196, 217, 0.14), transparent 34%);
         pointer-events: none;
     }
 
     .agent-composer-shell:focus-within {
-        border-color: rgba(108, 135, 160, 0.3);
-        box-shadow: 0 20px 46px rgba(8, 15, 24, 0.12), 0 0 0 4px rgba(170, 190, 212, 0.12);
+        background: rgba(17, 24, 39, 0.06);
+        box-shadow:
+            inset 0 0 0 1px rgba(20, 35, 52, 0.22),
+            inset 0 1px 0 rgba(255, 255, 255, 0.62),
+            0 20px 42px rgba(8, 15, 24, 0.11),
+            0 0 0 4px rgba(17, 24, 39, 0.07);
     }
 
     .agent-composer-body {
         position: relative;
+        padding: 0.2rem;
     }
 
     .agent-textarea {
         width: 100%;
-        min-height: 84px;
-        max-height: 220px;
+        min-height: 64px;
+        max-height: 180px;
         resize: none;
         border: 0;
-        border-radius: 2rem 2rem 1rem 1rem;
+        border-radius: 1.8rem;
         background: transparent;
         color: #162434;
-        padding: 1.15rem 4.1rem 0.55rem 1.45rem;
+        padding: 0.95rem 4.05rem 0.8rem 1.35rem;
         font-size: 1rem;
-        line-height: 1.5;
+        line-height: 1.35;
         font-weight: 500;
         outline: none;
     }
 
     .agent-textarea::placeholder {
-        color: rgba(73, 88, 107, 0.66);
+        color: rgba(17, 24, 39, 0.46);
     }
 
     .agent-composer-foot {
@@ -818,25 +1008,38 @@
 
     .agent-send-button {
         position: absolute;
-        right: 0.95rem;
+        right: 1rem;
         top: 50%;
         transform: translateY(-50%);
+        overflow: hidden;
         justify-content: center;
-        width: 2.4rem;
-        height: 2.4rem;
+        width: 2.5rem;
+        height: 2.5rem;
         padding: 0;
         border-radius: 0.95rem;
-        border: 1px solid rgba(17, 24, 39, 0.08);
-        background: rgba(17, 24, 39, 0.05);
+        border: 0;
+        background: rgba(17, 24, 39, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.08);
         color: #182636;
         cursor: pointer;
         transition: background 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
     }
 
+    .agent-send-button::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0));
+        opacity: 0;
+        transform: translateX(-130%);
+        pointer-events: none;
+    }
+
     .agent-send-button:hover {
         transform: translateY(calc(-50% - 1px));
-        background: rgba(17, 24, 39, 0.08);
-        box-shadow: 0 10px 22px rgba(17, 24, 39, 0.1);
+        background: rgba(17, 24, 39, 0.09);
+        box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.1), 0 10px 22px rgba(17, 24, 39, 0.08);
     }
 
     .agent-send-button:disabled {
@@ -846,22 +1049,41 @@
         transform: translateY(-50%);
         background: rgba(17, 24, 39, 0.04);
         color: rgba(73, 85, 103, 0.54);
-        border-color: rgba(148, 163, 184, 0.14);
     }
 
     .agent-send-arrow {
-        font-size: 0.96rem;
-        line-height: 1;
-        transition: opacity 0.18s ease;
+        position: relative;
+        z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
+        transition: opacity 0.18s ease, transform 0.22s ease;
+    }
+
+    .agent-send-icon {
+        width: 1.02rem;
+        height: 1.02rem;
+        display: block;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
     }
 
     .agent-send-spinner {
         display: none;
-        width: 0.82rem;
-        height: 0.82rem;
-        border-radius: 0.2rem;
-        background: currentColor;
-        animation: agentSpin 2.8s linear infinite;
+        position: relative;
+        z-index: 1;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 999px;
+        border: 2px solid rgba(255, 255, 255, 0.26);
+        border-top-color: currentColor;
+        border-right-color: rgba(255, 255, 255, 0.82);
+        background: transparent;
+        animation: agentSpin 0.78s linear infinite, agentSpinnerBreath 1.1s ease-in-out infinite;
     }
 
     .agent-send-button.is-empty .agent-send-arrow {
@@ -877,13 +1099,27 @@
     }
 
     .agent-send-button.is-loading {
-        background: transparent;
-        border-color: transparent;
-        box-shadow: none;
+        background: linear-gradient(180deg, #3e668e, #24415f);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 24px rgba(21, 34, 49, 0.18);
+        color: #f8fbff;
+        opacity: 1;
+        cursor: progress;
     }
 
     .agent-send-button:not(.is-empty):not(:disabled) {
-        background: rgba(17, 24, 39, 0.08);
+        background: linear-gradient(180deg, #3b6189, #213d5b);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 12px 24px rgba(27, 43, 60, 0.14);
+        color: #f8fbff;
+    }
+
+    .agent-send-button:not(.is-empty):not(:disabled)::before {
+        opacity: 1;
+        animation: agentSendSheen 2.4s ease-in-out infinite;
+    }
+
+    .agent-send-button:not(.is-empty):not(:disabled) .agent-send-arrow {
+        opacity: 1;
+        animation: agentSendReady 1.8s ease-in-out infinite;
     }
 
     @keyframes agentBlink {
@@ -898,6 +1134,431 @@
 
     @keyframes agentSpin {
         to { transform: rotate(360deg); }
+    }
+
+    @keyframes agentSendReady {
+        0%, 100% {
+            transform: translateY(0) scale(1);
+        }
+        35% {
+            transform: translate(1px, -1px) scale(1.06);
+        }
+        65% {
+            transform: translate(0, 0) scale(0.98);
+        }
+    }
+
+    @keyframes agentSendSheen {
+        0%, 52%, 100% {
+            transform: translateX(-130%);
+        }
+        68% {
+            transform: translateX(130%);
+        }
+    }
+
+    @keyframes agentSpinnerBreath {
+        0%, 100% {
+            opacity: 0.76;
+            transform: scale(0.92);
+        }
+        50% {
+            opacity: 1;
+            transform: scale(1);
+        }
+    }
+
+
+    @keyframes agentHeroRise {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .agent-layout,
+        .agent-history-panel,
+        .agent-history-head,
+        .agent-history-list {
+            transition-duration: 0.01ms !important;
+        }
+    }
+
+    .dark body.tls-agent-page {
+        background:
+            radial-gradient(circle at top, rgba(63, 94, 128, 0.18), transparent 32%),
+            linear-gradient(180deg, #0c1016 0%, #111722 100%);
+        color: #e7edf5;
+    }
+
+    .dark .site-brand,
+    .dark .tube-nav-track {
+        background: rgba(16, 21, 30, 0.76);
+        border-color: rgba(151, 173, 198, 0.14);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+        backdrop-filter: saturate(150%) blur(20px);
+        -webkit-backdrop-filter: saturate(150%) blur(20px);
+    }
+
+    .dark .site-brand {
+        color: rgba(240, 245, 251, 0.94);
+    }
+
+    .dark .site-brand:hover,
+    .dark .tube-nav-item:hover,
+    .dark .tube-nav-item.is-active {
+        color: #f7fbff;
+    }
+
+    .dark .site-brand-mark {
+        color: #e8eff8;
+        background: linear-gradient(135deg, rgba(84, 108, 135, 0.42), rgba(20, 30, 42, 0.84));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 24px rgba(0, 0, 0, 0.28);
+    }
+
+    .dark .tube-nav-item {
+        color: rgba(209, 220, 232, 0.72);
+    }
+
+    .dark .tube-nav-lamp {
+        background: linear-gradient(180deg, rgba(55, 72, 92, 0.74), rgba(24, 34, 46, 0.92));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 10px 28px rgba(0, 0, 0, 0.28);
+    }
+
+    .dark .tube-nav-lamp::before {
+        background: linear-gradient(90deg, rgba(115, 148, 183, 0.04), rgba(148, 181, 214, 0.44), rgba(115, 148, 183, 0.04));
+        box-shadow: 0 0 14px rgba(101, 131, 160, 0.18);
+    }
+
+    .dark .tube-nav-lamp::after {
+        background: rgba(134, 170, 207, 0.18);
+    }
+
+    .dark .sky-toggle__container {
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 12px 28px rgba(0, 0, 0, 0.32);
+    }
+
+    .dark .agent-shell {
+        --ink: #edf3fa;
+        --muted: rgba(191, 205, 220, 0.78);
+        --subtle: rgba(255, 255, 255, 0.08);
+        background:
+            radial-gradient(circle at top, rgba(72, 103, 136, 0.18), transparent 28%),
+            linear-gradient(145deg, rgba(13, 19, 28, 0.98) 0%, rgba(16, 24, 35, 0.98) 52%, rgba(20, 30, 43, 0.98) 100%);
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+        color: var(--ink);
+    }
+
+    .dark .agent-shell::before {
+        background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 34%),
+            repeating-linear-gradient(90deg, rgba(141, 165, 190, 0.05) 0, rgba(141, 165, 190, 0.05) 1px, transparent 1px, transparent 138px);
+        opacity: 0.22;
+    }
+
+    .dark .agent-backdrop {
+        background: rgba(2, 6, 12, 0.48);
+    }
+
+    .dark .agent-history-panel {
+        border-right-color: rgba(255, 255, 255, 0.08);
+        background: linear-gradient(180deg, rgba(14, 20, 29, 0.9), rgba(10, 16, 24, 0.82));
+        box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .dark .agent-history-head {
+        border-bottom-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .dark .agent-eyebrow {
+        color: rgba(169, 187, 207, 0.56);
+    }
+
+    .dark .agent-history-title,
+    .dark .agent-stream-notice-title,
+    .dark .agent-history-name,
+    .dark .agent-prompt-title,
+    .dark .agent-chip-label {
+        color: #edf3fa;
+    }
+
+    .dark .agent-button,
+    .dark .agent-inline-button,
+    .dark .agent-history-item,
+    .dark .agent-badge,
+    .dark .agent-model-pill,
+    .dark .agent-chip {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(166, 184, 204, 0.12);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        color: rgba(228, 236, 245, 0.9);
+    }
+
+    .dark .agent-button:hover,
+    .dark .agent-inline-button:hover,
+    .dark .agent-history-item:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(166, 184, 204, 0.2);
+        box-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
+    }
+
+    .dark .agent-button--accent {
+        background: linear-gradient(180deg, #587ca5, #304964);
+        color: #f7fbff;
+        box-shadow: 0 14px 30px rgba(13, 20, 31, 0.34);
+    }
+
+    .dark .agent-badge-dot,
+    .dark .agent-model-pill-dot,
+    .dark .agent-chip-dot {
+        background: #89b5e0;
+    }
+
+    .dark .agent-history-item.is-active {
+        border-color: rgba(127, 165, 205, 0.28);
+        background: linear-gradient(180deg, rgba(58, 79, 103, 0.46), rgba(28, 42, 58, 0.68));
+        box-shadow: 0 16px 30px rgba(0, 0, 0, 0.28);
+    }
+
+    .dark .agent-history-empty {
+        border-color: rgba(166, 184, 204, 0.14);
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(218, 227, 237, 0.82);
+    }
+
+    .dark .agent-history-empty.is-loading {
+        border-color: rgba(113, 182, 255, 0.22);
+        background: rgba(49, 109, 177, 0.18);
+    }
+
+    .dark .agent-history-empty.is-error {
+        border-color: rgba(248, 113, 113, 0.28);
+        background: rgba(127, 29, 29, 0.22);
+        color: rgba(254, 226, 226, 0.92);
+    }
+
+    .dark .agent-hero-copydeck,
+    .dark .agent-hero-board {
+        border-color: rgba(166, 184, 204, 0.12);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 24px 46px rgba(0, 0, 0, 0.22);
+    }
+
+    .dark .agent-hero-copydeck {
+        background:
+            radial-gradient(circle at top left, rgba(76, 110, 147, 0.28), transparent 30%),
+            linear-gradient(145deg, rgba(18, 27, 39, 0.92), rgba(20, 31, 45, 0.84));
+    }
+
+    .dark .agent-hero-board {
+        background: linear-gradient(180deg, rgba(20, 30, 43, 0.92), rgba(15, 23, 34, 0.84));
+    }
+
+    .dark .agent-hero-signal {
+        border-color: rgba(135, 164, 194, 0.16);
+        background: rgba(84, 112, 143, 0.18);
+        color: #d9e7f6;
+        box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
+    }
+
+    .dark .agent-hero-signal-dot {
+        background: linear-gradient(180deg, #98c3ec, #5c86af);
+        box-shadow: 0 0 0 0.28rem rgba(92, 134, 175, 0.16);
+    }
+
+    .dark .agent-hero-title {
+        color: #f4f8fd;
+    }
+
+    .dark .agent-hero-accent {
+        color: #abd3fb;
+    }
+
+    .dark .agent-hero-accent::after {
+        background: linear-gradient(90deg, rgba(83, 130, 180, 0.42), rgba(83, 130, 180, 0.12));
+    }
+
+    .dark .agent-hero-copy,
+    .dark .agent-hero-board-copy,
+    .dark .agent-prompt-copy {
+        color: rgba(205, 216, 228, 0.78);
+    }
+
+    .dark .agent-prompt-card {
+        border-color: rgba(166, 184, 204, 0.12);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(116, 145, 176, 0.08));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .dark .agent-prompt-card:hover,
+    .dark .agent-prompt-card:focus-visible {
+        border-color: rgba(158, 191, 225, 0.24);
+        background: linear-gradient(180deg, rgba(65, 92, 121, 0.3), rgba(26, 38, 54, 0.82));
+        box-shadow: 0 20px 34px rgba(0, 0, 0, 0.22);
+    }
+
+    .dark .agent-prompt-kicker {
+        background: rgba(92, 125, 159, 0.28);
+        color: #dbe8f5;
+    }
+
+    .dark .agent-avatar {
+        border-color: rgba(166, 184, 204, 0.12);
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        color: #dce9f7;
+    }
+
+    .dark .agent-message.is-user .agent-avatar {
+        background: linear-gradient(180deg, rgba(89, 123, 156, 0.34), rgba(53, 76, 98, 0.2));
+        color: #eef5fd;
+    }
+
+    .dark .agent-bubble {
+        border-color: rgba(166, 184, 204, 0.12);
+        background: linear-gradient(180deg, rgba(19, 28, 40, 0.92), rgba(14, 22, 33, 0.88));
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .dark .agent-message.is-user .agent-bubble {
+        background: linear-gradient(180deg, rgba(42, 61, 83, 0.92), rgba(27, 41, 57, 0.92));
+    }
+
+    .dark .agent-message-meta {
+        color: rgba(176, 191, 206, 0.64);
+    }
+
+    .dark .agent-message-body,
+    .dark .agent-message-body p,
+    .dark .agent-message-body li,
+    .dark .agent-message-body blockquote {
+        color: rgba(234, 240, 247, 0.92);
+    }
+
+    .dark .agent-message-body h1,
+    .dark .agent-message-body h2,
+    .dark .agent-message-body h3 {
+        color: #f7fbff;
+    }
+
+    .dark .agent-message-body blockquote {
+        border-left-color: rgba(125, 170, 215, 0.56);
+        color: rgba(204, 219, 235, 0.82);
+    }
+
+    .dark .agent-message-body pre {
+        border-color: rgba(255, 255, 255, 0.08);
+        background: rgba(5, 10, 18, 0.96);
+        color: #eaf3ff;
+    }
+
+    .dark .agent-message-body a {
+        color: #9bc8f3;
+    }
+
+    .dark .agent-streaming-copy::after {
+        border-bottom-color: rgba(174, 201, 229, 0.7);
+    }
+
+    .dark .agent-stream-notice {
+        border-color: rgba(166, 184, 204, 0.12);
+        background: linear-gradient(180deg, rgba(18, 27, 39, 0.9), rgba(14, 22, 33, 0.88));
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .dark .agent-stream-notice.is-error {
+        border-color: rgba(248, 113, 113, 0.28);
+        background: linear-gradient(180deg, rgba(79, 25, 25, 0.54), rgba(53, 18, 18, 0.76));
+    }
+
+    .dark .agent-stream-notice-copy {
+        color: rgba(205, 216, 228, 0.76);
+    }
+
+    .dark .agent-stream-notice.is-error .agent-stream-notice-copy {
+        color: rgba(254, 226, 226, 0.86);
+    }
+
+    .dark .agent-thinking-dot {
+        background: rgba(159, 189, 220, 0.72);
+    }
+
+    .dark .agent-thinking-label,
+    .dark .agent-composer-label,
+    .dark .agent-status,
+    .dark .agent-footnote {
+        color: rgba(182, 197, 213, 0.72);
+    }
+
+    .dark .agent-status.is-error {
+        color: #f5a3a3;
+    }
+
+    .dark .agent-composer-shell {
+        background: rgba(255, 255, 255, 0.04);
+        box-shadow:
+            inset 0 0 0 1px rgba(166, 184, 204, 0.12),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06),
+            0 18px 36px rgba(0, 0, 0, 0.24);
+    }
+
+    .dark .agent-composer-shell::before {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.01));
+    }
+
+    .dark .agent-composer-shell::after {
+        background:
+            radial-gradient(circle at top right, rgba(130, 160, 192, 0.14), transparent 26%),
+            radial-gradient(circle at bottom left, rgba(53, 78, 103, 0.22), transparent 34%);
+    }
+
+    .dark .agent-composer-shell:focus-within {
+        background: rgba(255, 255, 255, 0.05);
+        box-shadow:
+            inset 0 0 0 1px rgba(182, 205, 228, 0.18),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1),
+            0 20px 40px rgba(0, 0, 0, 0.28),
+            0 0 0 4px rgba(121, 155, 190, 0.12);
+    }
+
+    .dark .agent-textarea {
+        color: #eef4fb;
+    }
+
+    .dark .agent-textarea::placeholder {
+        color: rgba(186, 199, 214, 0.44);
+    }
+
+    .dark .agent-send-button {
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(166, 184, 204, 0.12);
+        color: #edf3fa;
+    }
+
+    .dark .agent-send-button:hover {
+        background: rgba(255, 255, 255, 0.1);
+        box-shadow: inset 0 0 0 1px rgba(166, 184, 204, 0.16), 0 10px 22px rgba(0, 0, 0, 0.18);
+    }
+
+    .dark .agent-send-button:disabled {
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(186, 199, 214, 0.46);
+    }
+
+    .dark .agent-send-button:not(.is-empty):not(:disabled) {
+        background: linear-gradient(180deg, #5f89b3, #36516f);
+        box-shadow: inset 0 0 0 1px rgba(209, 225, 241, 0.14), 0 12px 24px rgba(0, 0, 0, 0.2);
+        color: #f7fbff;
+    }
+
+    .dark .agent-send-button.is-loading {
+        background: linear-gradient(180deg, #74a0cd, #3d5f82);
+        box-shadow: inset 0 0 0 1px rgba(229, 239, 249, 0.12), 0 12px 24px rgba(0, 0, 0, 0.24);
+        color: #f9fbff;
     }
 
     @media (max-width: 900px) {
@@ -957,12 +1618,18 @@
         }
 
         .agent-hero {
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.95rem;
             padding: 0;
         }
 
+        .agent-hero-copydeck,
+        .agent-hero-board {
+            padding: 1.05rem 1rem;
+            border-radius: 1.45rem;
+        }
+
         .agent-shell:not(.has-messages) .agent-hero {
-            align-items: flex-start;
-            text-align: left;
             padding: 0 0.15rem;
         }
 
@@ -974,8 +1641,20 @@
             font-size: clamp(2rem, 10vw, 3rem);
         }
 
+        .agent-shell:not(.has-messages) .agent-hero-title {
+            max-width: none;
+        }
+
         .agent-hero-copy {
             font-size: 0.98rem;
+        }
+
+        .agent-prompt-card {
+            padding: 0.9rem 0.95rem;
+        }
+
+        .agent-hero-board-copy {
+            font-size: 0.88rem;
         }
 
         .agent-composer-foot {
@@ -1010,11 +1689,18 @@
         }
 
         .agent-hero {
-            gap: 0.75rem;
+            gap: 0.85rem;
         }
 
-        .agent-shell:not(.has-messages) .agent-hero {
-            gap: 0.55rem;
+        .agent-hero-copydeck,
+        .agent-hero-board {
+            padding: 0.95rem 1rem;
+        }
+
+        .agent-hero-signal,
+        .agent-hero-board-copy,
+        .agent-prompt-copy {
+            display: none;
         }
 
         .agent-shell:not(.has-messages) .agent-hero-title {
@@ -1031,6 +1717,14 @@
             display: none;
         }
 
+        .agent-prompt-grid {
+            gap: 0.5rem;
+        }
+
+        .agent-prompt-card {
+            padding: 0.78rem 0.88rem;
+        }
+
         .agent-composer-label {
             margin-bottom: 0.4rem;
         }
@@ -1044,8 +1738,8 @@
         }
 
         .agent-textarea {
-            min-height: 64px;
-            max-height: 160px;
+            min-height: 58px;
+            max-height: 148px;
         }
     }
 </style>
@@ -1060,7 +1754,6 @@
                 <div>
                     <div class="agent-eyebrow">最近会话</div>
                     <h1 class="agent-history-title">学习会话</h1>
-                    <div class="agent-history-subtitle">把高数、英语、政治和专业课的提问与复盘都留在这里。</div>
                 </div>
                 <div class="agent-history-actions">
                     <button type="button" class="agent-button agent-button--accent" id="agentNewSession">新建</button>
@@ -1083,14 +1776,43 @@
 
             <div class="agent-stage">
                 <div class="agent-hero" id="agentHero">
-                    <div class="agent-eyebrow">学习助教 Agent</div>
-                    <h1 class="agent-hero-title">今晚先攻克哪个 <span class="agent-hero-accent">考研问题</span>？</h1>
-                    <p class="agent-hero-copy">可以直接提问高数、英语、政治或专业课题目，也可以让 Agent 帮你拆解知识点、总结错因、制定下一轮复习动作。</p>
-                    <div class="agent-chip-row" aria-hidden="true">
-                        <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">高数</span></div>
-                        <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">英语</span></div>
-                        <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">政治</span></div>
-                        <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">专业课</span></div>
+                    <div class="agent-hero-copydeck">
+                        <div class="agent-eyebrow">学习助教 Agent</div>
+                        <div class="agent-hero-signal" aria-hidden="true">
+                            <span class="agent-hero-signal-dot"></span>
+                            <span class="agent-hero-signal-text">今晚适合先拆题，再找错因，最后把下一轮复习动作排清楚。</span>
+                        </div>
+                        <h1 class="agent-hero-title">今晚先攻克哪个 <span class="agent-hero-accent">考研问题</span>？</h1>
+                        <p class="agent-hero-copy">可以直接提问高数、英语、政治或专业课题目，也可以让 Agent 帮你拆解知识点、总结错因、制定下一轮复习动作。</p>
+                        <div class="agent-chip-row" aria-hidden="true">
+                            <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">高数</span></div>
+                            <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">英语</span></div>
+                            <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">政治</span></div>
+                            <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">专业课</span></div>
+                        </div>
+                    </div>
+                    <div class="agent-hero-board" aria-label="推荐开场问题">
+                        <div class="agent-hero-board-head">
+                            <div class="agent-eyebrow">直接开始</div>
+                            <p class="agent-hero-board-copy">点一下就把问题带入输入框，适合直接处理临床考研里最容易卡分的知识点和病例题。</p>
+                        </div>
+                        <div class="agent-prompt-grid">
+                            <button type="button" class="agent-prompt-card" data-agent-prompt="这个西医综合知识点我总混淆，帮我对比讲清概念、常考陷阱和记忆抓手。">
+                                <span class="agent-prompt-kicker">西综易混</span>
+                                <strong class="agent-prompt-title">把高频易混点讲透</strong>
+                                <span class="agent-prompt-copy">适合生理、病理、内科和外科里容易混淆的概念与鉴别点。</span>
+                            </button>
+                            <button type="button" class="agent-prompt-card" data-agent-prompt="按临床思路帮我拆这道病例分析题，依次讲诊断依据、鉴别诊断和下一步处理。">
+                                <span class="agent-prompt-kicker">病例分析</span>
+                                <strong class="agent-prompt-title">按临床思路拆病例题</strong>
+                                <span class="agent-prompt-copy">从症状、体征、检查到诊断和处理，按考试答题顺序梳理清楚。</span>
+                            </button>
+                            <button type="button" class="agent-prompt-card" data-agent-prompt="我今晚只有半小时，结合临床考研复习特点，帮我排一个先提分后巩固的复习顺序。">
+                                <span class="agent-prompt-kicker">今晚复习</span>
+                                <strong class="agent-prompt-title">先排今晚的提分顺序</strong>
+                                <span class="agent-prompt-copy">适合快速决定先看哪章、刷哪类题、怎么复盘最划算。</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div class="agent-chat-stream" id="agentStream" aria-live="polite"></div>
@@ -1103,7 +1825,12 @@
                     <div class="agent-composer-body">
                         <textarea id="agentInput" class="agent-textarea" rows="1" placeholder="比如：帮我拆解这道 408 大题的思路。Enter 发送，Shift+Enter 换行"></textarea>
                         <button type="submit" class="agent-send-button is-empty" id="agentSend" aria-label="发送">
-                            <span class="agent-send-arrow" aria-hidden="true">&#8599;</span>
+                            <span class="agent-send-arrow" aria-hidden="true">
+                                <svg class="agent-send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M12 18V6"></path>
+                                    <path d="M7.5 10.5L12 6l4.5 4.5"></path>
+                                </svg>
+                            </span>
                             <span class="agent-send-spinner" aria-hidden="true"></span>
                             <span class="sr-only">发送</span>
                         </button>
@@ -1165,6 +1892,7 @@
             historyToggle: document.getElementById('agentHistoryToggle'),
             historyClose: document.getElementById('agentHistoryClose'),
             newSession: document.getElementById('agentNewSession'),
+            hero: document.getElementById('agentHero'),
             stream: document.getElementById('agentStream'),
             composer: document.getElementById('agentComposer'),
             input: document.getElementById('agentInput'),
@@ -1232,11 +1960,13 @@
             if (isMobileViewport()) {
                 el.historyPanel.setAttribute('role', 'dialog');
                 el.historyPanel.setAttribute('aria-modal', 'true');
-                el.historyPanel.setAttribute('aria-hidden', String(!open));
             } else {
                 el.historyPanel.removeAttribute('role');
                 el.historyPanel.removeAttribute('aria-modal');
-                el.historyPanel.removeAttribute('aria-hidden');
+            }
+            el.historyPanel.setAttribute('aria-hidden', String(!open));
+            if ('inert' in el.historyPanel) {
+                el.historyPanel.inert = !open;
             }
             el.historyToggle.textContent = isMobileViewport()
                 ? (state.historyDrawerOpen ? '关闭会话' : '会话记录')
@@ -1362,7 +2092,7 @@
 
         function syncComposerHeight(reset = false) {
             el.input.style.height = 'auto';
-            el.input.style.height = `${reset ? 80 : Math.min(Math.max(el.input.scrollHeight, 80), 220)}px`;
+            el.input.style.height = `${reset ? 64 : Math.min(Math.max(el.input.scrollHeight, 64), 180)}px`;
         }
 
         function syncSendState() {
@@ -1386,6 +2116,19 @@
             ) {
                 setStatus(hasValue ? COMPOSER_HINT : DEFAULT_STATUS);
             }
+        }
+
+        function prefillComposer(prompt) {
+            const value = String(prompt || '').trim();
+            if (!value || state.isStreaming) return;
+            el.input.value = value;
+            persistDraft();
+            setStatus(COMPOSER_HINT);
+            syncComposerHeight();
+            syncSendState();
+            el.input.focus();
+            const cursor = el.input.value.length;
+            el.input.setSelectionRange(cursor, cursor);
         }
 
         function wait(ms) {
@@ -1519,6 +2262,14 @@
             renderMessages();
         }
 
+        function removeMessageById(messageId) {
+            if (messageId == null) return false;
+            const nextMessages = state.messages.filter((item) => String(item.id) !== String(messageId));
+            if (nextMessages.length === state.messages.length) return false;
+            state.messages = nextMessages;
+            return true;
+        }
+
         function upsertSession(session) {
             if (!session || !session.id) return;
             const index = state.sessions.findIndex((item) => item.id === session.id);
@@ -1530,9 +2281,40 @@
 
         function upsertMessage(message) {
             if (!message || message.id == null) return;
-            const index = state.messages.findIndex((item) => String(item.id) === String(message.id));
+            let index = state.messages.findIndex((item) => String(item.id) === String(message.id));
+            if (index < 0 && message.role === 'user' && message.trace_id) {
+                index = state.messages.findIndex((item) =>
+                    item &&
+                    item.role === 'user' &&
+                    item.trace_id === message.trace_id &&
+                    String(item.id || '').startsWith('temp-user-')
+                );
+            }
             if (index >= 0) state.messages[index] = message;
             else state.messages.push(message);
+        }
+
+        function insertOptimisticUserMessage(content, traceId) {
+            const text = String(content || '').trim();
+            if (!text) return null;
+            state.messagesLoading = false;
+            state.messagesError = '';
+            const optimisticMessage = {
+                id: `temp-user-${traceId || Date.now().toString(36)}`,
+                session_id: state.currentSessionId,
+                role: 'user',
+                content: text,
+                content_structured: traceId ? { client_request_id: traceId } : {},
+                message_status: 'completed',
+                token_input: 0,
+                token_output: 0,
+                latency_ms: 0,
+                trace_id: traceId || null,
+                created_at: new Date().toISOString(),
+            };
+            state.messages = [...state.messages, optimisticMessage];
+            renderMessages();
+            return optimisticMessage.id;
         }
 
         async function fetchJson(url, options = {}) {
@@ -1690,6 +2472,7 @@
                         state.currentSessionId = payload.session.id;
                         upsertSession(payload.session);
                     }
+                    if (payload.user_message) upsertMessage(payload.user_message);
                     if (payload.assistant_message) upsertMessage(payload.assistant_message);
                     finalizeStreamingAssistant();
                     renderMessages();
@@ -1766,11 +2549,13 @@
             state.isStreaming = true;
             setStatus(SEND_STATUS);
             syncSendState();
+            const clientRequestId = createClientRequestId();
+            const optimisticUserMessageId = insertOptimisticUserMessage(message, clientRequestId);
             updateStreamingAssistant('');
             const requestBody = {
                 session_id: state.currentSessionId,
                 device_id: state.deviceId,
-                client_request_id: createClientRequestId(),
+                client_request_id: clientRequestId,
                 message,
             };
             persistDraft();
@@ -1787,6 +2572,7 @@
                 try {
                     await runFallbackChat(requestBody);
                 } catch (fallbackError) {
+                    removeMessageById(optimisticUserMessageId);
                     finalizeStreamingAssistant();
                     renderMessages();
                     el.input.value = draftValue;
@@ -1842,6 +2628,13 @@
                 if (!retry || !state.currentSessionId || state.messagesLoading) return;
                 await loadMessages(state.currentSessionId);
             });
+            if (el.hero) {
+                el.hero.addEventListener('click', (event) => {
+                    const trigger = event.target.closest('[data-agent-prompt]');
+                    if (!trigger) return;
+                    prefillComposer(trigger.getAttribute('data-agent-prompt'));
+                });
+            }
             el.composer.addEventListener('submit', async (event) => {
                 event.preventDefault();
                 await sendMessage();

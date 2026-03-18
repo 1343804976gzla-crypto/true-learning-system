@@ -29,7 +29,7 @@ from api_contracts import (
     TrackingSessionListResponse,
     TrackingStatsResponse,
 )
-from models import get_db, Chapter
+from models import get_db, Chapter, DailyUpload
 from learning_tracking_models import (
     LearningSession, LearningActivity, QuestionRecord,
     DailyLearningLog, LearningInsight, SessionStatus, ActivityType,
@@ -493,6 +493,79 @@ def _apply_actor_scope(
     return query
 
 
+def _build_daily_upload_ai_extracted(
+    *,
+    chapter: Optional[Chapter],
+    chapter_id: Optional[str],
+    title: Optional[str],
+    knowledge_point: Optional[str],
+    uploaded_content: str,
+) -> Dict[str, Any]:
+    summary = uploaded_content[:160].strip()
+    payload: Dict[str, Any] = {
+        "book": getattr(chapter, "book", None) or "未识别",
+        "chapter_title": getattr(chapter, "chapter_title", None) or (title or "未识别章节"),
+        "chapter_id": chapter_id or "",
+        "main_topic": knowledge_point or "",
+        "summary": summary,
+        "concepts": list(getattr(chapter, "concepts", None) or []),
+    }
+    if getattr(chapter, "chapter_number", None):
+        payload["chapter_number"] = chapter.chapter_number
+    if getattr(chapter, "edition", None):
+        payload["edition"] = chapter.edition
+    return payload
+
+
+def _ensure_daily_upload_snapshot(
+    db: Session,
+    *,
+    actor: Dict[str, Any],
+    study_date: date,
+    raw_content: Optional[str],
+    chapter: Optional[Chapter],
+    chapter_id: Optional[str],
+    title: Optional[str],
+    knowledge_point: Optional[str],
+) -> Optional[DailyUpload]:
+    normalized_content = str(raw_content or "").strip()
+    if not normalized_content:
+        return None
+
+    existing = (
+        _apply_actor_scope(
+            db.query(DailyUpload),
+            DailyUpload,
+            actor=actor,
+        )
+        .filter(
+            DailyUpload.date == study_date,
+            DailyUpload.raw_content == normalized_content,
+        )
+        .order_by(desc(DailyUpload.id))
+        .first()
+    )
+    ai_extracted = _build_daily_upload_ai_extracted(
+        chapter=chapter,
+        chapter_id=chapter_id,
+        title=title,
+        knowledge_point=knowledge_point,
+        uploaded_content=normalized_content,
+    )
+    if existing is not None:
+        if not existing.ai_extracted:
+            existing.ai_extracted = ai_extracted
+        return existing
+
+    upload_record = DailyUpload(
+        date=study_date,
+        raw_content=normalized_content,
+        ai_extracted=ai_extracted,
+    )
+    db.add(upload_record)
+    return upload_record
+
+
 def _normalize_ocr_line(line: str) -> str:
     text = (line or "").strip()
     if not text:
@@ -819,6 +892,8 @@ async def start_learning_session(
     if valid_chapter_id:
         chapter_map = {chapter.id: chapter for chapter in db.query(Chapter).all()}
         valid_chapter_id = _resolve_chapter_id_from_map(valid_chapter_id, chapter_map)
+    actor = resolve_request_actor_scope()
+    chapter = db.query(Chapter).filter(Chapter.id == valid_chapter_id).first() if valid_chapter_id else None
 
     # 创建会话记录
     learning_session = LearningSession(
@@ -835,6 +910,16 @@ async def start_learning_session(
     )
     
     db.add(learning_session)
+    _ensure_daily_upload_snapshot(
+        db,
+        actor=actor,
+        study_date=date.today(),
+        raw_content=body.uploaded_content,
+        chapter=chapter,
+        chapter_id=valid_chapter_id,
+        title=title,
+        knowledge_point=body.knowledge_point,
+    )
     
     # 记录活动
     activity = LearningActivity(

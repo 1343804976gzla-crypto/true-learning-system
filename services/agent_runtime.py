@@ -26,7 +26,8 @@ from agent_models import (
     AgentToolCache,
     AgentTurnState,
 )
-from models import engine
+from learning_tracking_models import LearningSession, WrongAnswerV2
+from models import Chapter, engine
 from services.agent_actions import list_action_tool_definitions
 from services.agent_context import build_agent_context, estimate_tokens, redact_sensitive_output
 from services.agent_memory import (
@@ -829,26 +830,63 @@ def _tool_type_label(session_type: str | None) -> str:
 def _build_wrong_answer_source(tool_name: str, payload: Dict[str, Any]) -> AgentSourceCard:
     items = payload.get("items") or []
     count = int(payload.get("count") or len(items))
-    critical_count = sum(1 for item in items if item.get("severity_tag") == "critical")
-    review_due_count = 0
-    today = date.today()
-    for item in items:
-        raw_date = item.get("next_review_date")
-        if not raw_date:
-            continue
-        try:
-            if date.fromisoformat(str(raw_date)) <= today:
-                review_due_count += 1
-        except ValueError:
-            continue
+    returned_count = int(payload.get("returned_count") or len(items))
+    severity_counts = payload.get("severity_counts") or {}
+    critical_count = int(
+        severity_counts.get("critical")
+        or sum(1 for item in items if item.get("severity_tag") == "critical")
+    )
+    review_due_count = int(payload.get("due_count") or 0)
+    if not review_due_count:
+        today = date.today()
+        for item in items:
+            raw_date = item.get("next_review_date")
+            if not raw_date:
+                continue
+            try:
+                if date.fromisoformat(str(raw_date)) <= today:
+                    review_due_count += 1
+            except ValueError:
+                continue
+
+    status = str(payload.get("status") or "active")
+    status_label = {
+        "active": "活跃",
+        "archived": "已归档",
+        "all": "全部",
+    }.get(status, status)
+    top_key_points = payload.get("top_key_points") or []
+    top_chapters = payload.get("top_chapters") or []
 
     bullets = []
-    for item in items[:3]:
+    if top_key_points:
+        bullets.append(
+            "高频薄弱点："
+            + " / ".join(
+                f"{_shorten(str(item.get('name') or '未命名考点'), 18)}({int(item.get('count') or 0)})"
+                for item in top_key_points[:3]
+            )
+        )
+    if top_chapters:
+        bullets.append(
+            "问题最集中章节："
+            + " / ".join(
+                f"{_shorten(str(item.get('chapter_label') or item.get('chapter_id') or '未标记章节'), 18)}({int(item.get('count') or 0)})"
+                for item in top_chapters[:2]
+            )
+        )
+    for item in items[: max(0, 3 - len(bullets))]:
         label = item.get("chapter_label") or item.get("key_point") or "未命名错题"
         tags = [item.get("question_type"), item.get("severity_tag")]
-        bullets.append(f"{_shorten(str(label), 48)} · " + " / ".join([tag for tag in tags if tag]))
+        bullets.append(f"最近样本：{_shorten(str(label), 40)} · " + " / ".join([tag for tag in tags if tag]))
 
-    summary = f"已提取 {count} 条错题，当前高风险 {critical_count} 条。"
+    if count > returned_count:
+        summary = (
+            f"共发现 {count} 条{status_label}错题，当前展示最近 {returned_count} 条样本；"
+            f"高风险 {critical_count} 条。"
+        )
+    else:
+        summary = f"共提取 {count} 条{status_label}错题，高风险 {critical_count} 条。"
     if review_due_count:
         summary += f" 其中 {review_due_count} 条已到复习时间。"
 
@@ -858,7 +896,8 @@ def _build_wrong_answer_source(tool_name: str, payload: Dict[str, Any]) -> Agent
         summary=summary,
         count=count,
         stats=[
-            AgentSourceStat(label="条目", value=_format_count(count)),
+            AgentSourceStat(label="总量", value=_format_count(count)),
+            AgentSourceStat(label="展示", value=_format_count(returned_count)),
             AgentSourceStat(label="高风险", value=_format_count(critical_count)),
             AgentSourceStat(label="到期待复习", value=_format_count(review_due_count)),
         ],
@@ -983,14 +1022,19 @@ def _build_knowledge_mastery_source(tool_name: str, payload: Dict[str, Any]) -> 
 def _build_study_history_source(tool_name: str, payload: Dict[str, Any]) -> AgentSourceCard:
     recent_uploads = payload.get("recent_uploads") or []
     book_distribution = payload.get("book_distribution") or {}
+    fallback_count = int(payload.get("session_fallback_count_in_window") or 0)
     bullets = []
     if book_distribution:
         top_books = list(book_distribution.keys())[:3]
         bullets.append("最近覆盖科目：" + " / ".join(str(book) for book in top_books))
+    if fallback_count:
+        bullets.append(f"其中 {fallback_count} 条来自带原文的学习会话补记")
     for item in recent_uploads[:2]:
+        source = item.get("source")
+        source_suffix = " · 会话补记" if source == "learning_session" else ""
         bullets.append(
             f"{item.get('date') or '--'} · {item.get('book') or '未知'} · "
-            f"{_shorten(str(item.get('chapter_title') or '未识别章节'), 32)}"
+            f"{_shorten(str(item.get('chapter_title') or '未识别章节'), 32)}{source_suffix}"
         )
 
     return AgentSourceCard(
@@ -999,6 +1043,7 @@ def _build_study_history_source(tool_name: str, payload: Dict[str, Any]) -> Agen
         summary=(
             f"近 {payload.get('days') or 0} 天共有 {payload.get('total_uploads_in_window') or 0} 次上传记录，"
             f"最近 7 天 {payload.get('weekly_uploads') or 0} 次，连续学习 {payload.get('streak_days') or 0} 天。"
+            + (f" 其中 {fallback_count} 次由学习会话原文补记。" if fallback_count else "")
         ),
         count=int(payload.get("total_uploads_in_window") or 0),
         stats=[
@@ -1678,6 +1723,176 @@ def _default_clarifying_questions(request_analysis: Dict[str, Any]) -> List[str]
         questions.append("你这轮最想先解决的是总体进度、错题复习，还是复习压力？")
     questions.append("如果要我给具体建议，你更希望按优先级排序，还是按时间顺序拆解？")
     return questions[:3]
+
+
+_TOPIC_QUERY_TOOLS = {
+    "get_learning_sessions",
+    "get_wrong_answers",
+    "get_study_history",
+    "get_knowledge_mastery",
+}
+_TOPIC_RECOMMENDED_TOOLS = [
+    "get_learning_sessions",
+    "get_wrong_answers",
+    "get_study_history",
+    "get_knowledge_mastery",
+]
+_TOPIC_VARIANT_GROUPS: Dict[str, List[str]] = {
+    "细胞电活动": ["细胞电活动", "心肌电活动", "动作电位", "静息电位", "电生理", "兴奋性"],
+    "心肌电活动": ["细胞电活动", "心肌电活动", "动作电位", "静息电位", "电生理", "兴奋性"],
+    "动作电位": ["细胞电活动", "心肌电活动", "动作电位", "静息电位", "电生理", "兴奋性"],
+    "静息电位": ["细胞电活动", "心肌电活动", "动作电位", "静息电位", "电生理", "兴奋性"],
+}
+_TOPIC_PATTERNS = [
+    re.compile(r"(细胞电活动|心肌电活动|动作电位|静息电位|电生理|兴奋性)"),
+    re.compile(r"(?:最近|近期|这段时间|关于|针对|对于)?([\u4e00-\u9fffA-Za-z0-9·()（）]{2,20})(?:学得|掌握|情况|这部分|这一块|这个知识点)"),
+]
+
+
+def _normalize_topic_text(value: str | None) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _extract_topic_hint(db: Session, message: str) -> str:
+    clean_message = _normalize_topic_text(message)
+    if not clean_message:
+        return ""
+
+    entity_candidates = {
+        _normalize_topic_text(title)
+        for _, title in db.query(Chapter.id, Chapter.chapter_title).all()
+        if _normalize_topic_text(title)
+    }
+    entity_candidates.update(
+        {
+            _normalize_topic_text(item[0])
+            for item in db.query(LearningSession.knowledge_point)
+            .filter(LearningSession.knowledge_point.isnot(None))
+            .distinct()
+            .all()
+            if _normalize_topic_text(item[0])
+        }
+    )
+    entity_candidates.update(
+        {
+            _normalize_topic_text(item[0])
+            for item in db.query(WrongAnswerV2.key_point)
+            .filter(WrongAnswerV2.key_point.isnot(None))
+            .distinct()
+            .all()
+            if _normalize_topic_text(item[0])
+        }
+    )
+
+    entity_matches = sorted(
+        {
+            candidate
+            for candidate in entity_candidates
+            if candidate in clean_message
+        },
+        key=len,
+        reverse=True,
+    )
+    if entity_matches:
+        return entity_matches[0]
+
+    for pattern in _TOPIC_PATTERNS:
+        match = pattern.search(clean_message)
+        if not match:
+            continue
+        topic = _normalize_topic_text(match.group(1))
+        if topic:
+            return topic
+    return ""
+
+
+def _expand_topic_variants(topic: str) -> List[str]:
+    normalized_topic = _normalize_topic_text(topic)
+    if not normalized_topic:
+        return []
+
+    variants = {normalized_topic}
+    for key, aliases in _TOPIC_VARIANT_GROUPS.items():
+        if key in normalized_topic or normalized_topic in aliases or any(alias in normalized_topic for alias in aliases):
+            variants.update(aliases)
+    if "电活动" in normalized_topic or "电生理" in normalized_topic:
+        variants.update(["电活动", "动作电位", "静息电位", "兴奋性", "心肌电活动"])
+    return sorted({item for item in variants if item}, key=len, reverse=True)
+
+
+def _derive_topic_tool_overrides(
+    db: Session,
+    message: str,
+    selected_tools: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    topic = _extract_topic_hint(db, message)
+    if not topic:
+        return {}
+
+    topic_variants = _expand_topic_variants(topic)
+    chapter_ids: List[str] = []
+    seen_chapter_ids: set[str] = set()
+    for chapter_id, chapter_title in db.query(Chapter.id, Chapter.chapter_title).all():
+        normalized_title = _normalize_topic_text(chapter_title)
+        if not normalized_title:
+            continue
+        if not any(variant in normalized_title or normalized_title in variant for variant in topic_variants):
+            continue
+        chapter_id_text = str(chapter_id or "").strip()
+        if not chapter_id_text or chapter_id_text in seen_chapter_ids:
+            continue
+        seen_chapter_ids.add(chapter_id_text)
+        chapter_ids.append(chapter_id_text)
+        if len(chapter_ids) >= 6:
+            break
+
+    overrides: Dict[str, Dict[str, Any]] = {}
+    for tool_name in selected_tools:
+        if tool_name not in _TOPIC_QUERY_TOOLS:
+            continue
+        override: Dict[str, Any] = {}
+        if tool_name in {"get_learning_sessions", "get_wrong_answers", "get_study_history"}:
+            override["query"] = topic
+        if chapter_ids:
+            override["chapter_ids"] = chapter_ids
+        if tool_name == "get_learning_sessions":
+            override["limit"] = 8
+        elif tool_name == "get_wrong_answers":
+            override["limit"] = 8
+        elif tool_name == "get_study_history":
+            override["limit"] = 8
+        elif tool_name == "get_knowledge_mastery":
+            override["limit"] = 8
+        overrides[tool_name] = override
+    return overrides
+
+
+def _extend_tools_for_topic_query(
+    db: Session,
+    message: str,
+    selected_tools: List[str],
+    *,
+    requested_tools_explicit: bool,
+) -> List[str]:
+    if requested_tools_explicit:
+        return list(selected_tools)
+    topic = _extract_topic_hint(db, message)
+    if not topic:
+        return list(selected_tools)
+    return list(dict.fromkeys(list(selected_tools) + _TOPIC_RECOMMENDED_TOOLS))
+
+
+def _merge_tool_overrides(
+    auto_overrides: Dict[str, Dict[str, Any]],
+    payload_overrides: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    for tool_name in set(auto_overrides) | set(payload_overrides):
+        merged[tool_name] = {
+            **auto_overrides.get(tool_name, {}),
+            **payload_overrides.get(tool_name, {}),
+        }
+    return merged
 
 
 def _looks_ambiguous(message: str) -> bool:
@@ -2511,6 +2726,14 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
         )
 
     initial_selected_tools = resolve_requested_tools(payload.message, payload.requested_tools)
+    initial_selected_tools = _extend_tools_for_topic_query(
+        db,
+        payload.message,
+        initial_selected_tools,
+        requested_tools_explicit=bool(payload.requested_tools),
+    )
+    auto_tool_overrides = _derive_topic_tool_overrides(db, payload.message, initial_selected_tools)
+    effective_tool_overrides = _merge_tool_overrides(auto_tool_overrides, payload.tool_overrides)
     request_analysis = build_request_analysis(
         payload.message,
         initial_selected_tools,
@@ -2520,6 +2743,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
         "requested_tools": payload.requested_tools,
         "client_request_id": payload.client_request_id,
         "selected_tools": initial_selected_tools,
+        "tool_overrides": effective_tool_overrides,
         "request_analysis": request_analysis,
     }
     tool_calls: List[AgentToolCall] = []
@@ -2541,7 +2765,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
             user_message=user_message,
             trace_id=trace_id,
             tool_names=current_tool_names,
-            tool_overrides=payload.tool_overrides,
+            tool_overrides=effective_tool_overrides,
             tool_calls=tool_calls,
             tool_results=tool_results,
             tool_run_snapshots=tool_run_snapshots,
@@ -2594,6 +2818,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
         "requested_tools": payload.requested_tools,
         "client_request_id": payload.client_request_id,
         "selected_tools": selected_tools,
+        "tool_overrides": effective_tool_overrides,
         "request_analysis": request_analysis,
     }
     response_strategy = await _decide_response_strategy(
