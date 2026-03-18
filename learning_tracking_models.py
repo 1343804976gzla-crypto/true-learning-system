@@ -188,9 +188,15 @@ class DailyLearningLog(Base):
     每日学习日志 - 汇总每天的学习情况
     """
     __tablename__ = "daily_learning_logs"
+    __table_args__ = (
+        UniqueConstraint("actor_key", "date", name="uq_daily_learning_logs_actor_date"),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
-    date = Column(Date, nullable=False, unique=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
+    actor_key = Column(String, nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
     
     # 统计
     total_sessions = Column(Integer, default=0)
@@ -417,6 +423,30 @@ class DailyReviewPaperItem(Base):
     paper = relationship("DailyReviewPaper", back_populates="items")
 
 
+class BatchExamState(Base):
+    """
+    鎵归噺璇曞嵎鐢熸垚鐘舵€佸揩鐓э紝鐢ㄤ簬鐢熸垚鍚庡埌鎻愪氦鍓嶇殑鎸佷箙鍖栦笌 actor 闅旂
+    """
+    __tablename__ = "batch_exam_states"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
+    actor_key = Column(String, nullable=False, index=True)
+    chapter_id = Column(String, nullable=True)
+    chapter_prediction = Column(JSON, nullable=True)
+    questions = Column(JSON, nullable=False)
+    num_questions = Column(Integer, default=10)
+    uploaded_content = Column(Text, nullable=True)
+    fuzzy_options = Column(JSON, nullable=True)
+    exam_wrong_questions = Column(JSON, nullable=True)
+    score = Column(Integer, nullable=True)
+    wrong_count = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    submitted_at = Column(DateTime, nullable=True)
+
+
 # 创建表的函数
 def create_learning_tracking_tables():
     """创建学习轨迹记录相关的表"""
@@ -429,7 +459,8 @@ def create_learning_tracking_tables():
         WrongAnswerV2.__table__,
         WrongAnswerRetry.__table__,
         DailyReviewPaper.__table__,
-        DailyReviewPaperItem.__table__
+        DailyReviewPaperItem.__table__,
+        BatchExamState.__table__,
     ])
     print("✅ 学习轨迹记录表创建完成")
 

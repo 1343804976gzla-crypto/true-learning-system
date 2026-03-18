@@ -519,6 +519,7 @@ def _resolve_daily_review_actor(
     *,
     user_id: Optional[str] = None,
     device_id: Optional[str] = None,
+    include_scope_aliases: bool = True,
 ) -> Dict[str, Any]:
     request_user_id, request_device_id = get_request_identity()
     candidate_user_id = user_id or request_user_id
@@ -538,15 +539,24 @@ def _resolve_daily_review_actor(
         candidate_user_id if has_explicit_scope else None,
         candidate_device_id if has_explicit_scope else None,
     )
-    scope_device_ids = build_device_scope_aliases(scope_user_id, scope_device_id)
+    resolved_actor_key = build_actor_key(candidate_user_id, candidate_device_id)
+    scope_device_ids = (
+        build_device_scope_aliases(scope_user_id, scope_device_id)
+        if include_scope_aliases
+        else ([scope_device_id] if scope_device_id else [])
+    )
     return {
         "paper_user_id": paper_user_id,
         "paper_device_id": paper_device_id,
         "scope_user_id": scope_user_id,
         "scope_device_id": scope_device_id,
         "scope_device_ids": scope_device_ids,
-        "actor_key": build_actor_key(candidate_user_id, candidate_device_id),
-        "actor_keys": build_actor_key_aliases(candidate_user_id, candidate_device_id),
+        "actor_key": resolved_actor_key,
+        "actor_keys": (
+            build_actor_key_aliases(candidate_user_id, candidate_device_id)
+            if include_scope_aliases
+            else [resolved_actor_key]
+        ),
     }
 
 
@@ -2301,8 +2311,15 @@ async def export_daily_review_pdf(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     target_date = paper_date or date.today()
-    actors_to_try = [_resolve_daily_review_actor(user_id=user_id, device_id=device_id)]
-    if _should_try_legacy_anonymous_daily_review_actor(user_id=user_id, device_id=device_id):
+    try_legacy_anonymous = _should_try_legacy_anonymous_daily_review_actor(user_id=user_id, device_id=device_id)
+    actors_to_try = [
+        _resolve_daily_review_actor(
+            user_id=user_id,
+            device_id=device_id,
+            include_scope_aliases=not try_legacy_anonymous,
+        )
+    ]
+    if try_legacy_anonymous:
         legacy_actor = _resolve_daily_review_actor(device_id=DEFAULT_DEVICE_ID)
         if legacy_actor["actor_key"] != actors_to_try[0]["actor_key"]:
             actors_to_try.append(legacy_actor)

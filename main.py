@@ -106,6 +106,14 @@ async def startup():
     """应用启动时初始化数据库"""
     init_db()
     ensure_learning_identity_schema()
+    try:
+        from models import SessionLocal
+        from routers.learning_tracking import rebuild_daily_logs
+
+        with SessionLocal() as db:
+            rebuild_daily_logs(db)
+    except Exception as exc:
+        print(f"[WARN] rebuild daily logs failed on startup: {exc}")
     install_openviking_sync_hooks()
     try:
         openmanus_status = sync_openmanus_config()

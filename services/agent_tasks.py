@@ -8,6 +8,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from agent_models import AgentActionLog, AgentSession, AgentTask, AgentTaskEvent, AgentTurnState
+from services.data_identity import build_device_scope_aliases, resolve_query_identity
 from services.agent_runtime import AGENT_IDENTITY_REQUIRED, AgentIdentityRequiredError, ensure_agent_schema
 from utils.agent_contracts import (
     AgentActionLogItem,
@@ -269,12 +270,16 @@ def get_task_for_actor_or_none(
 ) -> AgentTask | None:
     if not user_id and not device_id:
         raise AgentIdentityRequiredError(AGENT_IDENTITY_REQUIRED)
+    user_id, device_id = resolve_query_identity(user_id, device_id)
+    device_ids = build_device_scope_aliases(user_id, device_id)
     task = get_task_or_none(db, task_id)
     if task is None:
         return None
     if user_id and task.user_id != user_id:
         return None
-    if device_id and task.device_id != device_id:
+    if device_ids and task.device_id not in device_ids:
+        return None
+    if not device_ids and device_id and task.device_id != device_id:
         return None
     return task
 

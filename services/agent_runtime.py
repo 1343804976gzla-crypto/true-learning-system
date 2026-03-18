@@ -12,7 +12,7 @@ import re
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import desc, func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from agent_models import (
@@ -38,6 +38,7 @@ from services.agent_memory import (
 from services.agent_prompt_templates import resolve_prompt_template
 from services.agent_tools import execute_agent_tool, resolve_requested_tools
 from services.ai_client import get_ai_client
+from services.data_identity import build_device_scope_aliases, resolve_query_identity
 from utils.agent_contracts import (
     AgentChatRequest,
     AgentChatResponse,
@@ -105,6 +106,10 @@ class AgentDuplicateResponseAvailableError(RuntimeError):
         self.response = response
 
 
+def _is_retryable_sqlite_lock_error(exc: Exception) -> bool:
+    return "database is locked" in str(exc).lower()
+
+
 def _reserve_chat_request(session_id: str, trace_id: str) -> bool:
     key = (session_id, trace_id)
     with _IN_FLIGHT_CHAT_REQUESTS_LOCK:
@@ -156,6 +161,8 @@ def _require_actor_identity(user_id: str | None, device_id: str | None) -> None:
 
 
 def _session_matches_actor(session: AgentSession, user_id: str | None, device_id: str | None) -> bool:
+    user_id, device_id = resolve_query_identity(user_id, device_id)
+    device_ids = build_device_scope_aliases(user_id, device_id)
     matched = False
 
     if user_id:
@@ -163,7 +170,11 @@ def _session_matches_actor(session: AgentSession, user_id: str | None, device_id
             return False
         matched = matched or session.user_id == user_id
 
-    if device_id:
+    if device_ids:
+        if session.device_id and session.device_id not in device_ids:
+            return False
+        matched = matched or session.device_id in device_ids
+    elif device_id:
         if session.device_id and session.device_id != device_id:
             return False
         matched = matched or session.device_id == device_id
@@ -593,10 +604,17 @@ def list_sessions(
 ) -> List[AgentSession]:
     ensure_agent_schema()
     _require_actor_identity(user_id, device_id)
+    user_id, device_id = resolve_query_identity(user_id, device_id)
+    device_ids = build_device_scope_aliases(user_id, device_id)
     query = db.query(AgentSession).order_by(desc(AgentSession.last_message_at), desc(AgentSession.created_at))
     if user_id:
         query = query.filter(AgentSession.user_id == user_id)
-    if device_id:
+    if device_ids:
+        if len(device_ids) == 1:
+            query = query.filter(AgentSession.device_id == device_ids[0])
+        else:
+            query = query.filter(AgentSession.device_id.in_(device_ids))
+    elif device_id:
         query = query.filter(AgentSession.device_id == device_id)
     if status != "all":
         query = query.filter(AgentSession.status == status)
@@ -755,8 +773,16 @@ async def _wait_for_existing_chat_response(
 ) -> AgentChatResponse | None:
     deadline = perf_counter() + timeout_seconds
     while perf_counter() < deadline:
-        db.expire_all()
-        response = _get_existing_chat_response(db, session=session, trace_id=trace_id)
+        try:
+            db.rollback()
+            db.expire_all()
+            response = _get_existing_chat_response(db, session=session, trace_id=trace_id)
+        except OperationalError as exc:
+            db.rollback()
+            if not _is_retryable_sqlite_lock_error(exc):
+                raise
+            await asyncio.sleep(poll_interval_seconds)
+            continue
         if response is not None:
             return response
         await asyncio.sleep(poll_interval_seconds)

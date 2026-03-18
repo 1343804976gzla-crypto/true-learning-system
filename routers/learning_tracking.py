@@ -5,7 +5,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any, Tuple, Union
 from pathlib import Path
@@ -40,7 +40,7 @@ from utils.data_contracts import (
     canonicalize_learning_activity_data,
     normalize_confidence,
 )
-from services.data_identity import build_device_scope_aliases, resolve_query_identity
+from services.data_identity import DEFAULT_DEVICE_ID, resolve_request_actor_scope
 
 router = APIRouter(prefix="/api/tracking", tags=["learning_tracking"])
 
@@ -459,18 +459,37 @@ def _resolve_period_bounds(
     return start_date, end_date
 
 
-def _apply_actor_scope(query, model, *, user_id: Optional[str], device_id: Optional[str]):
-    user_id, device_id = resolve_query_identity(user_id, device_id)
-    device_ids = build_device_scope_aliases(user_id, device_id)
-    if user_id and hasattr(model, "user_id"):
-        query = query.filter(model.user_id == user_id)
-    if device_ids and hasattr(model, "device_id"):
-        if len(device_ids) == 1:
-            query = query.filter(model.device_id == device_ids[0])
+def _apply_actor_scope(
+    query,
+    model,
+    *,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    actor: Optional[Dict[str, Any]] = None,
+):
+    actor_scope = actor or resolve_request_actor_scope(user_id=user_id, device_id=device_id)
+    scope_user_id = actor_scope.get("scope_user_id")
+    scope_device_id = actor_scope.get("scope_device_id")
+    scope_device_ids = list(actor_scope.get("scope_device_ids") or [])
+
+    if scope_user_id and hasattr(model, "user_id"):
+        query = query.filter(model.user_id == scope_user_id)
+    if scope_device_ids and hasattr(model, "device_id"):
+        device_column = getattr(model, "device_id")
+        if not scope_user_id and DEFAULT_DEVICE_ID in scope_device_ids:
+            query = query.filter(
+                or_(
+                    device_column.in_(scope_device_ids),
+                    device_column.is_(None),
+                    device_column == "",
+                )
+            )
+        elif len(scope_device_ids) == 1:
+            query = query.filter(device_column == scope_device_ids[0])
         else:
-            query = query.filter(model.device_id.in_(device_ids))
-    elif device_id and hasattr(model, "device_id"):
-        query = query.filter(model.device_id == device_id)
+            query = query.filter(device_column.in_(scope_device_ids))
+    elif scope_device_id and hasattr(model, "device_id"):
+        query = query.filter(getattr(model, "device_id") == scope_device_id)
     return query
 
 
@@ -981,7 +1000,7 @@ async def complete_learning_session(
 
     # 更新每日日志（不影响主流程）
     try:
-        await update_daily_log(session, db)
+        await sync_daily_log_for_actor(session, db)
     except Exception as e:
         print(f"[Tracking] 更新每日日志失败（不影响主流程）: {e}")
         import traceback
@@ -998,49 +1017,112 @@ async def complete_learning_session(
     }
 
 
+def _daily_log_actor(session: LearningSession) -> Dict[str, Any]:
+    return resolve_request_actor_scope(user_id=session.user_id, device_id=session.device_id)
+
+
+def _refresh_daily_log(
+    db: Session,
+    *,
+    session: LearningSession,
+    auto_commit: bool = True,
+) -> None:
+    log_date = (session.completed_at or datetime.now()).date()
+    start_of_day = datetime.combine(log_date, datetime.min.time())
+    end_of_day = datetime.combine(log_date, datetime.max.time())
+    actor = _daily_log_actor(session)
+
+    log = (
+        db.query(DailyLearningLog)
+        .filter(
+            DailyLearningLog.actor_key == actor["actor_key"],
+            DailyLearningLog.date == log_date,
+        )
+        .first()
+    )
+    if not log:
+        log = DailyLearningLog(
+            user_id=actor["paper_user_id"],
+            device_id=actor["paper_device_id"],
+            actor_key=actor["actor_key"],
+            date=log_date,
+        )
+        db.add(log)
+
+    day_sessions = (
+        _apply_actor_scope(
+            db.query(LearningSession),
+            LearningSession,
+            actor=actor,
+        )
+        .filter(
+            LearningSession.completed_at >= start_of_day,
+            LearningSession.completed_at <= end_of_day,
+        )
+        .order_by(LearningSession.completed_at.asc())
+        .all()
+    )
+
+    unique_records = _load_unique_question_records(
+        db,
+        session_ids=[item.id for item in day_sessions],
+    )
+    record_stats = _build_record_stats(unique_records)
+
+    scores = [item.score for item in day_sessions if item.score is not None]
+    started_candidates = [item.started_at for item in day_sessions if item.started_at]
+    completed_candidates = [item.completed_at for item in day_sessions if item.completed_at]
+    knowledge_points = sorted({_display_key_point(record) for record in unique_records})
+    weak_points = sorted({_display_key_point(record) for record in unique_records if not record.is_correct})
+
+    log.user_id = actor["paper_user_id"]
+    log.device_id = actor["paper_device_id"]
+    log.actor_key = actor["actor_key"]
+    log.total_sessions = len(day_sessions)
+    log.total_questions = record_stats["total_questions"]
+    log.total_correct = record_stats["correct_count"]
+    log.total_wrong = record_stats["wrong_count"]
+    log.total_duration_seconds = sum(item.duration_seconds or 0 for item in day_sessions)
+    log.average_score = round(sum(scores) / len(scores), 1) if scores else 0
+    log.first_session_at = min(started_candidates) if started_candidates else session.started_at
+    log.last_session_at = max(completed_candidates) if completed_candidates else session.completed_at
+    log.session_ids = [item.id for item in day_sessions]
+    log.knowledge_points_covered = knowledge_points
+    log.weak_knowledge_points = weak_points
+
+    if auto_commit:
+        db.commit()
+
+
+def rebuild_daily_logs(db: Session) -> None:
+    db.query(DailyLearningLog).delete()
+    completed_sessions = (
+        db.query(LearningSession)
+        .filter(LearningSession.completed_at.isnot(None))
+        .order_by(LearningSession.completed_at.asc(), LearningSession.id.asc())
+        .all()
+    )
+    processed: set[tuple[str, date]] = set()
+    for session in completed_sessions:
+        actor = _daily_log_actor(session)
+        key = (str(actor["actor_key"]), (session.completed_at or datetime.now()).date())
+        if key in processed:
+            continue
+        _refresh_daily_log(db, session=session, auto_commit=False)
+        processed.add(key)
+    db.commit()
+
+
+async def sync_daily_log_for_actor(session: LearningSession, db: Session) -> None:
+    _refresh_daily_log(db, session=session, auto_commit=True)
+
+
 async def update_daily_log(session: LearningSession, db: Session):
     """更新每日学习日志"""
     try:
+        _refresh_daily_log(db, session=session, auto_commit=True)
         log_date = (session.completed_at or datetime.now()).date()
-        start_of_day = datetime.combine(log_date, datetime.min.time())
-        end_of_day = datetime.combine(log_date, datetime.max.time())
-
-        log = db.query(DailyLearningLog).filter(DailyLearningLog.date == log_date).first()
-        if not log:
-            log = DailyLearningLog(date=log_date)
-            db.add(log)
-
-        day_sessions = db.query(LearningSession).filter(
-            LearningSession.completed_at >= start_of_day,
-            LearningSession.completed_at <= end_of_day
-        ).order_by(LearningSession.completed_at.asc()).all()
-
-        unique_records = _load_unique_question_records(
-            db,
-            session_ids=[item.id for item in day_sessions]
-        )
-        record_stats = _build_record_stats(unique_records)
-
-        scores = [item.score for item in day_sessions if item.score is not None]
-        started_candidates = [item.started_at for item in day_sessions if item.started_at]
-        completed_candidates = [item.completed_at for item in day_sessions if item.completed_at]
-        knowledge_points = sorted({_display_key_point(record) for record in unique_records})
-        weak_points = sorted({_display_key_point(record) for record in unique_records if not record.is_correct})
-
-        log.total_sessions = len(day_sessions)
-        log.total_questions = record_stats["total_questions"]
-        log.total_correct = record_stats["correct_count"]
-        log.total_wrong = record_stats["wrong_count"]
-        log.total_duration_seconds = sum(item.duration_seconds or 0 for item in day_sessions)
-        log.average_score = round(sum(scores) / len(scores), 1) if scores else 0
-        log.first_session_at = min(started_candidates) if started_candidates else session.started_at
-        log.last_session_at = max(completed_candidates) if completed_candidates else session.completed_at
-        log.session_ids = [item.id for item in day_sessions]
-        log.knowledge_points_covered = knowledge_points
-        log.weak_knowledge_points = weak_points
-
-        db.commit()
-        print(f"[Tracking] 每日日志更新成功: {log_date}, 会话数: {log.total_sessions}")
+        print(f"[Tracking] 每日日志更新成功: {log_date}")
     except Exception as e:
         db.rollback()
         print(f"[Tracking] 更新每日日志失败: {e}")
@@ -1059,7 +1141,12 @@ async def get_learning_sessions(
     """
     获取学习会话列表
     """
-    query = db.query(LearningSession).order_by(desc(LearningSession.started_at))
+    actor = resolve_request_actor_scope()
+    query = _apply_actor_scope(
+        db.query(LearningSession),
+        LearningSession,
+        actor=actor,
+    ).order_by(desc(LearningSession.started_at))
     
     if session_type:
         query = query.filter(LearningSession.session_type == session_type)
@@ -1106,7 +1193,16 @@ async def get_session_detail(
     """
     获取会话详情（包含所有活动和题目记录）
     """
-    session = db.query(LearningSession).filter(LearningSession.id == session_id).first()
+    actor = resolve_request_actor_scope()
+    session = (
+        _apply_actor_scope(
+            db.query(LearningSession),
+            LearningSession,
+            actor=actor,
+        )
+        .filter(LearningSession.id == session_id)
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
@@ -1186,9 +1282,18 @@ async def get_review_data(
         _load_unique_question_records(db, session_ids=session_ids)
     )
 
+    actor = resolve_request_actor_scope()
     results = []
     for sid in session_ids:
-        session = db.query(LearningSession).filter(LearningSession.id == sid).first()
+        session = (
+            _apply_actor_scope(
+                db.query(LearningSession),
+                LearningSession,
+                actor=actor,
+            )
+            .filter(LearningSession.id == sid)
+            .first()
+        )
         if not session:
             continue
 
@@ -1244,23 +1349,26 @@ async def get_knowledge_archive(
     按 学科 → 系统/章节 → 知识点 组织，包含所有题目
     """
     # 获取所有题目记录（按 session_id + question_index 去重）
+    actor = resolve_request_actor_scope()
+    scoped_sessions = _apply_actor_scope(
+        db.query(LearningSession),
+        LearningSession,
+        actor=actor,
+    ).all()
+    session_map = {
+        session.id: {
+            "title": session.title,
+            "session_type": session.session_type,
+            "started_at": session.started_at.isoformat() if session.started_at else None,
+        }
+        for session in scoped_sessions
+    }
+    session_ids = list(session_map.keys())
     all_questions = sorted(
-        _load_unique_question_records(db),
+        _load_unique_question_records(db, session_ids=session_ids),
         key=lambda record: _question_record_sort_key(record),
         reverse=True
     )
-
-    # 获取session信息用于补充上下文
-    session_map = {}
-    session_ids = set(q.session_id for q in all_questions)
-    if session_ids:
-        sessions = db.query(LearningSession).filter(LearningSession.id.in_(session_ids)).all()
-        for s in sessions:
-            session_map[s.id] = {
-                "title": s.title,
-                "session_type": s.session_type,
-                "started_at": s.started_at.isoformat() if s.started_at else None
-            }
 
     # 按知识点聚合
     kp_map = {}
@@ -1325,11 +1433,35 @@ async def get_daily_logs(
     """
     获取每日学习日志
     """
-    start_date = date.today() - timedelta(days=days)
-    
-    logs = db.query(DailyLearningLog).filter(
-        DailyLearningLog.date >= start_date
-    ).order_by(desc(DailyLearningLog.date)).all()
+    start_date = date.today() - timedelta(days=max(days - 1, 0))
+    actor = resolve_request_actor_scope()
+
+    logs = (
+        db.query(DailyLearningLog)
+        .filter(
+            DailyLearningLog.date >= start_date,
+            DailyLearningLog.actor_key.in_(actor["actor_keys"]),
+        )
+        .order_by(desc(DailyLearningLog.date), desc(DailyLearningLog.updated_at), desc(DailyLearningLog.id))
+        .all()
+    )
+    deduped_logs: List[DailyLearningLog] = []
+    seen_dates: set[date] = set()
+    preferred_actor_key = str(actor.get("actor_key") or "")
+    logs.sort(
+        key=lambda item: (
+            item.date,
+            1 if (item.actor_key or "") == preferred_actor_key else 0,
+            item.updated_at or datetime.min,
+            item.id or 0,
+        ),
+        reverse=True,
+    )
+    for log in logs:
+        if log.date in seen_dates:
+            continue
+        seen_dates.add(log.date)
+        deduped_logs.append(log)
     
     return {
         "logs": [
@@ -1343,7 +1475,7 @@ async def get_daily_logs(
                 "knowledge_points": len(log.knowledge_points_covered or []),
                 "weak_points": log.weak_knowledge_points or []
             }
-            for log in logs
+            for log in deduped_logs
         ]
     }
 

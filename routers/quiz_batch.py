@@ -3,6 +3,7 @@
 支持：选择题目数量(5/10/15/20)，一次性生成整套试卷
 """
 
+from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict, Any, Tuple
 import json
@@ -11,7 +12,7 @@ import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from api_contracts import (
@@ -24,12 +25,14 @@ from api_contracts import (
 )
 from models import get_db, QuizSession, WrongAnswer, ConceptMastery, Chapter
 from learning_tracking_models import (
+    BatchExamState,
     INVALID_CHAPTER_IDS,
     LearningSession,
     SessionStatus,
     WrongAnswerV2,
     make_fingerprint,
 )
+from services.data_identity import get_request_identity, resolve_request_actor_scope
 from services.quiz_service_v2 import get_quiz_service
 from utils.data_contracts import (
     canonicalize_quiz_answers,
@@ -45,6 +48,120 @@ _exam_cache = {}
 
 # 单独存储用于细节练习的数据（不删除）
 _detail_cache = {}
+
+
+def _can_use_legacy_cache_fallback() -> bool:
+    request_user_id, request_device_id = get_request_identity()
+    return request_user_id is None and request_device_id is None
+
+
+def _load_cached_exam_payload(
+    exam_id: str,
+    *,
+    include_submitted: bool,
+) -> Dict[str, Any] | None:
+    cached_exam = _detail_cache.get(exam_id) if include_submitted else None
+    if cached_exam is None:
+        cached_exam = _exam_cache.get(exam_id)
+    if not isinstance(cached_exam, dict):
+        return None
+
+    exam = deepcopy(cached_exam)
+    exam["chapter_id"] = str(exam.get("chapter_id") or "").strip()
+    exam["chapter_prediction"] = dict(exam.get("chapter_prediction") or {})
+    exam["questions"] = canonicalize_quiz_questions(exam.get("questions") or [])
+    exam["num_questions"] = int(exam.get("num_questions") or len(exam["questions"]) or 10)
+    exam["uploaded_content"] = str(exam.get("uploaded_content") or "")
+    exam["fuzzy_options"] = dict(exam.get("fuzzy_options") or {})
+    exam["exam_wrong_questions"] = list(exam.get("exam_wrong_questions") or [])
+    return exam
+
+
+def _load_exam_payload(
+    db: Session,
+    exam_id: str,
+    *,
+    include_submitted: bool,
+) -> Dict[str, Any] | None:
+    state = _load_batch_exam_state(db, exam_id, include_submitted=include_submitted)
+    if state is not None:
+        return _serialize_batch_exam_state(state)
+    if _can_use_legacy_cache_fallback():
+        return _load_cached_exam_payload(exam_id, include_submitted=include_submitted)
+    return None
+
+
+def _load_batch_exam_state(
+    db: Session,
+    exam_id: str,
+    *,
+    include_submitted: bool,
+) -> BatchExamState | None:
+    actor = resolve_request_actor_scope()
+    query = db.query(BatchExamState).filter(BatchExamState.id == exam_id)
+    actor_keys = list(actor.get("actor_keys") or [])
+    if actor_keys:
+        query = query.filter(BatchExamState.actor_key.in_(actor_keys))
+    else:
+        query = query.filter(BatchExamState.actor_key == actor["actor_key"])
+    if not include_submitted:
+        query = query.filter(BatchExamState.submitted_at.is_(None))
+    return query.order_by(desc(BatchExamState.updated_at), desc(BatchExamState.created_at)).first()
+
+
+def _serialize_batch_exam_state(state: BatchExamState) -> Dict[str, Any]:
+    return {
+        "chapter_id": state.chapter_id or "",
+        "chapter_prediction": dict(state.chapter_prediction or {}),
+        "questions": canonicalize_quiz_questions(state.questions or []),
+        "created_at": state.created_at or datetime.now(),
+        "num_questions": int(state.num_questions or 10),
+        "uploaded_content": state.uploaded_content or "",
+        "fuzzy_options": dict(state.fuzzy_options or {}),
+        "exam_wrong_questions": list(state.exam_wrong_questions or []),
+        "score": state.score,
+        "wrong_count": state.wrong_count,
+        "submitted_at": state.submitted_at.isoformat() if state.submitted_at else None,
+    }
+
+
+def _upsert_batch_exam_state(
+    db: Session,
+    *,
+    exam_id: str,
+    exam: Dict[str, Any],
+    mark_submitted: bool | None = None,
+) -> BatchExamState:
+    actor = resolve_request_actor_scope()
+    state = _load_batch_exam_state(db, exam_id, include_submitted=True)
+    if state is None:
+        state = BatchExamState(
+            id=exam_id,
+            user_id=actor["paper_user_id"],
+            device_id=actor["paper_device_id"],
+            actor_key=actor["actor_key"],
+        )
+        db.add(state)
+
+    state.user_id = actor["paper_user_id"]
+    state.device_id = actor["paper_device_id"]
+    state.actor_key = actor["actor_key"]
+    state.chapter_id = str(exam.get("chapter_id") or "").strip() or None
+    state.chapter_prediction = dict(exam.get("chapter_prediction") or {})
+    state.questions = canonicalize_quiz_questions(exam.get("questions") or [])
+    state.num_questions = int(exam.get("num_questions") or len(state.questions) or 10)
+    state.uploaded_content = str(exam.get("uploaded_content") or "")
+    state.fuzzy_options = dict(exam.get("fuzzy_options") or {})
+    state.exam_wrong_questions = list(exam.get("exam_wrong_questions") or [])
+    state.score = int(exam.get("score")) if exam.get("score") is not None else None
+    state.wrong_count = int(exam.get("wrong_count")) if exam.get("wrong_count") is not None else None
+    if mark_submitted is True:
+        state.submitted_at = datetime.now()
+    elif mark_submitted is False:
+        state.submitted_at = None
+    state.updated_at = datetime.now()
+    db.flush()
+    return state
 
 DETAIL_PRIORITY_WEIGHTS = {
     "error_count": 3,
@@ -450,13 +567,16 @@ class ConfirmChapterRequest(BaseModel):
 
 
 @router.post("/confirm-chapter/{exam_id}", response_model=BatchExamConfirmChapterResponse)
-async def confirm_chapter(exam_id: str, request: ConfirmChapterRequest):
+async def confirm_chapter(exam_id: str, request: ConfirmChapterRequest, db: Session = Depends(get_db)):
     """用户确认/修正AI预测的章节归属，更新缓存"""
-    exam = _exam_cache.get(exam_id)
+    exam = _load_exam_payload(db, exam_id, include_submitted=False)
     if not exam:
         raise HTTPException(status_code=404, detail="试卷不存在或已过期")
     confirmed_chapter_id = _normalize_confirmed_chapter_id(request.chapter_id)
     exam["chapter_id"] = confirmed_chapter_id
+    _upsert_batch_exam_state(db, exam_id=exam_id, exam=exam, mark_submitted=False)
+    db.commit()
+    _exam_cache[exam_id] = exam
     print(f"[Exam] 章节确认: exam={exam_id}, chapter={confirmed_chapter_id or '未确认'}")
     return {"success": True, "chapter_id": confirmed_chapter_id}
 
@@ -496,6 +616,8 @@ async def generate_exam(
             "num_questions": num_questions,
             "uploaded_content": uploaded_content  # 保存原始内容用于变式题生成
         }
+        _upsert_batch_exam_state(db, exam_id=exam_id, exam=_exam_cache[exam_id], mark_submitted=False)
+        db.commit()
 
         questions_for_student = []
         knowledge_points = []
@@ -552,7 +674,7 @@ async def submit_exam(
     db: Session = Depends(get_db)
 ):
     """提交试卷 - 直接对比答案，无AI讲解"""
-    exam = _exam_cache.get(exam_id)
+    exam = _load_exam_payload(db, exam_id, include_submitted=False)
     if not exam:
         raise HTTPException(status_code=404, detail="试卷已过期或不存在")
 
@@ -907,19 +1029,21 @@ async def submit_exam(
     exam["fuzzy_options"] = exam_fuzzy_options
     exam["score"] = result.get("score")
     exam["wrong_count"] = result.get("wrong_count")
+    _upsert_batch_exam_state(db, exam_id=exam_id, exam=exam, mark_submitted=True)
 
     _detail_cache[exam_id] = exam
 
     if exam_id in _exam_cache:
         del _exam_cache[exam_id]
+    db.commit()
     
     print(f"[Exam] 批改完成: {result['score']}分")
     return result
 
 @router.get("/session/{exam_id}", response_model=BatchExamSessionResponse)
-async def get_exam(exam_id: str):
+async def get_exam(exam_id: str, db: Session = Depends(get_db)):
     """获取试卷（用于页面刷新恢复）"""
-    exam = _exam_cache.get(exam_id)
+    exam = _load_exam_payload(db, exam_id, include_submitted=False)
     if not exam:
         raise HTTPException(status_code=404, detail="试卷已过期")
 
@@ -942,11 +1066,9 @@ async def get_exam(exam_id: str):
 @router.get("/detail/{exam_id}", response_model=BatchExamDetailResponse)
 async def get_exam_for_detail(exam_id: str, db: Session = Depends(get_db)):
     """获取试卷用于细节练习（保留完整数据包括答案）"""
-    exam = _exam_cache.get(exam_id)
+    exam = _load_exam_payload(db, exam_id, include_submitted=True)
     if not exam:
-        exam = _detail_cache.get(exam_id)
-        if not exam:
-            raise HTTPException(status_code=404, detail="试卷数据已过期，请重新生成试卷")
+        raise HTTPException(status_code=404, detail="试卷数据已过期，请重新生成试卷")
 
     questions = []
     for q in exam["questions"]:

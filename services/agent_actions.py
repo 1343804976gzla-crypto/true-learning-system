@@ -30,6 +30,7 @@ from routers.wrong_answers_v2 import (
 from services.data_identity import (
     build_actor_key_aliases,
     build_actor_key,
+    build_device_scope_aliases,
     ensure_learning_identity_schema,
     resolve_actor_identity,
     resolve_query_identity,
@@ -2129,9 +2130,15 @@ def _resolve_wrong_answer_target_status(value: str) -> str:
 
 def _apply_actor_scope(query, model, *, user_id: Optional[str], device_id: Optional[str]):
     user_id, device_id = resolve_query_identity(user_id, device_id)
+    device_ids = build_device_scope_aliases(user_id, device_id)
     if user_id and hasattr(model, "user_id"):
         query = query.filter(model.user_id == user_id)
-    if device_id and hasattr(model, "device_id"):
+    if device_ids and hasattr(model, "device_id"):
+        if len(device_ids) == 1:
+            query = query.filter(model.device_id == device_ids[0])
+        else:
+            query = query.filter(model.device_id.in_(device_ids))
+    elif device_id and hasattr(model, "device_id"):
         query = query.filter(model.device_id == device_id)
     return query
 

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from agent_models import AgentMemory, AgentMessage, AgentSession, AgentToolCache, AgentToolCall
 from services.mem0_bridge import search_mem0_memories, store_mem0_memory_records
+from services.data_identity import build_device_scope_aliases, resolve_query_identity
 
 TOOL_CACHE_TTLS = {
     "get_progress_summary": 300,
@@ -96,9 +97,15 @@ def _memory_scope_query(
     user_id: str | None,
     device_id: str | None,
 ):
+    user_id, device_id = resolve_query_identity(user_id, device_id)
+    device_ids = build_device_scope_aliases(user_id, device_id)
     query = db.query(AgentMemory).join(AgentSession, AgentSession.id == AgentMemory.session_id)
     if user_id:
         return query.filter(AgentMemory.user_id == user_id)
+    if device_ids:
+        if len(device_ids) == 1:
+            return query.filter(AgentSession.device_id == device_ids[0])
+        return query.filter(AgentSession.device_id.in_(device_ids))
     if device_id:
         return query.filter(AgentSession.device_id == device_id)
     return query.filter(AgentMemory.session_id.is_(None))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
+from threading import Lock
 from typing import Any
 
 from fastapi import Request
@@ -16,6 +17,7 @@ DEFAULT_DEVICE_ID = "local-default"
 _current_device_id: ContextVar[str | None] = ContextVar("tls_device_id", default=None)
 _current_user_id: ContextVar[str | None] = ContextVar("tls_user_id", default=None)
 _IDENTITY_SCHEMA_READY = False
+_IDENTITY_SCHEMA_LOCK = Lock()
 
 _IDENTITY_TABLES = (
     "daily_uploads",
@@ -93,6 +95,36 @@ def resolve_query_identity(user_id: str | None = None, device_id: str | None = N
     return normalized_user, normalized_device
 
 
+def resolve_request_actor_scope(
+    user_id: str | None = None,
+    device_id: str | None = None,
+) -> dict[str, Any]:
+    request_user_id, request_device_id = get_request_identity()
+    candidate_user_id = _normalize_identity(user_id) or request_user_id
+    candidate_device_id = _normalize_identity(device_id)
+    if candidate_device_id is None and request_device_id and (
+        request_device_id != DEFAULT_DEVICE_ID or not candidate_user_id
+    ):
+        candidate_device_id = request_device_id
+
+    scope_user_id, scope_device_id = resolve_query_identity(candidate_user_id, candidate_device_id)
+    paper_user_id, paper_device_id = resolve_actor_identity(candidate_user_id, candidate_device_id)
+
+    return {
+        "request_user_id": request_user_id,
+        "request_device_id": request_device_id,
+        "candidate_user_id": candidate_user_id,
+        "candidate_device_id": candidate_device_id,
+        "scope_user_id": scope_user_id,
+        "scope_device_id": scope_device_id,
+        "scope_device_ids": build_device_scope_aliases(scope_user_id, scope_device_id),
+        "paper_user_id": paper_user_id,
+        "paper_device_id": paper_device_id,
+        "actor_key": build_actor_key(candidate_user_id, candidate_device_id),
+        "actor_keys": build_actor_key_aliases(candidate_user_id, candidate_device_id),
+    }
+
+
 def resolve_request_identity(request: Request) -> tuple[str | None, str | None]:
     user_id = _normalize_identity(request.headers.get(USER_ID_HEADER))
     device_id = _normalize_identity(request.headers.get(DEVICE_ID_HEADER))
@@ -165,6 +197,81 @@ def _daily_review_unique_indexes(connection: Any) -> list[list[str]]:
         ]
         unique_indexes.append(columns)
     return unique_indexes
+
+
+def _daily_learning_log_columns(connection: Any) -> set[str]:
+    return {
+        str(row[1]).lower()
+        for row in connection.exec_driver_sql("PRAGMA table_info(daily_learning_logs)").fetchall()
+    }
+
+
+def _daily_learning_log_unique_indexes(connection: Any) -> list[list[str]]:
+    unique_indexes: list[list[str]] = []
+    for row in connection.exec_driver_sql("PRAGMA index_list(daily_learning_logs)").fetchall():
+        if not bool(row[2]):
+            continue
+        index_name = str(row[1])
+        columns = [
+            str(index_row[2]).lower()
+            for index_row in connection.exec_driver_sql(f"PRAGMA index_info({index_name})").fetchall()
+        ]
+        unique_indexes.append(columns)
+    return unique_indexes
+
+
+def _rebuild_daily_learning_logs_table(connection: Any) -> None:
+    connection.exec_driver_sql("PRAGMA foreign_keys = OFF")
+    try:
+        connection.exec_driver_sql("DROP TABLE IF EXISTS daily_learning_logs_new")
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE daily_learning_logs_new (
+                id INTEGER NOT NULL PRIMARY KEY,
+                user_id TEXT,
+                device_id TEXT,
+                actor_key TEXT NOT NULL,
+                date DATE NOT NULL,
+                total_sessions INTEGER DEFAULT 0,
+                total_questions INTEGER DEFAULT 0,
+                total_correct INTEGER DEFAULT 0,
+                total_wrong INTEGER DEFAULT 0,
+                average_score FLOAT DEFAULT 0.0,
+                total_duration_seconds INTEGER DEFAULT 0,
+                first_session_at DATETIME,
+                last_session_at DATETIME,
+                knowledge_points_covered JSON,
+                weak_knowledge_points JSON,
+                session_ids JSON,
+                created_at DATETIME,
+                updated_at DATETIME,
+                CONSTRAINT uq_daily_learning_logs_actor_date UNIQUE (actor_key, date)
+            )
+            """
+        )
+        connection.exec_driver_sql("DROP TABLE IF EXISTS daily_learning_logs")
+        connection.exec_driver_sql("ALTER TABLE daily_learning_logs_new RENAME TO daily_learning_logs")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_daily_learning_logs_user_id ON daily_learning_logs(user_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_daily_learning_logs_device_id ON daily_learning_logs(device_id)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_daily_learning_logs_actor_key ON daily_learning_logs(actor_key)")
+        connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_daily_learning_logs_date ON daily_learning_logs(date)")
+    finally:
+        connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+
+
+def _ensure_daily_learning_log_schema(connection: Any) -> None:
+    existing_columns = _daily_learning_log_columns(connection)
+    if not existing_columns:
+        return
+
+    unique_indexes = _daily_learning_log_unique_indexes(connection)
+    has_actor_columns = {"user_id", "device_id", "actor_key"}.issubset(existing_columns)
+    has_actor_date_unique = ["actor_key", "date"] in unique_indexes
+    has_legacy_date_unique = ["date"] in unique_indexes
+    if has_actor_columns and has_actor_date_unique and not has_legacy_date_unique:
+        return
+
+    _rebuild_daily_learning_logs_table(connection)
 
 
 def _rebuild_daily_review_papers_table(connection: Any, existing_columns: set[str]) -> None:
@@ -308,30 +415,35 @@ def ensure_learning_identity_schema() -> None:
     if _IDENTITY_SCHEMA_READY:
         return
 
-    with engine.begin() as connection:
-        dialect = connection.dialect.name
-        if dialect != "sqlite":
-            _IDENTITY_SCHEMA_READY = True
+    with _IDENTITY_SCHEMA_LOCK:
+        if _IDENTITY_SCHEMA_READY:
             return
 
-        for table_name in _IDENTITY_TABLES:
-            existing_columns = {
-                str(row[1]).lower()
-                for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
-            }
-            if not existing_columns:
-                continue
+        with engine.begin() as connection:
+            dialect = connection.dialect.name
+            if dialect != "sqlite":
+                _IDENTITY_SCHEMA_READY = True
+                return
 
-            if "user_id" not in existing_columns:
-                connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN user_id TEXT")
-            if "device_id" not in existing_columns:
-                connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN device_id TEXT")
+            for table_name in _IDENTITY_TABLES:
+                existing_columns = {
+                    str(row[1]).lower()
+                    for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+                }
+                if not existing_columns:
+                    continue
 
-            connection.exec_driver_sql(
-                f"UPDATE {table_name} SET device_id = ? WHERE device_id IS NULL OR TRIM(device_id) = ''",
-                (DEFAULT_DEVICE_ID,),
-            )
+                if "user_id" not in existing_columns:
+                    connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN user_id TEXT")
+                if "device_id" not in existing_columns:
+                    connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN device_id TEXT")
 
-        _ensure_daily_review_paper_schema(connection)
+                connection.exec_driver_sql(
+                    f"UPDATE {table_name} SET device_id = ? WHERE device_id IS NULL OR TRIM(device_id) = ''",
+                    (DEFAULT_DEVICE_ID,),
+                )
 
-    _IDENTITY_SCHEMA_READY = True
+            _ensure_daily_review_paper_schema(connection)
+            _ensure_daily_learning_log_schema(connection)
+
+            _IDENTITY_SCHEMA_READY = True
