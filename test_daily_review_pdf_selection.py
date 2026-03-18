@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -15,6 +16,19 @@ from routers.wrong_answers_v2 import (
     _sort_supplement_candidates,
 )
 from services.data_identity import DEFAULT_DEVICE_ID, build_actor_key
+
+
+@pytest.fixture(autouse=True)
+def disable_single_user_mode(monkeypatch):
+    from services.data_identity import clear_identity_caches_for_tests
+
+    monkeypatch.setenv("SINGLE_USER_MODE", "false")
+    clear_identity_caches_for_tests()
+    try:
+        yield
+    finally:
+        monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+        clear_identity_caches_for_tests()
 
 
 def _candidate(

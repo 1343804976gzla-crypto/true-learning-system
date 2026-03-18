@@ -27,6 +27,19 @@ Base.metadata.create_all(bind=_test_engine)
 _TestSession = sessionmaker(bind=_test_engine)
 
 
+@pytest.fixture(autouse=True)
+def disable_single_user_mode(monkeypatch):
+    from services.data_identity import clear_identity_caches_for_tests
+
+    monkeypatch.setenv("SINGLE_USER_MODE", "false")
+    clear_identity_caches_for_tests()
+    try:
+        yield
+    finally:
+        monkeypatch.delenv("SINGLE_USER_MODE", raising=False)
+        clear_identity_caches_for_tests()
+
+
 @pytest.fixture
 def db_session():
     connection = _test_engine.connect()
