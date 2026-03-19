@@ -8,7 +8,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from agent_models import AgentActionLog, AgentSession, AgentTask, AgentTaskEvent, AgentTurnState
-from services.data_identity import build_device_scope_aliases, resolve_query_identity
+from services.data_identity import build_device_scope_aliases, canonicalize_storage_identity, resolve_query_identity
 from services.agent_runtime import AGENT_IDENTITY_REQUIRED, AgentIdentityRequiredError, ensure_agent_schema
 from utils.agent_contracts import (
     AgentActionLogItem,
@@ -452,12 +452,16 @@ def create_agent_task(
 
     title = _resolve_task_title(payload, session, plan_bundle)
     goal = _resolve_task_goal(payload, plan_bundle, title)
+    stored_user_id, stored_device_id = canonicalize_storage_identity(
+        payload.user_id or session.user_id,
+        payload.device_id or session.device_id,
+    )
     now = datetime.now()
     task = AgentTask(
         id=uuid4().hex,
         session_id=session.id,
-        user_id=payload.user_id or session.user_id,
-        device_id=payload.device_id or session.device_id,
+        user_id=stored_user_id,
+        device_id=stored_device_id,
         related_turn_state_id=payload.related_turn_state_id,
         title=title,
         goal=goal,

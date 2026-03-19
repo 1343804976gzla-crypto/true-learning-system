@@ -31,6 +31,7 @@ from services.data_identity import (
     build_actor_key_aliases,
     build_actor_key,
     build_device_scope_aliases,
+    canonicalize_storage_identity,
     ensure_learning_identity_schema,
     resolve_actor_identity,
     resolve_query_identity,
@@ -2079,6 +2080,10 @@ def _upsert_action_log(
     related_task_id: Optional[str],
 ) -> AgentActionLog:
     now = datetime.now()
+    stored_user_id, stored_device_id = canonicalize_storage_identity(
+        payload.user_id or session.user_id,
+        payload.device_id or session.device_id,
+    )
     if action_log is None:
         action_log = AgentActionLog(
             id=str(uuid4()),
@@ -2087,8 +2092,8 @@ def _upsert_action_log(
         )
         db.add(action_log)
 
-    action_log.user_id = payload.user_id or session.user_id
-    action_log.device_id = payload.device_id or session.device_id
+    action_log.user_id = stored_user_id
+    action_log.device_id = stored_device_id
     action_log.related_task_id = related_task_id
     action_log.tool_name = tool_definition.name
     action_log.tool_type = tool_definition.tool_type

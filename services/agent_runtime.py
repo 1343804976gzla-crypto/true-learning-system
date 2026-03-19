@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 import os
 import threading
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any, AsyncIterator, Dict, List, Optional
 import json
 import re
@@ -1521,6 +1521,15 @@ def _build_action_suggestions(
         [item.get("id") for item in wrong_answer_items if item.get("mastery_status") == "active"],
         limit=8,
     )
+    if not active_wrong_ids:
+        active_wrong_ids = _safe_int_list(
+            [
+                item.get("id")
+                for item in wrong_answer_items
+                if str(item.get("mastery_status") or "").strip().lower() != "archived"
+            ],
+            limit=8,
+        )
     archivable_wrong_ids = _safe_int_list(
         [
             item.get("id")
@@ -2656,6 +2665,25 @@ def _resolve_session_for_payload(db: Session, payload: AgentChatRequest) -> Agen
                     )
                     if session is None:
                         raise AgentDuplicateRequestInProgressError(AGENT_DUPLICATE_REQUEST_IN_PROGRESS)
+                except OperationalError as exc:
+                    db.rollback()
+                    if not _is_retryable_sqlite_lock_error(exc):
+                        raise
+
+                    session = None
+                    for _ in range(30):
+                        session = get_session_for_actor_or_none(
+                            db,
+                            deterministic_session_id,
+                            user_id=payload.user_id,
+                            device_id=payload.device_id,
+                        )
+                        if session is not None:
+                            break
+                        sleep(0.05)
+
+                    if session is None:
+                        raise AgentDuplicateRequestInProgressError(AGENT_DUPLICATE_REQUEST_IN_PROGRESS) from exc
                 else:
                     db.refresh(session)
 

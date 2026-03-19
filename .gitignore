@@ -12,13 +12,29 @@ env/
 
 # Local configuration
 .env
+.claude/
+.serena/
+.edge-headless/
+.pw-browsers/
 
 # Local databases and logs
 *.db
+*.db-journal
 *.sqlite
 *.sqlite3
 *.log
 .gitnexus
+*.png
+test-results/
+stress_test_outputs/
+data/*backup*
+data/mem0_qdrant/
+data/mem0_runtime/
+data/openviking_bulk_test/
+data/openviking_exports/
+data/agent_inline_check.js
+data/agent_template_check.js
+learning.db.legacy.detached.*
 
 # Node / Next
 node_modules/
