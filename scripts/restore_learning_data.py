@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sqlite3
 from dataclasses import dataclass
@@ -63,6 +64,29 @@ TEST_CHAPTER_PREFIXES = (
     "contract",
 )
 
+AUDIT_CHANGE_LOG_DDL = """
+CREATE TABLE IF NOT EXISTS audit_change_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain_name TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    public_id TEXT,
+    action TEXT NOT NULL,
+    actor_key TEXT,
+    user_id TEXT,
+    device_id TEXT,
+    request_id TEXT,
+    trace_id TEXT,
+    source TEXT,
+    origin_event_type TEXT,
+    origin_public_id TEXT,
+    before_json TEXT,
+    after_json TEXT,
+    changed_fields TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 
 @dataclass
 class RestoreSummary:
@@ -96,6 +120,46 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA busy_timeout = 30000")
     return conn
+
+
+def ensure_audit_table(conn: sqlite3.Connection) -> None:
+    conn.execute(AUDIT_CHANGE_LOG_DDL)
+
+
+def write_script_audit(
+    conn: sqlite3.Connection,
+    *,
+    entity_type: str,
+    entity_id: str,
+    action: str,
+    after_payload: dict[str, Any],
+    origin_event_type: str,
+    origin_public_id: str,
+    domain_name: str = "shadow",
+) -> None:
+    ensure_audit_table(conn)
+    conn.execute(
+        """
+        INSERT INTO audit_change_log (
+            domain_name, entity_type, entity_id, public_id, action,
+            actor_key, source, origin_event_type, origin_public_id,
+            after_json, changed_fields
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            domain_name,
+            entity_type,
+            entity_id,
+            origin_public_id,
+            action,
+            "system:script",
+            "script",
+            origin_event_type,
+            origin_public_id,
+            json.dumps(after_payload, ensure_ascii=False, sort_keys=True),
+            json.dumps(sorted(after_payload.keys()), ensure_ascii=False),
+        ),
+    )
 
 
 def normalize_text(value: Any) -> str:
@@ -427,6 +491,30 @@ def main() -> None:
         import_recent_wrong_answer_retries(current_conn, output_conn, wrong_answer_id_map, summary)
         import_recent_quiz_sessions(current_conn, output_conn, summary)
 
+        output_conn.commit()
+        script_summary = {
+            "current": str(current_path),
+            "source": str(source_path),
+            "output": str(output_path),
+            "cleaned_wrong_answers": summary.cleaned_wrong_answers,
+            "cleaned_question_records": summary.cleaned_question_records,
+            "cleaned_learning_sessions": summary.cleaned_learning_sessions,
+            "cleaned_wrong_answer_retries": summary.cleaned_wrong_answer_retries,
+            "imported_learning_sessions": summary.imported_learning_sessions,
+            "imported_question_records": summary.imported_question_records,
+            "imported_wrong_answers": summary.imported_wrong_answers,
+            "imported_wrong_answer_retries": summary.imported_wrong_answer_retries,
+            "imported_quiz_sessions": summary.imported_quiz_sessions,
+        }
+        write_script_audit(
+            output_conn,
+            entity_type="restore_learning_data",
+            entity_id=f"restore:{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            action="script_run",
+            after_payload=script_summary,
+            origin_event_type="script.restore_learning_data",
+            origin_public_id=str(output_path),
+        )
         output_conn.commit()
         print_counts("restored-output", output_conn)
         print(

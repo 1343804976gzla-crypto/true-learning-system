@@ -530,6 +530,7 @@ def _rollback_agent_action(
             action_log=action_log,
         )
         now = datetime.now()
+        before_action_log_snapshot = model_to_audit_dict(action_log)
         merged_result = dict(action_log.result or {})
         merged_result["rollback"] = {
             **rollback_result.result,
@@ -552,6 +553,18 @@ def _rollback_agent_action(
                     action_log=action_log,
                     auto_commit=False,
                 )
+        db.flush([action_log])
+        log_audit_change(
+            db=db,
+            target=action_log,
+            action="update",
+            before=before_action_log_snapshot,
+            after=action_log,
+            user_id=action_log.user_id,
+            device_id=action_log.device_id,
+            origin_event_type="agent.action_log.rollback",
+            origin_public_id=action_log.id,
+        )
         db.commit()
         db.refresh(action_log)
         return AgentActionExecuteResponse(
@@ -860,12 +873,25 @@ def _rollback_update_wrong_answer_status(
     if len(items) != len(wrong_answer_ids):
         raise ValueError("待回滚的错题已发生变化")
 
+    before_snapshots = {int(item.id): model_to_audit_dict(item) or {} for item in items}
     for item in items:
         item.mastery_status = str(previous_statuses.get(int(item.id)) or "active")
         item.archived_at = _parse_iso_datetime(previous_archived_at.get(int(item.id)))
         item.updated_at = datetime.now()
 
     db.flush()
+    for item in items:
+        log_audit_change(
+            db=db,
+            target=item,
+            action="update",
+            before=before_snapshots.get(int(item.id)),
+            after=item,
+            user_id=item.user_id,
+            device_id=item.device_id,
+            origin_event_type="agent.rollback_update_wrong_answer_status",
+            origin_public_id=str(item.id),
+        )
 
     refreshed = db.query(WrongAnswerV2).filter(WrongAnswerV2.id.in_(wrong_answer_ids)).all()
     all_verified = all(
@@ -1026,6 +1052,7 @@ def _rollback_update_concept_mastery(
     if len(concepts) != len(concept_ids):
         raise ValueError("待回滚的知识点已发生变化")
 
+    before_snapshots = {concept.concept_id: model_to_audit_dict(concept) or {} for concept in concepts}
     for concept in concepts:
         previous = previous_map.get(concept.concept_id)
         if previous is None:
@@ -1037,6 +1064,18 @@ def _rollback_update_concept_mastery(
         concept.next_review = _parse_iso_date(previous.get("next_review"))
 
     db.flush()
+    for concept in concepts:
+        log_audit_change(
+            db=db,
+            target=concept,
+            action="update",
+            before=before_snapshots.get(concept.concept_id),
+            after=concept,
+            user_id=concept.user_id,
+            device_id=concept.device_id,
+            origin_event_type="agent.rollback_update_concept_mastery",
+            origin_public_id=concept.concept_id,
+        )
 
     refreshed = db.query(ConceptMastery).filter(ConceptMastery.concept_id.in_(concept_ids)).all()
     refreshed_map = {concept.concept_id: concept for concept in refreshed}
@@ -1281,6 +1320,18 @@ def _rollback_generate_quiz_set(
         if learning_session_id
         else None
     )
+    learning_session_snapshot = model_to_audit_dict(learning_session) if learning_session is not None else None
+    question_record_snapshots = [
+        (record, model_to_audit_dict(record) or {})
+        for record in (
+            db.query(QuestionRecord)
+            .filter(QuestionRecord.session_id == learning_session_id)
+            .order_by(QuestionRecord.question_index.asc(), QuestionRecord.id.asc())
+            .all()
+            if learning_session_id
+            else []
+        )
+    ]
     if learning_session is not None:
         db.delete(learning_session)
 
@@ -1291,9 +1342,41 @@ def _rollback_generate_quiz_set(
         if quiz_session_id is not None
         else None
     )
+    quiz_session_snapshot = model_to_audit_dict(quiz_session) if quiz_session is not None else None
     if quiz_session is not None:
         db.delete(quiz_session)
 
+    for question_record, snapshot in question_record_snapshots:
+        log_audit_change(
+            db=db,
+            target=question_record,
+            action="delete",
+            before=snapshot,
+            user_id=question_record.user_id,
+            device_id=question_record.device_id,
+            origin_event_type="agent.rollback_generate_quiz_set",
+            origin_public_id=learning_session_id,
+        )
+    if learning_session is not None:
+        log_audit_change(
+            db=db,
+            target=learning_session,
+            action="delete",
+            before=learning_session_snapshot,
+            user_id=learning_session.user_id,
+            device_id=learning_session.device_id,
+            origin_event_type="agent.rollback_generate_quiz_set",
+            origin_public_id=learning_session.id,
+        )
+    if quiz_session is not None:
+        log_audit_change(
+            db=db,
+            target=quiz_session,
+            action="delete",
+            before=quiz_session_snapshot,
+            origin_event_type="agent.rollback_generate_quiz_set",
+            origin_public_id=str(quiz_session.id),
+        )
     db.flush()
 
     remaining_learning_session = (
@@ -1501,6 +1584,7 @@ def _rollback_create_daily_review_paper(
         actor_key=actor_key,
         actor_keys=actor_keys,
     )
+    before_paper_snapshot = model_to_audit_dict(paper) if paper is not None else None
 
     if existing_snapshot:
         if paper is None:
@@ -1515,9 +1599,37 @@ def _rollback_create_daily_review_paper(
             db.flush()
         _restore_daily_review_paper_snapshot(paper, existing_snapshot)
     elif paper is not None:
+        log_audit_change(
+            db=db,
+            target=paper,
+            action="delete",
+            before=before_paper_snapshot,
+            actor={
+                "actor_key": actor_key,
+                "paper_user_id": paper.user_id,
+                "paper_device_id": paper.device_id,
+            },
+            origin_event_type="agent.rollback_create_daily_review_paper",
+            origin_public_id=f"{actor_key}:{paper_date.isoformat()}",
+        )
         db.delete(paper)
 
     db.flush()
+    if existing_snapshot and paper is not None:
+        log_audit_change(
+            db=db,
+            target=paper,
+            action="update" if before_paper_snapshot is not None else "create",
+            before=before_paper_snapshot,
+            after=paper,
+            actor={
+                "actor_key": actor_key,
+                "paper_user_id": paper.user_id,
+                "paper_device_id": paper.device_id,
+            },
+            origin_event_type="agent.rollback_create_daily_review_paper",
+            origin_public_id=f"{actor_key}:{paper_date.isoformat()}",
+        )
 
     restored_paper = _get_daily_review_paper_for_actor(
         db,

@@ -17,8 +17,10 @@ from api_contracts import (
     QuizSessionStartResponse,
     QuizSessionSubmitResponse,
 )
+from database.audit import log_audit_change, model_to_audit_dict
 from models import get_db, WrongAnswer, QuizSession, ConceptMastery, Chapter, TestRecord
 from schemas import QuizResponse, QuizSubmitRequest, QuizResultResponse
+from services.data_identity import build_actor_key, get_request_identity
 from utils.answer import answers_match
 from utils.data_contracts import (
     canonicalize_quiz_answers,
@@ -34,6 +36,15 @@ def _normalize_legacy_question_payload(item: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(item or {})
     payload["options"] = normalize_option_map(payload.get("options"))
     return payload
+
+
+def _legacy_audit_actor() -> Dict[str, Any]:
+    user_id, device_id = get_request_identity()
+    return {
+        "paper_user_id": user_id,
+        "paper_device_id": device_id,
+        "actor_key": build_actor_key(user_id, device_id),
+    }
 
 
 @router.post("/start/{chapter_id}", response_model=QuizSessionStartResponse)
@@ -139,6 +150,16 @@ async def start_quiz(
         score=0
     )
     db.add(session)
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=session,
+        action="create",
+        after=session,
+        actor=_legacy_audit_actor(),
+        origin_event_type="legacy_quiz_new.start",
+        origin_public_id=str(session.id),
+    )
     db.commit()
     
     normalized_questions = [_normalize_legacy_question_payload(question) for question in normalized_questions]
@@ -167,6 +188,9 @@ async def submit_quiz(
     # 记录答案
     answers = []
     correct_count = 0
+    audit_actor = _legacy_audit_actor()
+    before_session_snapshot = model_to_audit_dict(session)
+    wrong_audit_entries: List[tuple[WrongAnswer, Optional[Dict[str, Any]]]] = []
     
     for idx, answer in enumerate(data.answers):
         question = session.questions[idx] if idx < len(session.questions) else None
@@ -197,6 +221,7 @@ async def submit_quiz(
                 WrongAnswer.question == question["question"]
             ).first()
             
+            before_wrong_snapshot = model_to_audit_dict(existing) if existing else None
             if existing:
                 # 更新错误次数
                 existing.review_count += 1
@@ -220,12 +245,37 @@ async def submit_quiz(
                     is_mastered=False
                 )
                 db.add(wrong_answer)
+                wrong_audit_entries.append((wrong_answer, None))
+            if existing:
+                wrong_audit_entries.append((existing, before_wrong_snapshot))
     
     # 更新会话
     session.answers = canonicalize_quiz_answers(answers)
     session.correct_count = correct_count
     session.score = int(correct_count / 10 * 100)
     session.completed_at = datetime.now()
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=session,
+        action="update",
+        before=before_session_snapshot,
+        after=session,
+        actor=audit_actor,
+        origin_event_type="legacy_quiz_new.submit",
+        origin_public_id=str(session.id),
+    )
+    for wrong_entry, before_snapshot in wrong_audit_entries:
+        log_audit_change(
+            db=db,
+            target=wrong_entry,
+            action="create" if before_snapshot is None else "update",
+            before=before_snapshot,
+            after=wrong_entry,
+            actor=audit_actor,
+            origin_event_type="legacy_quiz_new.submit",
+            origin_public_id=str(getattr(wrong_entry, "id", "") or session.id),
+        )
     db.commit()
     
     return {
@@ -293,6 +343,7 @@ async def review_wrong_answer(
         raise HTTPException(status_code=404, detail="错题不存在")
     
     # 更新复习状态
+    before_wrong_snapshot = model_to_audit_dict(wrong)
     wrong.review_count += 1
     wrong.last_reviewed = datetime.now()
     
@@ -314,6 +365,17 @@ async def review_wrong_answer(
         wrong.is_mastered = False
         wrong.next_review = date.today() + timedelta(days=1)  # 明天再复习
     
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=wrong,
+        action="update",
+        before=before_wrong_snapshot,
+        after=wrong,
+        actor=_legacy_audit_actor(),
+        origin_event_type="legacy_quiz_new.review_wrong_answer",
+        origin_public_id=str(wrong.id),
+    )
     db.commit()
     
     return {

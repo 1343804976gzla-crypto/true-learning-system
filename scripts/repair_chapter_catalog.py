@@ -45,6 +45,29 @@ TITLE_REPLACEMENTS = (
     ("胆系疾病2", "胆系疾病"),
 )
 
+AUDIT_CHANGE_LOG_DDL = """
+CREATE TABLE IF NOT EXISTS audit_change_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain_name TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    public_id TEXT,
+    action TEXT NOT NULL,
+    actor_key TEXT,
+    user_id TEXT,
+    device_id TEXT,
+    request_id TEXT,
+    trace_id TEXT,
+    source TEXT,
+    origin_event_type TEXT,
+    origin_public_id TEXT,
+    before_json TEXT,
+    after_json TEXT,
+    changed_fields TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 
 def resolve_active_db(project_dir: Path) -> Path:
     load_dotenv(project_dir / ".env")
@@ -65,6 +88,46 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA busy_timeout = 30000")
     return conn
+
+
+def ensure_audit_table(conn: sqlite3.Connection) -> None:
+    conn.execute(AUDIT_CHANGE_LOG_DDL)
+
+
+def write_script_audit(
+    conn: sqlite3.Connection,
+    *,
+    entity_type: str,
+    entity_id: str,
+    action: str,
+    after_payload: dict[str, Any],
+    origin_event_type: str,
+    origin_public_id: str,
+    domain_name: str = "shadow",
+) -> None:
+    ensure_audit_table(conn)
+    conn.execute(
+        """
+        INSERT INTO audit_change_log (
+            domain_name, entity_type, entity_id, public_id, action,
+            actor_key, source, origin_event_type, origin_public_id,
+            after_json, changed_fields
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            domain_name,
+            entity_type,
+            entity_id,
+            origin_public_id,
+            action,
+            "system:script",
+            "script",
+            origin_event_type,
+            origin_public_id,
+            json.dumps(after_payload, ensure_ascii=False, sort_keys=True),
+            json.dumps(sorted(after_payload.keys()), ensure_ascii=False),
+        ),
+    )
 
 
 def parse_concepts(raw: Any) -> list[dict[str, Any]]:
@@ -407,6 +470,20 @@ def repair(active_db: Path, source_db: Path, report_path: Path, catalog_json: Pa
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    audit_conn = connect(active_db)
+    try:
+        write_script_audit(
+            audit_conn,
+            entity_type="repair_chapter_catalog",
+            entity_id=f"repair:{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            action="script_run",
+            after_payload=report,
+            origin_event_type="script.repair_chapter_catalog",
+            origin_public_id=str(report_path),
+        )
+        audit_conn.commit()
+    finally:
+        audit_conn.close()
     return report
 
 
