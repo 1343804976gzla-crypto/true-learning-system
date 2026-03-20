@@ -29,6 +29,12 @@ from services.llm_audit import (
 BASE_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(BASE_DIR / ".env")
 
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 # Type alias: (client, model, display_name)
@@ -442,14 +448,6 @@ class AIClient:
         """
         if not pool:
             raise RuntimeError(f"{pool_name}池为空，无可用模型")
-
-        if audit_context is not None:
-            try:
-                pool_limit = int(audit_context.get("llm_pool_limit") or 0)
-            except Exception:
-                pool_limit = 0
-            if pool_limit > 0:
-                pool = pool[:pool_limit]
 
         deadline = _time.time() + timeout
         last_error: Optional[Exception] = None

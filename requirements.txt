@@ -12,7 +12,6 @@ aiofiles>=23.2.0
 # AI API
 openai>=1.0.0
 httpx>=0.25.0
-llmlingua>=0.2.2
 
 # 数据库
 sqlalchemy>=2.0.23
