@@ -8,6 +8,8 @@ import asyncio
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -31,6 +33,8 @@ from utils.data_contracts import (
     normalize_confidence,
     normalize_option_map,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 
@@ -69,7 +73,7 @@ async def generate_quiz(
             concept_name=concept.name
         )
     except Exception as e:
-        print(f"AI生成题目失败: {e}")
+        logger.error("AI生成题目失败: %s", e)
         # 返回默认题目
         quiz_data = {
             "question": f"关于{concept.name}，以下说法正确的是？",
@@ -127,7 +131,7 @@ async def submit_answer(
             confidence=normalized_confidence
         )
     except Exception as e:
-        print(f"AI批改失败: {e}")
+        logger.error("AI批改失败: %s", e)
         # 返回默认批改结果
         is_correct = answers_match(data.user_answer, test.ai_correct_answer)
         grading_result = {
@@ -289,7 +293,7 @@ async def start_quiz(
                     "quiz_data": quiz_data
                 }
             except Exception as e:
-                print(f"生成题目失败 for {concept.name}: {e}")
+                logger.error("生成题目失败 for %s: %s", concept.name, e)
                 return {
                     "success": False,
                     "concept": concept,

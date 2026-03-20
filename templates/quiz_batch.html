@@ -2728,14 +2728,14 @@
     }
 
     function buildMaskedExplanationHtml(explanation, isCorrect, confidence, revealId, keyPoint) {
-        const text = escapeHtml(explanation) || '暂无解析';  // ✅ 转义解析文本
+        const text = escapeHtml((explanation || '').toString().trim()) || '暂无解析';  // ✅ 转义解析文本
         const keyPointText = escapeHtml(keyPoint) || '未标注';  // ✅ 转义考点
         const keyPointHtml = '<div class="mt-2 text-sm text-blue-600"><span class="font-medium">核心考点：</span>' + keyPointText + '</div>';
         const shouldGate = !!explanation && (!isCorrect || confidence === 'unsure' || confidence === 'no');
 
         if (!shouldGate) {
             return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div>' +
-                '<p class="text-gray-600 text-sm">' + text + '</p>' +
+                '<div class="text-gray-600 text-sm whitespace-pre-line leading-7">' + text + '</div>' +
                 keyPointHtml + '</div>';
         }
 
@@ -2746,7 +2746,7 @@
             '<button type="button" onclick="revealMaskedExplanation(\'' + revealId + '\', this)" ' +
             'class="w-full text-left bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 rounded-lg text-sm hover:bg-amber-100 transition">' +
             gateText + '</button>' +
-            '<p id="' + revealId + '" class="text-gray-600 text-sm mt-3 hidden">' + text + '</p>' +
+            '<div id="' + revealId + '" class="text-gray-600 text-sm mt-3 hidden whitespace-pre-line leading-7">' + text + '</div>' +
             keyPointHtml + '</div>';
     }
 

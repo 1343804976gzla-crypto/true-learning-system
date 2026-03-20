@@ -8,6 +8,7 @@ compatibility and adds the new knowledge-upload workspace API used by
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Any, Dict, Optional
 
@@ -22,6 +23,7 @@ from services.data_identity import resolve_request_actor_scope
 from services.knowledge_upload_service import get_knowledge_upload_service
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=UploadResponse)
@@ -39,7 +41,7 @@ async def upload_content(
 
     start_time = time.time()
     content_length = len(data.content)
-    print(f"[Upload] start legacy parse, content_length={content_length}")
+    logger.info("[Upload] start legacy parse, content_length=%d", content_length)
 
     try:
         if not data.content or not data.content.strip():

@@ -1164,13 +1164,13 @@
     }
 
     function buildMaskedExplanationHtml(explanation, isCorrect, confidence, revealId) {
-        const text = explanation || '暂无解析';
+        const text = escapeHtml((explanation || '').toString().trim()) || '暂无解析';
         if (!explanation || (isCorrect && confidence === 'sure')) {
-            return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div><p class="text-gray-600 text-sm">' + text + '</p></div>';
+            return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div><div class="text-gray-600 text-sm whitespace-pre-line leading-7">' + text + '</div></div>';
         }
         return '<div class="bg-gray-50 p-4 rounded-lg"><div class="font-medium text-gray-700 mb-2">解析</div>' +
             '<button type="button" onclick="revealMaskedExplanation(\'' + revealId + '\', this)" class="w-full text-left bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 rounded-lg text-sm hover:bg-amber-100 transition">先自行反思后，再查看解析</button>' +
-            '<p id="' + revealId + '" class="text-gray-600 text-sm mt-3 hidden">' + text + '</p></div>';
+            '<div id="' + revealId + '" class="text-gray-600 text-sm mt-3 hidden whitespace-pre-line leading-7">' + text + '</div></div>';
     }
 
     async function loadExamData() {

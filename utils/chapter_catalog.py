@@ -28,10 +28,102 @@ _SYNTHETIC_ID_PATTERNS = (
     re.compile(r"^chapter-[0-9a-f]{8,}$", re.IGNORECASE),
     re.compile(r"^[a-z0-9-]+-[0-9a-f]{8,}-chapter(?:-[a-z])?$", re.IGNORECASE),
 )
+_CANONICAL_CATALOG_ID_PATTERNS = (
+    re.compile(r"^physio_ch\d{1,2}$", re.IGNORECASE),
+    re.compile(r"^internal_ch\d{1,2}$", re.IGNORECASE),
+    re.compile(r"^surgery_ch\d{1,2}$", re.IGNORECASE),
+    re.compile(r"^biochem_ch\d{1,2}$", re.IGNORECASE),
+    re.compile(r"^patho_ch\d{1,2}$", re.IGNORECASE),
+    re.compile(r"^medical_humanities_ch\d{1,2}$", re.IGNORECASE),
+)
+
+BOOK_ALIASES: dict[str, tuple[str, ...]] = {
+    "内科学": (
+        "内科学",
+        "内科",
+        "内科含诊断",
+        "内科含诊断+部分外科",
+        "内科含诊断（含部分外科）",
+        "内科含诊断(含部分外科)",
+        "Internal Medicine",
+    ),
+    "外科学": (
+        "外科学",
+        "外科",
+        "Surgery",
+    ),
+    "生理学": (
+        "生理学",
+        "生理",
+        "Physiology",
+    ),
+    "生物化学": (
+        "生物化学",
+        "生化",
+        "Biochemistry",
+    ),
+    "病理学": (
+        "病理学",
+        "病理",
+        "Pathology",
+    ),
+    "医学人文": (
+        "医学人文",
+        "人文",
+        "Medical Humanities",
+    ),
+}
 
 
 def _clean_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def normalize_book_name(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+
+    for canonical, aliases in BOOK_ALIASES.items():
+        if text == canonical:
+            return canonical
+        for alias in aliases:
+            if text == alias:
+                return canonical
+    return text
+
+
+def extract_book_name_from_text(text: Any, allowed_books: Iterable[str] | None = None) -> str:
+    raw_text = _clean_text(text)
+    if not raw_text:
+        return ""
+
+    allowed = {
+        normalize_book_name(item)
+        for item in (allowed_books or [])
+        if normalize_book_name(item)
+    }
+
+    candidates: list[tuple[int, str, str]] = []
+    for canonical, aliases in BOOK_ALIASES.items():
+        if allowed and canonical not in allowed:
+            continue
+        for alias in aliases:
+            if alias and alias in raw_text:
+                candidates.append((len(alias), canonical, alias))
+
+    if not candidates:
+        return ""
+
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return candidates[0][1]
+
+
+def is_canonical_catalog_chapter_id(chapter_id: Any) -> bool:
+    cid = _clean_text(chapter_id)
+    if not cid:
+        return False
+    return any(pattern.match(cid) for pattern in _CANONICAL_CATALOG_ID_PATTERNS)
 
 
 def chinese_numeral_to_int(raw: str) -> int | None:
@@ -153,7 +245,7 @@ def is_batch_catalog_chapter(
 
 def _chapter_identity_key(row: Mapping[str, Any]) -> tuple[str, tuple[tuple[int, Any], ...], str]:
     return (
-        _clean_text(row.get("book")).lower(),
+        normalize_book_name(row.get("book")).lower(),
         chapter_number_sort_key(row.get("chapter_number")),
         _clean_text(row.get("chapter_title")).lower(),
     )
@@ -173,7 +265,7 @@ def _chapter_preference_key(row: Mapping[str, Any]) -> tuple[int, int, int, str]
 
 def chapter_row_sort_key(row: Mapping[str, Any]) -> tuple[str, tuple[tuple[int, Any], ...], str, str]:
     return (
-        _clean_text(row.get("book")).lower(),
+        normalize_book_name(row.get("book")).lower(),
         chapter_number_sort_key(row.get("chapter_number")),
         _clean_text(row.get("chapter_title")).lower(),
         _clean_text(row.get("id")).lower(),
@@ -186,7 +278,7 @@ def clean_batch_chapter_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str
     for raw in rows:
         row = {
             "id": _clean_text(raw.get("id")),
-            "book": _clean_text(raw.get("book")),
+            "book": normalize_book_name(raw.get("book")),
             "chapter_number": _clean_text(raw.get("chapter_number")),
             "chapter_title": _clean_text(raw.get("chapter_title")),
         }
@@ -203,4 +295,6 @@ def clean_batch_chapter_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str
         if existing is None or _chapter_preference_key(row) < _chapter_preference_key(existing):
             deduped[identity_key] = row
 
-    return sorted(deduped.values(), key=chapter_row_sort_key)
+    cleaned_rows = sorted(deduped.values(), key=chapter_row_sort_key)
+    canonical_rows = [row for row in cleaned_rows if is_canonical_catalog_chapter_id(row.get("id"))]
+    return canonical_rows or cleaned_rows

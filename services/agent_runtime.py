@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 import os
@@ -60,6 +61,8 @@ from utils.agent_contracts import (
     AgentTurnStateItem,
     AgentToolCallItem,
 )
+
+logger = logging.getLogger(__name__)
 
 _AGENT_SCHEMA_READY = False
 DEFAULT_AGENT_PROVIDER = "deepseek"
@@ -599,6 +602,7 @@ def create_session(db: Session, payload: AgentSessionCreateRequest) -> AgentSess
     db.add(session)
     db.commit()
     db.refresh(session)
+    logger.info("[AGENT_SESSION] created session_id=%s agent_type=%s model=%s", session.id, session.agent_type, resolved_model)
     return session
 
 
@@ -2711,6 +2715,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
     session = _resolve_session_for_payload(db, payload)
     llm_options = _session_model_options(session)
     trace_id = payload.client_request_id or uuid4().hex
+    logger.info("[AGENT_SESSION] chat turn session_id=%s trace_id=%s", session.id, trace_id)
     reserved_request = False
 
     if payload.client_request_id:

@@ -35,6 +35,18 @@ class FakeAI:
         return self.payload
 
 
+class CapturingFakeAI(FakeAI):
+    def __init__(self, payload):
+        super().__init__(payload)
+        self.last_prompt = None
+        self.last_schema = None
+
+    async def generate_json(self, prompt, schema, *args, **kwargs):
+        self.last_prompt = prompt
+        self.last_schema = schema
+        return self.payload
+
+
 @pytest.fixture
 def session_factory():
     engine = create_engine(
@@ -323,6 +335,59 @@ def test_generate_exam_paper_does_not_fallback_to_placeholder_chapter(monkeypatc
         "chapter_title": "",
         "confidence": "low",
     }
+
+
+def test_generate_exam_prompt_requests_option_by_option_explanations(monkeypatch, session_factory):
+    session = session_factory()
+    seed_chapters(session)
+    session.close()
+    install_fake_get_db(monkeypatch, session_factory)
+
+    fake_result = {
+        "paper_title": "Mock Paper",
+        "total_questions": 5,
+        "chapter_prediction": {
+            "book": BOOK_PHYSIOLOGY,
+            "chapter_id": "physio_ch16",
+            "chapter_title": TITLE_GASTRIC,
+            "confidence": "high",
+        },
+        "difficulty_distribution": {
+            "\u57fa\u7840": 2,
+            "\u63d0\u9ad8": 2,
+            "\u96be\u9898": 1,
+        },
+        "questions": [make_valid_question(i) for i in range(1, 6)],
+        "summary": {"coverage": "all", "focus": "all", "advice": "all"},
+    }
+
+    fake_ai = CapturingFakeAI(fake_result)
+    monkeypatch.setattr(quiz_service_module, "get_ai_client", lambda: fake_ai)
+    service = quiz_service_module.QuizService()
+
+    async def fake_topic_check(*args, **kwargs):
+        return True, 1.0, "ok"
+
+    monkeypatch.setattr(service, "_validate_topic_consistency", fake_topic_check)
+    monkeypatch.setattr(service, "_get_chapter_catalog", lambda content="": "catalog")
+    monkeypatch.setattr(service, "_infer_chapter_prediction", lambda content: {
+        "book": BOOK_PHYSIOLOGY,
+        "chapter_id": "physio_ch16",
+        "chapter_title": TITLE_GASTRIC,
+        "confidence": "high",
+    })
+
+    asyncio.run(
+        service.generate_exam_paper(
+            uploaded_content="gastric physiology " * 40,
+            num_questions=5,
+        )
+    )
+
+    assert fake_ai.last_prompt is not None
+    assert "逐项分析 A/B/C/D/E" in fake_ai.last_prompt
+    assert "易错提醒" in fake_ai.last_prompt
+    assert "\\nA：" in fake_ai.last_prompt
 
 
 def test_list_chapters_grouped_filters_placeholder_rows(session_factory):

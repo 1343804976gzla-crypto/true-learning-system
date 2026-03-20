@@ -7,6 +7,7 @@ from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict, Any, Tuple
 import json
+import logging
 import uuid
 import hashlib
 
@@ -43,6 +44,7 @@ from utils.data_contracts import (
 )
 
 router = APIRouter(prefix="/api/quiz/batch", tags=["batch_quiz"])
+logger = logging.getLogger(__name__)
 
 # 试卷缓存
 _exam_cache = {}
@@ -63,7 +65,7 @@ def _build_question_concepts_safely(
         except SQLAlchemyError as exc:
             db.rollback()
             concepts[index] = None
-            print(f"[Exam] 跳过第{index + 1}题的概念持久化: {exc}")
+            logger.warning("[Exam] 跳过第%d题的概念持久化: %s", index + 1, exc)
     return concepts
 
 
@@ -73,7 +75,7 @@ def _commit_batch_submit_safely(db: Session, label: str) -> bool:
         return True
     except SQLAlchemyError as exc:
         db.rollback()
-        print(f"[Exam] {label} failed, returning grading result anyway: {exc}")
+        logger.warning("[Exam] %s failed, returning grading result anyway: %s", label, exc)
         return False
 
 
@@ -604,7 +606,7 @@ async def confirm_chapter(exam_id: str, request: ConfirmChapterRequest, db: Sess
     _upsert_batch_exam_state(db, exam_id=exam_id, exam=exam, mark_submitted=False)
     _commit_batch_submit_safely(db, "confirm chapter state")
     _exam_cache[exam_id] = exam
-    print(f"[Exam] 章节确认: exam={exam_id}, chapter={confirmed_chapter_id or '未确认'}")
+    logger.info("[Exam] 章节确认: exam=%s, chapter=%s", exam_id, confirmed_chapter_id or "未确认")
     return {"success": True, "chapter_id": confirmed_chapter_id}
 
 @router.post("/generate/{chapter_id}", response_model=BatchExamGenerateResponse)
@@ -620,7 +622,7 @@ async def generate_exam(
     if num_questions not in [5, 10, 15, 20]:
         num_questions = 10
 
-    print(f"[Exam] 为章节 {chapter_id} 生成 {num_questions} 道题")
+    logger.info("[QUIZ_SESSION] generated exam chapter=%s questions=%d", chapter_id, num_questions)
 
     if not uploaded_content or len(uploaded_content) < 100:
         raise HTTPException(status_code=400, detail="请提供至少100字的讲课内容")
@@ -665,7 +667,7 @@ async def generate_exam(
 
         # 调试：打印 chapter_prediction
         chapter_pred = result.get("chapter_prediction")
-        print(f"[Exam] AI 返回的 chapter_prediction: {chapter_pred}")
+        logger.info("[Exam] AI 返回的 chapter_prediction: %s", chapter_pred)
 
         return {
             "exam_id": exam_id,
@@ -679,7 +681,7 @@ async def generate_exam(
         }
         
     except Exception as e:
-        print(f"[Exam] 出卷失败: {e}")
+        logger.error("[Exam] 出卷失败: %s", e)
         import traceback
         traceback.print_exc()
         msg = str(e)
@@ -755,9 +757,9 @@ async def submit_exam(
                     if inferred_id not in INVALID_CHAPTER_IDS:
                         if db.query(Chapter).filter(Chapter.id == inferred_id).first():
                             session_chapter_id = inferred_id
-                            print(f"[Exam] 从题目考点推断章节: {inferred_id}")
+                            logger.info("[Exam] 从题目考点推断章节: %s", inferred_id)
         except Exception as e:
-            print(f"[Exam] 章节推断失败: {e}")
+            logger.warning("[Exam] 章节推断失败: %s", e)
 
     # 方式4: 从原始讲课内容推断章节（题目考点失效时的最终兜底）
     if not session_chapter_id:
@@ -771,11 +773,11 @@ async def submit_exam(
                     if inferred_id not in INVALID_CHAPTER_IDS:
                         if db.query(Chapter).filter(Chapter.id == inferred_id).first():
                             session_chapter_id = inferred_id
-                            print(f"[Exam] 从原始内容推断章节: {inferred_id}")
+                            logger.info("[Exam] 从原始内容推断章节: %s", inferred_id)
             except Exception as e:
-                print(f"[Exam] 原始内容章节推断失败: {e}")
+                logger.warning("[Exam] 原始内容章节推断失败: %s", e)
 
-    print(f"[Exam] 最终章节ID: {session_chapter_id} (原始: {chapter_id})")
+    logger.info("[Exam] 最终章节ID: %s (原始: %s)", session_chapter_id, chapter_id)
 
     normalized_questions = canonicalize_quiz_questions(questions)
     normalized_answers = canonicalize_quiz_answers([
@@ -942,9 +944,9 @@ async def submit_exam(
                 existing.severity_tag = computed_severity
             existing.updated_at = now
 
-            print(
-                f"[WrongAnswer] 鏇存柊棰樼洰: {fingerprint[:8]}... "
-                f"(error_count={existing.error_count}, severity={existing.severity_tag})"
+            logger.info(
+                "[WrongAnswer] 更新题目: %s... (error_count=%s, severity=%s)",
+                fingerprint[:8], existing.error_count, existing.severity_tag,
             )
             continue
 
@@ -973,9 +975,9 @@ async def submit_exam(
             updated_at=now,
         )
         db.add(wrong)
-        print(
-            f"[WrongAnswer] 鏂板棰樼洰: {fingerprint[:8]}... "
-            f"(error_count={event_error_count}, severity={severity})"
+        logger.info(
+            "[WrongAnswer] 新增题目: %s... (error_count=%s, severity=%s)",
+            fingerprint[:8], event_error_count, severity,
         )
         continue
 
@@ -1014,7 +1016,7 @@ async def submit_exam(
                 elif existing.error_count >= 2 and existing.severity_tag not in ("critical", "stubborn"):
                     existing.severity_tag = "stubborn"  # 错误次数 >= 2 → 顽固病灶
 
-                print(f"[WrongAnswer] 更新已有错题: {fingerprint[:8]}... (错误次数: {existing.error_count})")
+                logger.info("[WrongAnswer] 更新已有错题: %s... (错误次数: %s)", fingerprint[:8], existing.error_count)
             else:
                 # 不存在：创建新错题
                 concept_id = question_concepts[i].concept_id
@@ -1048,7 +1050,7 @@ async def submit_exam(
                     updated_at=datetime.now()
                 )
                 db.add(wrong)
-                print(f"[WrongAnswer] 新增错题: {fingerprint[:8]}... (严重度: {severity})")
+                logger.info("[WrongAnswer] 新增错题: %s... (严重度: %s)", fingerprint[:8], severity)
 
     exam["chapter_id"] = session_chapter_id or exam.get("chapter_id", "")
     exam["exam_wrong_questions"] = exam_wrong_questions
@@ -1068,11 +1070,11 @@ async def submit_exam(
             state_persisted = _commit_batch_submit_safely(db, "batch submit state persistence")
         except SQLAlchemyError as exc:
             db.rollback()
-            print(f"[Exam] batch submit state preparation failed: {exc}")
+            logger.warning("[Exam] batch submit state preparation failed: %s", exc)
 
-    print(f"[Exam] 批改完成: {result['score']}分")
+    logger.info("[QUIZ_SESSION] submitted exam score=%s", result["score"])
     if not (detail_persisted and state_persisted):
-        print(f"[Exam] batch submit completed with partial persistence: {result['score']}")
+        logger.info("[Exam] batch submit completed with partial persistence: %s", result["score"])
     return result
 
 @router.get("/session/{exam_id}", response_model=BatchExamSessionResponse)
@@ -1137,7 +1139,7 @@ async def generate_variation_questions(
     db: Session = Depends(get_db)
 ):
     """基于知识点生成变式题"""
-    print(f"[Variation] 生成变式题: {request.key_point}")
+    logger.info("[Variation] 生成变式题: %s", request.key_point)
     
     quiz_service = get_quiz_service()
     
@@ -1149,11 +1151,11 @@ async def generate_variation_questions(
             num_variations=request.num_variations
         )
         
-        print(f"[Variation] 生成成功: {len(variations)} 道变式题")
+        logger.info("[Variation] 生成成功: %d 道变式题", len(variations))
         return {"variations": variations}
         
     except Exception as e:
-        print(f"[Variation] 生成失败: {e}")
+        logger.error("[Variation] 生成失败: %s", e)
         import traceback
         traceback.print_exc()
         # 不再静默返回原题冒充变式，返回明确的错误标记

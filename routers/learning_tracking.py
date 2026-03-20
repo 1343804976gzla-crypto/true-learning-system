@@ -3,6 +3,8 @@
 用于记录和查询详细的学习过程
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
@@ -41,6 +43,8 @@ from utils.data_contracts import (
     normalize_confidence,
 )
 from services.data_identity import DEFAULT_DEVICE_ID, resolve_request_actor_scope
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tracking", tags=["learning_tracking"])
 
@@ -934,7 +938,7 @@ async def start_learning_session(
     
     db.commit()
     
-    print(f"[Tracking] 开始学习会话: {session_id}, 类型: {body.session_type}")
+    logger.info("[LEARNING_SESSION] started session_id=%s type=%s", session_id, body.session_type)
     
     return {
         "session_id": session_id,
@@ -1087,11 +1091,11 @@ async def complete_learning_session(
     try:
         await sync_daily_log_for_actor(session, db)
     except Exception as e:
-        print(f"[Tracking] 更新每日日志失败（不影响主流程）: {e}")
+        logger.warning("[Tracking] 更新每日日志失败（不影响主流程）: %s", e)
         import traceback
         traceback.print_exc()
 
-    print(f"[Tracking] 完成学习会话: {session_id}, 得分: {body.score}")
+    logger.info("[LEARNING_SESSION] completed session_id=%s score=%s", session_id, body.score)
     
     return {
         "success": True,
@@ -1207,10 +1211,10 @@ async def update_daily_log(session: LearningSession, db: Session):
     try:
         _refresh_daily_log(db, session=session, auto_commit=True)
         log_date = (session.completed_at or datetime.now()).date()
-        print(f"[Tracking] 每日日志更新成功: {log_date}")
+        logger.info("[Tracking] 每日日志更新成功: %s", log_date)
     except Exception as e:
         db.rollback()
-        print(f"[Tracking] 更新每日日志失败: {e}")
+        logger.error("[Tracking] 更新每日日志失败: %s", e)
         import traceback
         traceback.print_exc()
         # 不影响主流程，不抛出异常

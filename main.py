@@ -3,6 +3,8 @@ True Learning System - 主应用
 AI驱动的学习系统：上传→识别→测试→批改
 """
 
+import logging
+
 from fastapi import FastAPI, Request, Form, Depends, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +18,11 @@ import sqlite3
 from pathlib import Path
 from threading import Lock
 from typing import Optional
+
+from utils.logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 # 自定义 JSONResponse 类，确保 UTF-8 编码
@@ -46,7 +53,7 @@ from services.openmanus_bridge import sync_openmanus_config
 from services.openviking_sync import install_openviking_sync_hooks
 from knowledge_upload_models import create_knowledge_upload_tables
 from routers import api_router
-from utils.chapter_catalog import clean_batch_chapter_rows
+from utils.chapter_catalog import clean_batch_chapter_rows, normalize_book_name
 from routers.quiz import router as quiz_router
 from routers.feynman import router as feynman_router
 from routers.quiz_concurrent import router as concurrent_quiz_router
@@ -133,20 +140,20 @@ async def startup():
             with SessionLocal() as db:
                 rebuild_daily_logs(db)
         except Exception as exc:
-            print(f"[WARN] rebuild daily logs failed on startup: {exc}")
+            logger.warning("rebuild daily logs failed on startup: %s", exc)
         install_openviking_sync_hooks()
         try:
             openmanus_status = sync_openmanus_config()
             if openmanus_status.get("available"):
-                print(
-                    "[INFO] OpenManus bridge ready: "
-                    f"synced={openmanus_status.get('synced')} model={openmanus_status.get('model')}"
+                logger.info(
+                    "OpenManus bridge ready: synced=%s model=%s",
+                    openmanus_status.get("synced"), openmanus_status.get("model"),
                 )
         except Exception as exc:
-            print(f"[WARN] OpenManus bridge sync failed: {exc}")
+            logger.warning("OpenManus bridge sync failed: %s", exc)
         _warn_if_split_db()
         _STARTUP_ONCE_COMPLETE = True
-    print("🚀 True Learning System 启动完成")
+    logger.info("True Learning System 启动完成")
 
 
 @app.middleware("http")
@@ -209,14 +216,14 @@ def _warn_if_split_db() -> None:
         root_db.rename(detached_path)
 
         if diverged:
-            print("[WARN] 检测到项目根目录残留旧数据库，且它与当前 active DB 已分叉；已自动隔离：")
+            logger.warning("检测到项目根目录残留旧数据库，且它与当前 active DB 已分叉；已自动隔离：")
         else:
-            print("[INFO] 检测到项目根目录残留旧数据库副本；已自动隔离：")
-        print(f"       active={active_db} counts={active_counts}")
-        print(f"       legacy={detached_path} counts={root_counts}")
-        print("       当前唯一生效数据库仍为 DATABASE_PATH 指向的文件。")
+            logger.info("检测到项目根目录残留旧数据库副本；已自动隔离：")
+        logger.info("       active=%s counts=%s", active_db, active_counts)
+        logger.info("       legacy=%s counts=%s", detached_path, root_counts)
+        logger.info("       当前唯一生效数据库仍为 DATABASE_PATH 指向的文件。")
     except Exception as e:
-        print(f"[WARN] 启动数据库分叉检测/隔离失败: {e}")
+        logger.warning("启动数据库分叉检测/隔离失败: %s", e)
 
 
 # ============================================
@@ -630,37 +637,57 @@ async def get_stats(db: Session = Depends(get_db)):
 @app.get("/api/chapters")
 async def list_chapters(
     book: Optional[str] = None,
-    include_empty: bool = False,
+    include_empty: bool = True,
     db: Session = Depends(get_db)
 ):
     """列出所有章节"""
-    query = db.query(Chapter)
-    if book:
-        query = query.filter(Chapter.book == book)
-    chapters = query.order_by(Chapter.id).all()
+    chapter_rows = clean_batch_chapter_rows(
+        {
+            "id": chapter.id,
+            "book": chapter.book,
+            "chapter_number": chapter.chapter_number,
+            "chapter_title": chapter.chapter_title,
+        }
+        for chapter in db.query(Chapter).all()
+    )
+
+    normalized_book = normalize_book_name(book) if book else ""
+    if normalized_book:
+        chapter_rows = [row for row in chapter_rows if row["book"] == normalized_book]
+
+    chapter_ids = [row["id"] for row in chapter_rows]
+    if not chapter_ids:
+        return []
+
+    chapters = {
+        chapter.id: chapter
+        for chapter in db.query(Chapter).filter(Chapter.id.in_(chapter_ids)).all()
+    }
 
     cm_counts = dict(
         db.query(ConceptMastery.chapter_id, func.count(ConceptMastery.concept_id))
+        .filter(ConceptMastery.chapter_id.in_(chapter_ids))
         .group_by(ConceptMastery.chapter_id)
         .all()
     )
 
     items = []
-    for c in chapters:
-        chapter_concepts = len(c.concepts) if isinstance(c.concepts, list) else 0
-        mastery_concepts = int(cm_counts.get(c.id, 0))
+    for row in chapter_rows:
+        chapter = chapters.get(row["id"])
+        chapter_concepts = len(chapter.concepts) if chapter and isinstance(chapter.concepts, list) else 0
+        mastery_concepts = int(cm_counts.get(row["id"], 0))
         concept_count = max(chapter_concepts, mastery_concepts)
 
         if not include_empty and concept_count == 0:
             continue
 
         items.append({
-            "id": c.id,
-            "book": c.book,
-            "chapter_number": c.chapter_number,
-            "chapter_title": c.chapter_title,
+            "id": row["id"],
+            "book": row["book"],
+            "chapter_number": row["chapter_number"],
+            "chapter_title": row["chapter_title"],
             "concept_count": concept_count,
-            "last_reviewed": c.last_reviewed
+            "last_reviewed": chapter.last_reviewed if chapter else None,
         })
 
     return items
@@ -898,9 +925,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """通用错误处理"""
-    import traceback
-    print(f"错误: {exc}")
-    print(traceback.format_exc())
+    logger.error("Unhandled exception: %s", exc, exc_info=True)
     
     if request.headers.get("accept") and "application/json" in request.headers.get("accept"):
         from fastapi.responses import JSONResponse

@@ -7,6 +7,8 @@ import random
 from types import SimpleNamespace
 from typing import List
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -24,6 +26,8 @@ from utils.data_contracts import (
     normalize_confidence,
     normalize_option_map,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/quiz-v2", tags=["quiz-v2"])
 
@@ -79,7 +83,7 @@ def _build_concept_slots(concepts: List[ConceptMastery], target: int = 10) -> Li
         )
 
     if actual_count < target:
-        print(f"[_build_concept_slots] 知识点不足: {len(selected)}/{target}，生成 {actual_count} 题（不循环复用）")
+        logger.warning("知识点不足: %d/%d，生成 %d 题", len(selected), target, actual_count)
 
     return slots
 
@@ -124,7 +128,7 @@ async def start_concurrent_quiz(
                 repaired += 1
         if repaired:
             db.commit()
-            print(f"[quiz-v2] 鑷姩鍥炲～鐭ヨ瘑鐐? chapter={chapter_id}, repaired={repaired}")
+            logger.info("[quiz-v2] 自动回填知识点 chapter=%s, repaired=%s", chapter_id, repaired)
         concepts = db.query(ConceptMastery).filter(
             ConceptMastery.chapter_id == chapter_id
         ).all()
@@ -158,7 +162,7 @@ async def start_concurrent_quiz(
                 seeded += 1
             if seeded:
                 db.commit()
-                print(f"[quiz-v2] 娉ㄥ叆绔犺妭绉嶅瓙鐭ヨ瘑鐐? chapter={chapter_id}, seeded={seeded}")
+                logger.info("[quiz-v2] 注入章节种子知识点 chapter=%s, seeded=%s", chapter_id, seeded)
             concepts = db.query(ConceptMastery).filter(
                 ConceptMastery.chapter_id == chapter_id
             ).all()
@@ -172,14 +176,14 @@ async def start_concurrent_quiz(
     concept_names = [c.name for c in concepts]
     concept_descriptions = [c.description for c in concepts]
     
-    print(f"[骞跺彂鐢熸垚] 寮€濮嬩负 {len(concept_names)} 涓煡璇嗙偣鐢熸垚棰樼洰...")
+    logger.info("开始为 %d 个知识点生成题目...", len(concept_names))
     
     
     generator = get_concurrent_generator()
     import asyncio
     quizzes = await generator.generate_quiz_batch(concept_names, concept_descriptions)
     
-    print(f"[quiz-v2] generated {len(quizzes)} questions")
+    logger.info("[quiz-v2] generated %d questions", len(quizzes))
     
     
     questions = []
@@ -253,14 +257,14 @@ async def submit_concurrent_quiz(
     if len(answers) != len(session.questions):
         raise HTTPException(status_code=400, detail="Invalid request payload")
     
-    print(f"[鎵归噺鎵规敼] 寮€濮嬫壒鏀?{len(answers)} 閬撻鐩?..")
+    logger.info("开始批改 %d 道题目...", len(answers))
     
     
     grader = get_batch_grader()
     import asyncio
     graded_results = await grader.grade_batch(session.questions, answers)
     
-    print(f"[鎵归噺鎵规敼] 瀹屾垚")
+    logger.info("开始批改 %d 道题目...", len(answers))
     
     
     answer_records = []
@@ -342,14 +346,14 @@ async def submit_concurrent_quiz(
                 existing.weak_points = normalized_weak_points
     
     # AI鎬荤粨鍒嗘瀽
-    print(f"[AI鍒嗘瀽] 寮€濮嬬敓鎴愮患鍚堝垎鏋愭姤鍛?..")
+    logger.info("开始生成综合分析报告...")
     analyzer = get_ai_analyzer()
     analysis = await analyzer.analyze_session(
         session.questions,
         graded_results,
         answers
     )
-    print(f"[AI鍒嗘瀽] 瀹屾垚")
+    logger.info("批改完成")
     
     # 鏇存柊浼氳瘽
     normalized_answers = canonicalize_quiz_answers(answer_records)

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 from xml.sax.saxutils import escape as xml_escape
 import io
+import logging
 import math
 import re
 
@@ -64,6 +65,7 @@ from utils.data_contracts import (
 )
 
 router = APIRouter(prefix="/api/wrong-answers", tags=["wrong_answers_v2"])
+logger = logging.getLogger(__name__)
 
 
 def _coerce_to_date(value: Any) -> Optional[date]:
@@ -2775,7 +2777,7 @@ chapter_id必须是列表中的值。""",
                 else:
                     failed_count += 1
             except Exception as e:
-                print(f"[RecognizeChapters] 错题ID {wrong.id} 识别失败: {e}")
+                logger.warning("[RecognizeChapters] 错题ID %s 识别失败: %s", wrong.id, e)
                 failed_count += 1
 
         db.commit()

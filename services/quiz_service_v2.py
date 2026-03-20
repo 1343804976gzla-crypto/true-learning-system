@@ -17,7 +17,12 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Set
 from services.ai_client import get_ai_client
-from utils.chapter_catalog import clean_batch_chapter_rows, chapter_number_sort_key
+from utils.chapter_catalog import (
+    chapter_number_sort_key,
+    clean_batch_chapter_rows,
+    extract_book_name_from_text,
+    normalize_book_name,
+)
 
 # 配置日志
 logging.basicConfig(
@@ -477,6 +482,21 @@ class QuizService:
         if not text:
             return "", ""
 
+        course_title = re.search(
+            r"(?:^|\n)\s*([0-9]{1,3})\.\s*(?:生理学?|生理|生化|生物化学|病理学?|病理|内科学?|内科(?:含诊断(?:[（(]含部分外科[)）])?)?|外科学?|外科|人文|医学人文)\s+([^\n]{1,60})",
+            text,
+        )
+        if course_title:
+            chapter_number = str(int(course_title.group(1)))
+            chapter_title = re.sub(
+                r"\s*(?:天天师兄.*|tt师兄.*|第\d+段.*|\.(?:mp4|pdf|docx?|pptx?|png|jpg|jpeg))\s*$",
+                "",
+                course_title.group(2).strip(),
+                flags=re.IGNORECASE,
+            )
+            if chapter_title:
+                return chapter_number, chapter_title
+
         pat = re.search(
             r"\u7b2c\s*([0-9\uff10-\uff19\u4e00-\u9fa5]{1,8})\s*\u7ae0\s*([^\n\uff0c\u3002\uff1b;:]{1,40})",
             text,
@@ -504,6 +524,9 @@ class QuizService:
             return ""
 
         self._load_real_chapter_rows()
+        hinted = extract_book_name_from_text(text, allowed_books=self._chapter_books_cache)
+        if hinted:
+            return hinted
         for b in self._chapter_books_cache:
             if b in text:
                 return b
@@ -592,6 +615,7 @@ class QuizService:
         chapter_number: str = "",
         confidence: str = "medium",
     ) -> Optional[Dict[str, str]]:
+        book = normalize_book_name(book)
         rows = self._load_real_chapter_rows()
 
         def _pick_best(candidates: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
@@ -1235,6 +1259,20 @@ class QuizService:
 - A3型：{max(2, num_questions//5)}道（病例组）
 - X型：{max(1, num_questions//10)}道（多选）
 
+【解析写法要求】
+- explanation 必须写成可直接展示的详细解析，不能只写一句结论
+- 先说明“正确答案为什么对”
+- 再逐项分析 A/B/C/D/E：正确项说明为什么对，错误项说明错在哪里、为什么容易误选
+- 最后补一条“易错提醒”或“临床提示”
+- explanation 允许使用换行，推荐直接写成下面的结构：
+正确答案：……
+A：……
+B：……
+C：……
+D：……
+E：……
+易错提醒：……
+
 【讲课内容】
 {content}
 
@@ -1252,7 +1290,7 @@ class QuizService:
             "question": "实际题目内容（不要写'题目'或'题目内容'）",
             "options": {{"A": "实际选项A内容", "B": "实际选项B内容", "C": "实际选项C内容", "D": "实际选项D内容", "E": "实际选项E内容"}},
             "correct_answer": "A",
-            "explanation": "实际解析内容（不要写'解析'）",
+            "explanation": "正确答案：说明为什么正确。\\nA：分析A为什么对或为什么错。\\nB：分析B为什么错。\\nC：分析C为什么错。\\nD：分析D为什么错。\\nE：分析E为什么错。\\n易错提醒：总结本题最容易混淆的点。",
             "key_point": "实际考点（不要写'考点'）",
             "related_questions": "[2,3]"
         }}
@@ -1281,7 +1319,7 @@ class QuizService:
                         "E": "以上都不是"
                     },
                     "correct_answer": "D",
-                    "explanation": "盐酸的作用包括激活胃蛋白酶原、促进铁的吸收、杀死细菌等",
+                    "explanation": "正确答案：D。盐酸既能激活胃蛋白酶原，也有助于铁吸收，并能抑制部分细菌。\\nA：正确，是盐酸的重要作用之一。\\nB：正确，酸性环境有利于铁维持二价状态，促进吸收。\\nC：正确，胃内强酸环境有助于杀灭进入胃内的部分细菌。\\nD：正确，因为A、B、C都对。\\nE：错误，因为前三项都属于盐酸的生理作用。\\n易错提醒：遇到“以上都是”时，要先逐项核对，不要只凭印象排除。",
                     "key_point": "胃酸的生理作用",
                     "related_questions": "[2,3]"
                 }
@@ -1725,6 +1763,7 @@ class QuizService:
 - 每道题的 correct_answer 不能全部相同，至少要有 3 个不同的正确答案字母
 - 选项要有干扰性，似是而非
 - 答案和解析必须准确
+- explanation 也要按“正确答案 + A/B/C/D/E逐项分析 + 易错提醒”来写，不能只给一句总述
 - **每道题必须有且仅有 A、B、C、D、E 五个选项，缺一不可**
 
 【输出格式】
@@ -1738,7 +1777,7 @@ class QuizService:
             "question": "题目内容",
             "options": {{"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."}},
             "correct_answer": "A/B/C/D/E",
-            "explanation": "详细解析，说明为什么对、为什么错"
+            "explanation": "正确答案：……\\nA：……\\nB：……\\nC：……\\nD：……\\nE：……\\n易错提醒：……"
         }}
     ]
 }}"""
