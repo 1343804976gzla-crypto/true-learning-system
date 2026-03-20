@@ -613,7 +613,8 @@ def list_sessions(
     _require_actor_identity(user_id, device_id)
     user_id, device_id = resolve_query_identity(user_id, device_id)
     device_ids = build_device_scope_aliases(user_id, device_id)
-    query = db.query(AgentSession).order_by(desc(AgentSession.last_message_at), desc(AgentSession.created_at))
+    activity_at = func.coalesce(AgentSession.last_message_at, AgentSession.created_at)
+    query = db.query(AgentSession).order_by(desc(activity_at), desc(AgentSession.created_at))
     if user_id:
         query = query.filter(AgentSession.user_id == user_id)
     if device_ids:

@@ -59,6 +59,17 @@ def test_agent_template_keeps_composer_visible_and_animates_non_stream_chunks():
     assert "await revealAssistantDelta(fallbackText.slice(currentText.length), { forceChunked: true });" in template
 
 
+def test_agent_template_disables_idle_motion_that_causes_visual_flicker():
+    template = _read_agent_template()
+
+    assert ".agent-background-svg path {" in template
+    assert "stroke-dasharray: 96 184;" in template
+    assert "stroke-dashoffset: -120;" in template
+    assert "animation: agentPathDrift var(--duration, 24s) linear infinite;" not in template
+    assert ".agent-send-button:not(.is-empty):not(:disabled)::before {" in template
+    assert ".agent-send-button:not(.is-empty):not(:disabled) .agent-send-arrow {" in template
+
+
 def test_agent_template_is_reduced_to_history_and_chat_only():
     template = _read_agent_template()
 

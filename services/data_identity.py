@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 import os
+import time
 from threading import Lock
 from typing import Any
 
 from fastapi import Request
 from sqlalchemy import event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as OrmSession
 
 from models import engine
@@ -519,31 +521,47 @@ def ensure_learning_identity_schema() -> None:
         if _IDENTITY_SCHEMA_READY:
             return
 
-        with engine.begin() as connection:
-            dialect = connection.dialect.name
-            if dialect != "sqlite":
-                _IDENTITY_SCHEMA_READY = True
-                return
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with engine.begin() as connection:
+                    dialect = connection.dialect.name
+                    if dialect != "sqlite":
+                        _IDENTITY_SCHEMA_READY = True
+                        return
 
-            for table_name in _IDENTITY_TABLES:
-                existing_columns = {
-                    str(row[1]).lower()
-                    for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
-                }
-                if not existing_columns:
-                    continue
+                    for table_name in _IDENTITY_TABLES:
+                        existing_columns = {
+                            str(row[1]).lower()
+                            for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+                        }
+                        if not existing_columns:
+                            continue
 
-                if "user_id" not in existing_columns:
-                    connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN user_id TEXT")
-                if "device_id" not in existing_columns:
-                    connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN device_id TEXT")
+                        if "user_id" not in existing_columns:
+                            connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN user_id TEXT")
+                        if "device_id" not in existing_columns:
+                            connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN device_id TEXT")
 
-                connection.exec_driver_sql(
-                    f"UPDATE {table_name} SET device_id = ? WHERE device_id IS NULL OR TRIM(device_id) = ''",
-                    (DEFAULT_DEVICE_ID,),
-                )
+                        connection.exec_driver_sql(
+                            f"UPDATE {table_name} SET device_id = ? WHERE device_id IS NULL OR TRIM(device_id) = ''",
+                            (DEFAULT_DEVICE_ID,),
+                        )
 
-            _ensure_daily_review_paper_schema(connection)
-            _ensure_daily_learning_log_schema(connection)
+                    _ensure_daily_review_paper_schema(connection)
+                    _ensure_daily_learning_log_schema(connection)
 
-            _IDENTITY_SCHEMA_READY = True
+                    _IDENTITY_SCHEMA_READY = True
+                    return
+            except OperationalError as exc:
+                message = str(exc).lower()
+                if "database is locked" not in message:
+                    raise
+                if attempt >= max_attempts:
+                    print(
+                        "[WARN] ensure_learning_identity_schema skipped after repeated sqlite lock contention; "
+                        "assuming current schema is already compatible."
+                    )
+                    _IDENTITY_SCHEMA_READY = True
+                    return
+                time.sleep(0.1 * attempt)

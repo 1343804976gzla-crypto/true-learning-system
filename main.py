@@ -14,6 +14,7 @@ import os
 import json
 import sqlite3
 from pathlib import Path
+from threading import Lock
 from typing import Optional
 
 
@@ -36,9 +37,16 @@ from services.data_identity import (
     resolve_request_identity,
     set_request_identity,
 )
+from services.llm_audit import (
+    new_llm_audit_id,
+    reset_llm_audit_request_context,
+    set_llm_audit_request_context,
+)
 from services.openmanus_bridge import sync_openmanus_config
 from services.openviking_sync import install_openviking_sync_hooks
+from knowledge_upload_models import create_knowledge_upload_tables
 from routers import api_router
+from utils.chapter_catalog import clean_batch_chapter_rows
 from routers.quiz import router as quiz_router
 from routers.feynman import router as feynman_router
 from routers.quiz_concurrent import router as concurrent_quiz_router
@@ -97,6 +105,9 @@ app.include_router(agent_router)
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+_STARTUP_ONCE_LOCK = Lock()
+_STARTUP_ONCE_COMPLETE = False
+
 # ============================================
 # 初始化
 # ============================================
@@ -104,38 +115,62 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.on_event("startup")
 async def startup():
     """应用启动时初始化数据库"""
-    init_db()
-    ensure_learning_identity_schema()
-    try:
-        from models import SessionLocal
-        from routers.learning_tracking import rebuild_daily_logs
+    global _STARTUP_ONCE_COMPLETE
+    if _STARTUP_ONCE_COMPLETE:
+        return
 
-        with SessionLocal() as db:
-            rebuild_daily_logs(db)
-    except Exception as exc:
-        print(f"[WARN] rebuild daily logs failed on startup: {exc}")
-    install_openviking_sync_hooks()
-    try:
-        openmanus_status = sync_openmanus_config()
-        if openmanus_status.get("available"):
-            print(
-                "[INFO] OpenManus bridge ready: "
-                f"synced={openmanus_status.get('synced')} model={openmanus_status.get('model')}"
-            )
-    except Exception as exc:
-        print(f"[WARN] OpenManus bridge sync failed: {exc}")
-    _warn_if_split_db()
+    with _STARTUP_ONCE_LOCK:
+        if _STARTUP_ONCE_COMPLETE:
+            return
+
+        init_db()
+        create_knowledge_upload_tables()
+        ensure_learning_identity_schema()
+        try:
+            from models import SessionLocal
+            from routers.learning_tracking import rebuild_daily_logs
+
+            with SessionLocal() as db:
+                rebuild_daily_logs(db)
+        except Exception as exc:
+            print(f"[WARN] rebuild daily logs failed on startup: {exc}")
+        install_openviking_sync_hooks()
+        try:
+            openmanus_status = sync_openmanus_config()
+            if openmanus_status.get("available"):
+                print(
+                    "[INFO] OpenManus bridge ready: "
+                    f"synced={openmanus_status.get('synced')} model={openmanus_status.get('model')}"
+                )
+        except Exception as exc:
+            print(f"[WARN] OpenManus bridge sync failed: {exc}")
+        _warn_if_split_db()
+        _STARTUP_ONCE_COMPLETE = True
     print("🚀 True Learning System 启动完成")
 
 
 @app.middleware("http")
 async def bind_request_identity(request: Request, call_next):
     user_id, device_id = resolve_request_identity(request)
-    tokens = set_request_identity(user_id=user_id, device_id=device_id)
+    identity_tokens = set_request_identity(user_id=user_id, device_id=device_id)
+    request_id = request.headers.get("X-Request-ID") or new_llm_audit_id("req")
+    audit_token = set_llm_audit_request_context(
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        query=request.url.query,
+        referer=request.headers.get("referer"),
+        user_agent=request.headers.get("user-agent"),
+        user_id=user_id,
+        device_id=device_id,
+    )
     try:
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers.setdefault("X-Request-ID", request_id)
+        return response
     finally:
-        reset_request_identity(tokens)
+        reset_llm_audit_request_context(audit_token)
+        reset_request_identity(identity_tokens)
 
 
 def _warn_if_split_db() -> None:
@@ -634,32 +669,24 @@ async def list_chapters(
 @app.get("/api/chapters/grouped")
 async def list_chapters_grouped(db: Session = Depends(get_db)):
     """按学科分组的章节列表（供大纲确认弹窗用）"""
-    chapters = db.query(Chapter).order_by(Chapter.book, Chapter.chapter_number).all()
+    chapter_rows = clean_batch_chapter_rows(
+        {
+            "id": chapter.id,
+            "book": chapter.book,
+            "chapter_number": chapter.chapter_number,
+            "chapter_title": chapter.chapter_title,
+        }
+        for chapter in db.query(Chapter).all()
+    )
     grouped = {}
 
-    def _is_selectable_chapter(chapter: Chapter) -> bool:
-        chapter_id = (chapter.id or "").strip()
-        chapter_title = (chapter.chapter_title or "").strip()
-        chapter_number = (chapter.chapter_number or "").strip()
-        book = (chapter.book or "").strip()
-        return not (
-            chapter_id in {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0", "uncategorized_ch0"}
-            or chapter_id.endswith("_ch0")
-            or chapter_number == "0"
-            or book in {"未分类", "unknown"}
-            or chapter_title.startswith("自动补齐章节")
-            or chapter_title in {"待人工归类", "未知章节"}
-        )
-
-    for c in chapters:
-        if not _is_selectable_chapter(c):
-            continue
-        if c.book not in grouped:
-            grouped[c.book] = []
-        grouped[c.book].append({
-            "id": c.id,
-            "number": c.chapter_number,
-            "title": c.chapter_title,
+    for row in chapter_rows:
+        if row["book"] not in grouped:
+            grouped[row["book"]] = []
+        grouped[row["book"]].append({
+            "id": row["id"],
+            "number": row["chapter_number"],
+            "title": row["chapter_title"],
         })
     return grouped
 

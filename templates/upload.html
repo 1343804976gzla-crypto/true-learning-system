@@ -1,250 +1,190 @@
 {% extends "base.html" %}
 
-{% block title %}上传内容 - True Learning System{% endblock %}
+{% block title %}知识上传工作台 - True Learning System{% endblock %}
 
 {% block content %}
-<div class="max-w-3xl mx-auto">
-    <div class="bg-white rounded-lg shadow">
-        <div class="px-6 py-4 border-b">
-            <h1 class="text-xl font-semibold">📤 上传今日学习内容</h1>
-            <p class="text-gray-500 text-sm mt-1">粘贴老师讲课内容，AI会自动识别章节和知识点</p>
+<div class="upload-workbench">
+    <section class="paper-card upload-hero">
+        <div class="upload-hero__copy">
+            <div class="upload-kicker">Knowledge Intake</div>
+            <h1>把课堂知识整理成可复用的章节知识库</h1>
+            <p>课堂对话、课堂笔记、Markdown 或图片会先被拆成章节和知识点，再合成为可持续更新的知识笔记。</p>
         </div>
-        
-        <div class="p-6">
-            <form id="uploadForm">
-                <!-- 日期选择 -->
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">学习日期</label>
-                    <input type="date" id="studyDate" 
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                           value="{{ today }}">
-                </div>
-                
-                <!-- 内容输入 -->
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">讲课内容</label>
-                    <textarea id="content" rows="12" 
-                              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              placeholder="请粘贴老师讲课内容...
+        <div class="upload-hero__summary">
+            <div class="hero-mini-label">今日节奏</div>
+            <div id="heroPaceAdvice" class="hero-mini-value">正在加载工作台数据...</div>
+            <button type="button" class="hero-mini-button" onclick="loadDailyReport(true)">生成今日日报</button>
+        </div>
+    </section>
 
-示例：
-今天讲心力衰竭。心力衰竭是各种心脏结构或功能性疾病导致心室充盈和/或射血功能受损，心排血量不能满足机体组织代谢需要..."></textarea>
-                    <p class="text-gray-400 text-xs mt-1">支持长文本，AI会自动提取关键知识点</p>
+    <section class="upload-stats-grid">
+        <div class="paper-card stat-card">
+            <div class="stat-label">总上传次数</div>
+            <div id="statUploads" class="stat-value">0</div>
+            <div class="stat-note">原始文本只在后台保留</div>
+        </div>
+        <div class="paper-card stat-card">
+            <div class="stat-label">章节数</div>
+            <div id="statChapters" class="stat-value">0</div>
+            <div class="stat-note">复用现有章节体系</div>
+        </div>
+        <div class="paper-card stat-card">
+            <div class="stat-label">知识点数</div>
+            <div id="statKnowledgePoints" class="stat-value">0</div>
+            <div class="stat-note">同名知识点会自动合并</div>
+        </div>
+        <div class="paper-card stat-card stat-card--alert">
+            <div class="stat-label">待归类条目</div>
+            <div id="statPending" class="stat-value">0</div>
+            <div class="stat-note">提供 3 个候选章节和手动搜索</div>
+        </div>
+    </section>
+
+    <section class="upload-main-grid">
+        <div class="paper-card composer-card">
+            <div class="section-head">
+                <div>
+                    <div class="section-kicker">Upload</div>
+                    <h2>上传并生成预览</h2>
                 </div>
-                
-                <!-- 提交按钮 -->
-                <div class="flex justify-between items-center">
-                    <a href="/" class="text-gray-500 hover:text-gray-700">← 返回仪表盘</a>
-                    
-                    <button type="submit" id="submitBtn"
-                            class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition flex items-center">
-                        <span>开始识别</span>
-                        <svg id="loadingIcon" class="animate-spin ml-2 h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                    </button>
+                <button type="button" class="subtle-button" onclick="resetComposer()">清空输入</button>
+            </div>
+
+            <div class="composer-mode-row">
+                <button type="button" class="mode-pill is-active" data-mode="text_paste" onclick="setUploadMode('text_paste', this)">粘贴文本</button>
+                <button type="button" class="mode-pill" data-mode="file" onclick="setUploadMode('file', this)">上传 md/txt</button>
+                <button type="button" class="mode-pill" data-mode="image_ocr" onclick="setUploadMode('image_ocr', this)">图片 OCR</button>
+            </div>
+
+            <label class="field-label" for="sourceNameInput">来源名称</label>
+            <input id="sourceNameInput" class="paper-input" placeholder="例如：3月19日直播内科笔记 / GPT 对话整理" />
+
+            <div id="textModePanel" class="mode-panel">
+                <label class="field-label" for="contentTextInput">课程内容</label>
+                <textarea id="contentTextInput" class="paper-textarea" placeholder="把课堂对话、课堂笔记、自己的总结或 Markdown 内容贴进来。"></textarea>
+            </div>
+
+            <div id="fileModePanel" class="mode-panel hidden">
+                <label class="field-label" for="contentFileInput">选择文件</label>
+                <input id="contentFileInput" type="file" class="paper-file" accept=".md,.txt,image/*" />
+                <div id="fileModeHint" class="field-hint">单次只上传一个 md 或 txt 文件。</div>
+            </div>
+
+            <div class="composer-actions">
+                <button type="button" id="previewBtn" class="primary-button" onclick="buildPreview()">生成整理预览</button>
+                <div class="field-hint">流程：上传原文 -> AI 自动拆章节/知识点 -> 你可编辑 -> 确认保存</div>
+            </div>
+        </div>
+
+        <div class="paper-card side-card">
+            <div class="section-head">
+                <div>
+                    <div class="section-kicker">Review Pace</div>
+                    <h2>未来 7 天复习压力</h2>
                 </div>
-            </form>
+            </div>
+            <div id="reviewPressureStrip" class="pressure-strip"></div>
+            <div id="reviewPaceSummary" class="side-card__copy">正在计算复习节奏...</div>
+
+            <div class="side-divider"></div>
+
+            <div class="section-kicker">Recent Uploads</div>
+            <div id="recentUploadsList" class="recent-upload-list"></div>
+        </div>
+    </section>
+
+    <section id="previewSection" class="paper-card preview-card hidden">
+        <div class="section-head">
+            <div>
+                <div class="section-kicker">Preview</div>
+                <h2>保存前预览</h2>
+            </div>
+            <div class="section-actions">
+                <button type="button" class="subtle-button" onclick="dismissPreview()">暂不保存</button>
+                <button type="button" class="primary-button" onclick="savePreview()">确认保存</button>
+            </div>
+        </div>
+        <div id="previewMeta" class="preview-meta"></div>
+        <div id="previewList" class="preview-list"></div>
+    </section>
+
+    <section id="reportSection" class="paper-card report-card hidden">
+        <div class="section-head">
+            <div>
+                <div class="section-kicker">Daily Report</div>
+                <h2>今日日报</h2>
+            </div>
+            <div class="section-actions">
+                <button type="button" class="subtle-button" onclick="loadDailyReport(true)">重新生成</button>
+                <button type="button" class="primary-button" onclick="printDailyReport()">打印日报</button>
+            </div>
+        </div>
+        <div id="reportBody"></div>
+    </section>
+
+    <section class="upload-knowledge-grid">
+        <div class="paper-card pending-card">
+            <div class="section-head">
+                <div>
+                    <div class="section-kicker">Pending</div>
+                    <h2>待归类</h2>
+                </div>
+            </div>
+            <div id="pendingList" class="pending-list"></div>
+        </div>
+
+        <div class="paper-card archive-card">
+            <div class="section-head section-head--spaced">
+                <div>
+                    <div class="section-kicker">Archive</div>
+                    <h2>章节知识库</h2>
+                </div>
+                <input id="knowledgeSearchInput" class="paper-input paper-input--small" placeholder="搜索知识点或章节" oninput="renderKnowledgeArchive()" />
+            </div>
+            <div id="knowledgeArchive" class="knowledge-accordion"></div>
+        </div>
+    </section>
+</div>
+
+<datalist id="chapterDatalist"></datalist>
+
+<div id="editorModal" class="modal-shell hidden" onclick="handleModalBackdrop(event, 'editorModal')">
+    <div class="modal-card">
+        <div class="section-head">
+            <div>
+                <div class="section-kicker">Edit</div>
+                <h2>编辑知识点</h2>
+            </div>
+            <button type="button" class="subtle-button" onclick="closeEditor()">关闭</button>
+        </div>
+        <label class="field-label" for="editorChapterInput">章节</label>
+        <input id="editorChapterInput" class="paper-input" list="chapterDatalist" placeholder="搜索章节或直接粘贴章节 ID" />
+        <label class="field-label" for="editorConceptName">知识点名称</label>
+        <input id="editorConceptName" class="paper-input" />
+        <label class="field-label" for="editorNoteSummary">摘要</label>
+        <input id="editorNoteSummary" class="paper-input" />
+        <label class="field-label" for="editorNoteBody">笔记正文</label>
+        <textarea id="editorNoteBody" class="paper-textarea paper-textarea--short"></textarea>
+        <div class="composer-actions">
+            <button type="button" class="primary-button" onclick="saveEditor()">保存修改</button>
         </div>
     </div>
-    
-    <!-- 章节识别结果弹窗 -->
-    <div id="recognitionModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
-        <div class="bg-white rounded-lg shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div class="px-6 py-4 border-b bg-gradient-to-r from-green-50 to-blue-50 flex justify-between items-center">
-                <h2 class="text-xl font-semibold text-green-800">✅ AI章节识别完成</h2>
-                <button onclick="closeRecognitionModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+</div>
+
+<div id="practiceModal" class="modal-shell hidden" onclick="handleModalBackdrop(event, 'practiceModal')">
+    <div class="modal-card modal-card--practice">
+        <div class="section-head">
+            <div>
+                <div class="section-kicker">Practice</div>
+                <h2 id="practiceTitle">即时练习</h2>
             </div>
-
-            <div class="p-6">
-                <!-- 识别结果 -->
-                <div class="mb-6 bg-blue-50 p-4 rounded-lg">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <span class="text-gray-600 text-sm">📚 教材：</span>
-                            <span id="modalResultBook" class="font-semibold text-lg"></span>
-                        </div>
-                        <div>
-                            <span class="text-gray-600 text-sm">📖 版本：</span>
-                            <span id="modalResultEdition" class="font-medium"></span>
-                        </div>
-                        <div>
-                            <span class="text-gray-600 text-sm">📑 章节号：</span>
-                            <span id="modalResultChapter" class="font-semibold text-lg text-blue-600"></span>
-                        </div>
-                        <div>
-                            <span class="text-gray-600 text-sm">📝 标题：</span>
-                            <span id="modalResultTitle" class="font-semibold text-lg"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 知识点列表 - 按重要性分组 -->
-                <div class="mb-6">
-                    <div class="flex justify-between items-center mb-3">
-                        <h3 class="font-semibold text-lg">🎯 识别到的知识点</h3>
-                        <span class="text-xs text-gray-500">AI已自动分级</span>
-                    </div>
-
-                    <!-- 主体内容 -->
-                    <div id="modalMainConcepts" class="mb-4">
-                        <div class="flex items-center text-red-700 font-medium mb-2">
-                            <span class="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
-                            <span>🔴 主体内容（重点掌握）</span>
-                            <span id="modalMainCount" class="ml-2 text-xs bg-red-100 px-2 py-0.5 rounded"></span>
-                        </div>
-                        <div id="modalMainList" class="space-y-2 pl-4 border-l-2 border-red-200"></div>
-                    </div>
-
-                    <!-- 次要内容 -->
-                    <div id="modalSecondaryConcepts" class="mb-4">
-                        <div class="flex items-center text-yellow-700 font-medium mb-2">
-                            <span class="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
-                            <span>🟡 次要内容（需要了解）</span>
-                            <span id="modalSecondaryCount" class="ml-2 text-xs bg-yellow-100 px-2 py-0.5 rounded"></span>
-                        </div>
-                        <div id="modalSecondaryList" class="space-y-2 pl-4 border-l-2 border-yellow-200"></div>
-                    </div>
-
-                    <!-- 提及内容 -->
-                    <div id="modalMentionConcepts" class="mb-4">
-                        <div class="flex items-center text-green-700 font-medium mb-2 cursor-pointer" onclick="toggleModalMention()">
-                            <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                            <span>🟢 提及内容（简单了解）</span>
-                            <span id="modalMentionCount" class="ml-2 text-xs bg-green-100 px-2 py-0.5 rounded"></span>
-                            <span id="modalMentionToggle" class="ml-auto text-xs">▼</span>
-                        </div>
-                        <div id="modalMentionList" class="space-y-2 pl-4 border-l-2 border-green-200"></div>
-                    </div>
-                </div>
-
-                <!-- 主体内容概括 -->
-                <div id="modalMainTopicSection" class="mb-6 bg-blue-50 p-4 rounded hidden">
-                    <h3 class="font-medium mb-2 text-blue-800">📌 本节课主体</h3>
-                    <p id="modalMainTopic" class="text-blue-700 text-sm"></p>
-                </div>
-
-                <!-- 摘要 -->
-                <div class="mb-6 bg-gray-50 p-4 rounded">
-                    <h3 class="font-medium mb-2">📋 章节摘要：</h3>
-                    <p id="modalResultSummary" class="text-gray-600 text-sm leading-relaxed"></p>
-                </div>
-
-                <!-- 操作按钮 -->
-                <div class="flex justify-between items-center pt-4 border-t">
-                    <button onclick="reRecognize()" class="text-gray-500 hover:text-gray-700 flex items-center">
-                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                        </svg>
-                        重新识别
-                    </button>
-                    <div class="space-x-3">
-                        <button onclick="closeRecognitionModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">
-                            稍后处理
-                        </button>
-                        <a id="modalStartLearningBtn" href="#"
-                           class="inline-block bg-gradient-to-r from-green-500 to-blue-500 text-white px-6 py-2 rounded-lg hover:from-green-600 hover:to-blue-600 transition shadow-lg">
-                            开始学习 →
-                        </a>
-                    </div>
-                </div>
-            </div>
+            <button type="button" class="subtle-button" onclick="closePractice()">关闭</button>
         </div>
-    </div>
-
-    <!-- 识别结果展示区域（保留原有的，用于向下兼容） -->
-    <div id="resultArea" class="mt-6 hidden">
-        <div class="bg-white rounded-lg shadow">
-            <div class="px-6 py-4 border-b bg-green-50">
-                <h2 class="text-lg font-semibold text-green-800">✅ AI识别完成</h2>
-            </div>
-            
-            <div class="p-6">
-                <!-- 识别结果 -->
-                <div class="mb-6">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <span class="text-gray-500 text-sm">教材：</span>
-                            <span id="resultBook" class="font-medium"></span>
-                        </div>
-                        <div>
-                            <span class="text-gray-500 text-sm">版本：</span>
-                            <span id="resultEdition" class="font-medium"></span>
-                        </div>
-                        <div>
-                            <span class="text-gray-500 text-sm">章节：</span>
-                            <span id="resultChapter" class="font-medium"></span>
-                        </div>
-                        <div>
-                            <span class="text-gray-500 text-sm">标题：</span>
-                            <span id="resultTitle" class="font-medium"></span>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 知识点列表 - 按重要性分组 -->
-                <div class="mb-6">
-                    <div class="flex justify-between items-center mb-3">
-                        <h3 class="font-medium">识别到的知识点</h3>
-                        <span class="text-xs text-gray-500">AI已自动分级</span>
-                    </div>
-                    
-                    <!-- 主体内容 -->
-                    <div id="mainConcepts" class="mb-4">
-                        <div class="flex items-center text-red-700 font-medium mb-2">
-                            <span class="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
-                            <span>🔴 主体内容（重点掌握）</span>
-                            <span id="mainCount" class="ml-2 text-xs bg-red-100 px-2 py-0.5 rounded"></span>
-                        </div>
-                        <div id="mainList" class="space-y-2 pl-4 border-l-2 border-red-200"></div>
-                    </div>
-                    
-                    <!-- 次要内容 -->
-                    <div id="secondaryConcepts" class="mb-4">
-                        <div class="flex items-center text-yellow-700 font-medium mb-2">
-                            <span class="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
-                            <span>🟡 次要内容（需要了解）</span>
-                            <span id="secondaryCount" class="ml-2 text-xs bg-yellow-100 px-2 py-0.5 rounded"></span>
-                        </div>
-                        <div id="secondaryList" class="space-y-2 pl-4 border-l-2 border-yellow-200"></div>
-                    </div>
-                    
-                    <!-- 提及内容 -->
-                    <div id="mentionConcepts" class="mb-4">
-                        <div class="flex items-center text-green-700 font-medium mb-2 cursor-pointer" onclick="toggleMention()">
-                            <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                            <span>🟢 提及内容（简单了解）</span>
-                            <span id="mentionCount" class="ml-2 text-xs bg-green-100 px-2 py-0.5 rounded"></span>
-                            <span id="mentionToggle" class="ml-auto text-xs">▼</span>
-                        </div>
-                        <div id="mentionList" class="space-y-2 pl-4 border-l-2 border-green-200"></div>
-                    </div>
-                </div>
-                
-                <!-- 主体内容概括 -->
-                <div id="mainTopicSection" class="mb-6 bg-blue-50 p-4 rounded hidden">
-                    <h3 class="font-medium mb-2 text-blue-800">📌 本节课主体</h3>
-                    <p id="mainTopic" class="text-blue-700 text-sm"></p>
-                </div>
-                
-                <!-- 摘要 -->
-                <div class="mb-6 bg-gray-50 p-4 rounded">
-                    <h3 class="font-medium mb-2">章节摘要：</h3>
-                    <p id="resultSummary" class="text-gray-600 text-sm"></p>
-                </div>
-                
-                <!-- 操作按钮 -->
-                <div class="flex justify-end space-x-4">
-                    <button id="re识别Btn" class="text-gray-500 hover:text-gray-700">
-                        🔄 重新识别
-                    </button>
-                    <a id="startLearningBtn" href="#" 
-                       class="bg-green-500 text-white px-6 py-2 rounded-lg hover:bg-green-600 transition">
-                        开始学习 →
-                    </a>
-                </div>
-            </div>
+        <div id="practiceQuestion" class="practice-question"></div>
+        <div id="practiceOptions" class="practice-options"></div>
+        <div id="practiceFeedback" class="practice-feedback hidden"></div>
+        <div class="composer-actions">
+            <button type="button" class="primary-button" onclick="submitPracticeAnswer()">提交答案</button>
         </div>
     </div>
 </div>
@@ -252,305 +192,672 @@
 
 {% block extra_css %}
 <style>
-    .line-clamp-2 {
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
+    :root {
+        --paper-bg: #f4eee2;
+        --paper-card: rgba(252, 248, 240, 0.96);
+        --paper-stroke: rgba(123, 98, 62, 0.16);
+        --paper-shadow: 18px 18px 40px rgba(183, 168, 145, 0.35), -14px -14px 28px rgba(255, 255, 255, 0.9);
+        --paper-emboss: inset 1px 1px 0 rgba(255, 255, 255, 0.9), inset -1px -1px 0 rgba(186, 167, 138, 0.18);
+        --ink-main: #2e261d;
+        --ink-soft: rgba(60, 48, 37, 0.7);
+        --accent-deep: #6e5536;
+        --accent-alert: #b25c43;
+        --surface-mist: rgba(255, 255, 255, 0.65);
+    }
+
+    .upload-workbench { display: grid; gap: 1.4rem; }
+    .paper-card {
+        position: relative;
+        border-radius: 1.9rem;
+        border: 1px solid var(--paper-stroke);
+        background:
+            radial-gradient(circle at top left, rgba(255, 255, 255, 0.82), transparent 35%),
+            linear-gradient(180deg, rgba(250, 246, 238, 0.98), rgba(244, 238, 226, 0.98));
+        box-shadow: var(--paper-shadow), var(--paper-emboss);
         overflow: hidden;
+    }
+    .paper-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.18), transparent 46%);
+        pointer-events: none;
+    }
+    .upload-hero, .composer-card, .side-card, .preview-card, .report-card, .pending-card, .archive-card, .stat-card { padding: 1.45rem; }
+    .upload-hero { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.8fr); gap: 1.2rem; align-items: end; }
+    .upload-kicker, .section-kicker, .hero-mini-label, .stat-label { color: var(--accent-deep); font-size: 0.74rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; }
+    .upload-hero h1, .section-head h2 { margin: 0.55rem 0 0; color: var(--ink-main); font-family: "Noto Serif SC", "Songti SC", "STSong", serif; line-height: 1.06; }
+    .upload-hero h1 { font-size: clamp(2rem, 4vw, 3.2rem); }
+    .upload-hero p, .hero-mini-value, .side-card__copy, .stat-note, .field-hint, .preview-item__copy, .pending-item__copy, .archive-note__summary, .archive-note__body, .recent-upload-item__copy, .report-copy { color: var(--ink-soft); line-height: 1.7; }
+    .upload-hero__summary { padding: 1.1rem; border-radius: 1.45rem; background: var(--surface-mist); border: 1px solid rgba(110, 85, 54, 0.12); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72); }
+    .hero-mini-button, .primary-button, .subtle-button, .mode-pill, .candidate-button, .mini-button { border: 0; cursor: pointer; transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease; }
+    .hero-mini-button, .primary-button { padding: 0.88rem 1.25rem; border-radius: 999px; background: linear-gradient(135deg, #7f5f39, #c58b41); color: #fffdf8; box-shadow: 0 14px 26px rgba(136, 99, 54, 0.22); font-weight: 700; }
+    .subtle-button, .mini-button, .mode-pill, .candidate-button { padding: 0.72rem 1rem; border-radius: 999px; background: rgba(255, 255, 255, 0.7); color: var(--ink-main); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 10px 20px rgba(171, 152, 126, 0.18); }
+    .hero-mini-button:hover, .primary-button:hover, .subtle-button:hover, .mode-pill:hover, .candidate-button:hover, .mini-button:hover { transform: translateY(-1px); }
+    .mode-pill.is-active { background: linear-gradient(135deg, rgba(126, 95, 56, 0.95), rgba(211, 153, 84, 0.9)); color: #fffdf8; }
+    .upload-stats-grid, .upload-main-grid, .upload-knowledge-grid { display: grid; gap: 1rem; }
+    .upload-stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .upload-main-grid { grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.88fr); }
+    .upload-knowledge-grid { grid-template-columns: minmax(300px, 0.82fr) minmax(0, 1.2fr); }
+    .stat-card--alert { background: radial-gradient(circle at top left, rgba(255,255,255,0.82), transparent 35%), linear-gradient(180deg, rgba(250,240,235,0.96), rgba(247,232,226,0.96)); }
+    .stat-value { margin-top: 0.55rem; color: var(--ink-main); font-size: 2.1rem; font-weight: 700; }
+    .section-head { position: relative; z-index: 1; display: flex; align-items: start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+    .section-head--spaced { align-items: center; }
+    .section-actions, .composer-actions, .composer-mode-row, .candidate-row, .source-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .field-label { display: block; margin: 1rem 0 0.45rem; color: var(--ink-main); font-weight: 700; }
+    .paper-input, .paper-textarea, .paper-file {
+        width: 100%;
+        border: 1px solid rgba(110, 85, 54, 0.16);
+        border-radius: 1.1rem;
+        background: rgba(255, 255, 255, 0.76);
+        color: var(--ink-main);
+        padding: 0.88rem 1rem;
+        box-shadow: inset 2px 2px 6px rgba(194, 177, 148, 0.22), inset -2px -2px 6px rgba(255, 255, 255, 0.78);
+    }
+    .paper-input--small { max-width: 280px; }
+    .paper-textarea { min-height: 15rem; resize: vertical; }
+    .paper-textarea--short { min-height: 11rem; }
+    .pressure-strip, .recent-upload-list, .preview-list, .pending-list, .knowledge-accordion, .preview-kp-grid, .practice-options, .archive-item__panel, .report-grid { display: grid; gap: 0.85rem; }
+    .pressure-strip { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+    .pressure-pill, .recent-upload-item, .preview-item, .pending-item, .archive-item, .preview-kp, .report-question { position: relative; z-index: 1; padding: 1rem; border-radius: 1.3rem; background: rgba(255,255,255,0.56); border: 1px solid rgba(110,85,54,0.12); }
+    .pressure-pill { text-align: center; }
+    .pressure-pill__date { color: var(--ink-soft); font-size: 0.75rem; }
+    .pressure-pill__count { margin-top: 0.4rem; font-size: 1.5rem; color: var(--ink-main); font-weight: 700; }
+    .pressure-pill__label { margin-top: 0.3rem; font-size: 0.76rem; color: var(--accent-deep); }
+    .preview-item__header, .pending-item__header, .archive-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .preview-status, .archive-count, .source-chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.34rem 0.7rem; border-radius: 999px; background: rgba(255,255,255,0.74); color: var(--accent-deep); font-size: 0.78rem; font-weight: 700; }
+    .preview-status--pending { color: var(--accent-alert); }
+    .upload-main-grid .side-divider, .report-section { margin-top: 1.2rem; padding-top: 1.1rem; border-top: 1px solid rgba(110, 85, 54, 0.12); }
+    .archive-item__panel { margin-top: 0.9rem; display: none; }
+    .archive-item.is-open .archive-item__panel { display: grid; }
+    .archive-note { padding: 0.95rem; border-radius: 1.1rem; background: rgba(255,255,255,0.72); border: 1px solid rgba(110,85,54,0.1); }
+    .archive-note__title, .report-title, .practice-question { color: var(--ink-main); font-weight: 700; }
+    .modal-shell { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 1rem; background: rgba(28,22,17,0.42); z-index: 50; }
+    .modal-card { width: min(780px, 96vw); max-height: 88vh; overflow: auto; border-radius: 1.8rem; padding: 1.4rem; background: linear-gradient(180deg, rgba(252,248,240,0.98), rgba(245,238,226,0.98)); box-shadow: 0 28px 50px rgba(40,28,18,0.28); }
+    .modal-card--practice { width: min(720px, 96vw); }
+    .practice-option { display: flex; gap: 0.75rem; align-items: start; padding: 0.92rem; border-radius: 1rem; background: rgba(255,255,255,0.7); border: 1px solid rgba(110,85,54,0.12); }
+    .practice-feedback { margin-top: 1rem; padding: 1rem; border-radius: 1rem; background: rgba(255,255,255,0.7); color: var(--ink-main); }
+    .empty-state { padding: 1rem; border-radius: 1rem; background: rgba(255,255,255,0.54); color: var(--ink-soft); }
+    .hidden { display: none !important; }
+    @media (max-width: 1100px) {
+        .upload-stats-grid, .upload-main-grid, .upload-knowledge-grid, .upload-hero { grid-template-columns: 1fr; }
+        .pressure-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media print {
+        body.print-report .upload-workbench > *:not(#reportSection) { display: none !important; }
+        body.print-report #reportSection { display: block !important; box-shadow: none; border: 0; background: #fff; }
+        body.print-report .paper-card::after, body.print-report .section-actions, body.print-report .subtle-button, body.print-report .primary-button { display: none !important; }
     }
 </style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    // 设置今天日期
-    document.getElementById('studyDate').value = new Date().toISOString().split('T')[0];
-    
-    // 表单提交
-    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const content = document.getElementById('content').value.trim();
-        if (!content) {
-            alert('请输入讲课内容');
-            return;
-        }
-        
-        // 显示加载状态
-        document.getElementById('submitBtn').disabled = true;
-        document.getElementById('loadingIcon').classList.remove('hidden');
-        
-        try {
-            const response = await fetch('/api/upload', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    content: content,
-                    date: document.getElementById('studyDate').value
-                })
-            });
-            
-            const result = await response.json();
-            
-            if (response.ok) {
-                // 显示识别结果弹窗
-                displayResultModal(result);
-            } else {
-                alert('识别失败：' + result.detail);
-            }
-        } catch (error) {
-            alert('上传失败：' + error.message);
-        } finally {
-            document.getElementById('submitBtn').disabled = false;
-            document.getElementById('loadingIcon').classList.add('hidden');
-        }
+const uploadState = {
+    workspace: null,
+    preview: null,
+    report: null,
+    activeMode: 'text_paste',
+    chapterLookup: {},
+    editorNote: null,
+    practice: null,
+};
+
+function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = String(value ?? '');
+    return div.innerHTML;
+}
+
+function setUploadMode(mode, trigger) {
+    uploadState.activeMode = mode;
+    document.querySelectorAll('.mode-pill').forEach((button) => {
+        button.classList.toggle('is-active', button === trigger);
     });
-    
-    // 显示识别结果
-    function displayResult(data) {
-        const extracted = data.extracted;
-        
-        document.getElementById('resultBook').textContent = extracted.book;
-        document.getElementById('resultEdition').textContent = extracted.edition || '-';
-        document.getElementById('resultChapter').textContent = extracted.chapter_number;
-        document.getElementById('resultTitle').textContent = extracted.chapter_title;
-        document.getElementById('resultSummary').textContent = extracted.summary || extracted.main_topic || '暂无摘要';
-        
-        // 主体内容概括
-        if (extracted.main_topic) {
-            document.getElementById('mainTopicSection').classList.remove('hidden');
-            document.getElementById('mainTopic').textContent = extracted.main_topic;
+    const textPanel = document.getElementById('textModePanel');
+    const filePanel = document.getElementById('fileModePanel');
+    const fileInput = document.getElementById('contentFileInput');
+    const fileHint = document.getElementById('fileModeHint');
+    if (mode === 'text_paste') {
+        textPanel.classList.remove('hidden');
+        filePanel.classList.add('hidden');
+    } else {
+        textPanel.classList.add('hidden');
+        filePanel.classList.remove('hidden');
+        fileInput.value = '';
+        if (mode === 'file') {
+            fileInput.setAttribute('accept', '.md,.txt');
+            fileHint.textContent = '单次只上传一个 md 或 txt 文件。';
         } else {
-            document.getElementById('mainTopicSection').classList.add('hidden');
+            fileInput.setAttribute('accept', 'image/*');
+            fileHint.textContent = '上传一张课堂图片，后台会先做 OCR，再进入同一套知识整理流程。';
         }
-        
-        // 按重要性分组显示知识点
-        const concepts = extracted.concepts || [];
-        const mainConcepts = concepts.filter(c => c.importance === 'main' || !c.importance);
-        const secondaryConcepts = concepts.filter(c => c.importance === 'secondary');
-        const mentionConcepts = concepts.filter(c => c.importance === 'mention');
-        
-        // 主体内容
-        const mainList = document.getElementById('mainList');
-        const mainSection = document.getElementById('mainConcepts');
-        mainList.innerHTML = '';
-        
-        if (mainConcepts.length > 0) {
-            mainSection.classList.remove('hidden');
-            document.getElementById('mainCount').textContent = mainConcepts.length + '个';
-            mainConcepts.forEach(concept => {
-                mainList.appendChild(createConceptCard(concept, 'red'));
-            });
-        } else {
-            mainSection.classList.add('hidden');
-        }
-        
-        // 次要内容
-        const secondaryList = document.getElementById('secondaryList');
-        const secondarySection = document.getElementById('secondaryConcepts');
-        secondaryList.innerHTML = '';
-        
-        if (secondaryConcepts.length > 0) {
-            secondarySection.classList.remove('hidden');
-            document.getElementById('secondaryCount').textContent = secondaryConcepts.length + '个';
-            secondaryConcepts.forEach(concept => {
-                secondaryList.appendChild(createConceptCard(concept, 'yellow'));
-            });
-        } else {
-            secondarySection.classList.add('hidden');
-        }
-        
-        // 提及内容
-        const mentionList = document.getElementById('mentionList');
-        const mentionSection = document.getElementById('mentionConcepts');
-        mentionList.innerHTML = '';
-        
-        if (mentionConcepts.length > 0) {
-            mentionSection.classList.remove('hidden');
-            document.getElementById('mentionCount').textContent = mentionConcepts.length + '个';
-            mentionConcepts.forEach(concept => {
-                mentionList.appendChild(createConceptCard(concept, 'green'));
-            });
-        } else {
-            mentionSection.classList.add('hidden');
-        }
-        
-        // 设置学习链接 - 使用服务器返回的chapter_id
-        const chapterId = extracted.chapter_id;
-        document.getElementById('startLearningBtn').href = `/chapter/${chapterId}`;
-        
-        // 显示结果区域
-        document.getElementById('resultArea').classList.remove('hidden');
-        document.getElementById('resultArea').scrollIntoView({ behavior: 'smooth' });
     }
-    
-    // 创建知识点卡片
-    function createConceptCard(concept, color) {
-        const div = document.createElement('div');
-        div.className = `bg-${color}-50 p-3 rounded border border-${color}-100 hover:bg-${color}-100 transition`;
-        
-        const importanceLabels = {
-            'main': '主体',
-            'secondary': '次要', 
-            'mention': '提及'
-        };
-        
-        const label = importanceLabels[concept.importance] || '主体';
-        const badgeColor = color === 'red' ? 'bg-red-100 text-red-700' : 
-                          color === 'yellow' ? 'bg-yellow-100 text-yellow-700' : 
-                          'bg-green-100 text-green-700';
-        
-        div.innerHTML = `
-            <div class="flex items-start justify-between">
-                <div class="flex-1">
-                    <div class="font-medium">${concept.name}</div>
-                    ${concept.evidence ? `<div class="text-xs text-gray-500 mt-1 line-clamp-2">依据：${concept.evidence}</div>` : ''}
-                </div>
-                <span class="text-xs ${badgeColor} px-2 py-0.5 rounded ml-2 flex-shrink-0">${label}</span>
+}
+
+function resetComposer() {
+    document.getElementById('sourceNameInput').value = '';
+    document.getElementById('contentTextInput').value = '';
+    document.getElementById('contentFileInput').value = '';
+}
+
+function showMessage(message) {
+    window.alert(message);
+}
+
+async function safeJsonFetch(url, options = {}) {
+    const response = await fetch(url, options);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(payload.detail || '请求失败');
+    }
+    return payload;
+}
+
+function resolveChapterId(inputValue) {
+    const value = String(inputValue || '').trim();
+    return uploadState.chapterLookup[value] || value || '';
+}
+
+async function loadWorkspace() {
+    try {
+        const data = await safeJsonFetch('/api/upload/workspace');
+        uploadState.workspace = data;
+        uploadState.chapterLookup = {};
+        (data.chapter_options || []).forEach((item) => {
+            uploadState.chapterLookup[item.id] = item.id;
+            uploadState.chapterLookup[item.label] = item.id;
+        });
+        renderWorkspace();
+    } catch (error) {
+        showMessage(error.message);
+    }
+}
+
+function renderWorkspace() {
+    const workspace = uploadState.workspace || {};
+    const stats = workspace.stats || {};
+    document.getElementById('statUploads').textContent = stats.total_uploads || 0;
+    document.getElementById('statChapters').textContent = stats.total_chapters || 0;
+    document.getElementById('statKnowledgePoints').textContent = stats.total_knowledge_points || 0;
+    document.getElementById('statPending').textContent = stats.pending_count || 0;
+    document.getElementById('heroPaceAdvice').textContent = stats.pace_advice || '还没有足够的数据生成节奏建议。';
+    document.getElementById('reviewPaceSummary').textContent = stats.pace_advice || '还没有足够的数据生成节奏建议。';
+    renderPressureStrip(stats.weekly_review_pressure || []);
+    renderRecentUploads(workspace.recent_uploads || []);
+    renderPendingList(workspace.pending || []);
+    renderChapterDatalist(workspace.chapter_options || []);
+    renderKnowledgeArchive();
+}
+
+function renderPressureStrip(days) {
+    const container = document.getElementById('reviewPressureStrip');
+    if (!days.length) {
+        container.innerHTML = '<div class="empty-state">当前没有未来 7 天的复习压力数据。</div>';
+        return;
+    }
+    container.innerHTML = days.map((item) => `
+        <div class="pressure-pill">
+            <div class="pressure-pill__date">${escapeHtml(item.date.slice(5))}</div>
+            <div class="pressure-pill__count">${escapeHtml(item.count)}</div>
+            <div class="pressure-pill__label">${escapeHtml(item.label)}</div>
+        </div>
+    `).join('');
+}
+
+function renderRecentUploads(items) {
+    const container = document.getElementById('recentUploadsList');
+    if (!items.length) {
+        container.innerHTML = '<div class="empty-state">还没有上传记录。</div>';
+        return;
+    }
+    container.innerHTML = items.map((item) => `
+        <div class="recent-upload-item">
+            <div class="preview-item__header">
+                <strong>${escapeHtml(item.source_name || item.source_type)}</strong>
+                <span class="archive-count">${escapeHtml(item.saved_note_count)} 已保存 / ${escapeHtml(item.pending_item_count)} 待归类</span>
             </div>
+            <div class="recent-upload-item__copy">${escapeHtml((item.created_at || '').replace('T', ' ').slice(0, 16))}</div>
+        </div>
+    `).join('');
+}
+
+function renderChapterDatalist(options) {
+    const datalist = document.getElementById('chapterDatalist');
+    datalist.innerHTML = options.map((item) => `<option value="${escapeHtml(item.label)}"></option>`).join('');
+}
+
+function renderPendingList(items) {
+    const container = document.getElementById('pendingList');
+    if (!items.length) {
+        container.innerHTML = '<div class="empty-state">当前没有重点待归类对象。新上传内容如果章节不明确，会先出现在这里。</div>';
+        return;
+    }
+    container.innerHTML = items.map((item) => `
+        <div class="pending-item" id="pending-${item.id}">
+            <div class="pending-item__header">
+                <div>
+                    <div class="preview-status preview-status--pending">待归类</div>
+                    <h3>${escapeHtml(item.chapter_title_hint || '章节待确认')}</h3>
+                </div>
+                <span class="archive-count">${escapeHtml((item.knowledge_points || []).length)} 个知识点</span>
+            </div>
+            <div class="pending-item__copy">${escapeHtml(item.source_excerpt || '')}</div>
+            <div class="candidate-row">
+                ${(item.chapter_candidates || []).map((candidate) => `
+                    <button type="button" class="candidate-button" onclick="fillPendingCandidate(${item.id}, decodeURIComponent('${encodeURIComponent(candidate.label || '')}'))">${escapeHtml(candidate.label)}</button>
+                `).join('')}
+            </div>
+            <label class="field-label" for="pending-input-${item.id}">手动搜索章节</label>
+            <input id="pending-input-${item.id}" class="paper-input" list="chapterDatalist" placeholder="输入章节名称或章节 ID" />
+            <div class="composer-actions">
+                <button type="button" class="primary-button" onclick="resolvePending(${item.id})">归入章节</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderKnowledgeArchive() {
+    const workspace = uploadState.workspace || {};
+    const query = String(document.getElementById('knowledgeSearchInput').value || '').trim().toLowerCase();
+    const chapters = (workspace.chapters || []).filter((chapter) => {
+        if (!query) return true;
+        const chapterHit = String(chapter.chapter_label || '').toLowerCase().includes(query);
+        const noteHit = (chapter.notes || []).some((note) => String(note.concept_name || '').toLowerCase().includes(query) || String(note.note_summary || '').toLowerCase().includes(query));
+        return chapterHit || noteHit;
+    });
+    const container = document.getElementById('knowledgeArchive');
+    if (!chapters.length) {
+        container.innerHTML = '<div class="empty-state">当前还没有知识点归档。</div>';
+        return;
+    }
+    container.innerHTML = chapters.map((chapter) => `
+        <div class="archive-item" id="chapter-${chapter.chapter_id}">
+            <button type="button" class="archive-head" onclick="toggleChapter('${escapeHtml(chapter.chapter_id)}')">
+                <div>
+                    <div class="archive-count">${escapeHtml(chapter.book || '未分类科目')}</div>
+                    <h3>${escapeHtml(chapter.chapter_label)}</h3>
+                </div>
+                <span class="archive-count">${escapeHtml(chapter.note_count)} 个知识点</span>
+            </button>
+            <div class="archive-item__panel">
+                ${(chapter.notes || []).map((note) => `
+                    <div class="archive-note">
+                        <div class="preview-item__header">
+                            <div>
+                                <div class="archive-note__title">${escapeHtml(note.concept_name)}</div>
+                                <div class="archive-note__summary">${escapeHtml(note.note_summary || '')}</div>
+                            </div>
+                            <div class="composer-actions">
+                                <button type="button" class="mini-button" onclick="openEditor(${note.id})">编辑</button>
+                                <button type="button" class="primary-button" onclick="startPractice(${note.id})">开始出题</button>
+                            </div>
+                        </div>
+                        <div class="archive-note__body">${escapeHtml(note.note_body || '')}</div>
+                        <div class="source-row">
+                            ${(note.sources || []).map((source) => `<span class="source-chip">${escapeHtml(source.source_name || source.source_type)}</span>`).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+function toggleChapter(chapterId) {
+    document.getElementById(`chapter-${chapterId}`)?.classList.toggle('is-open');
+}
+
+async function buildPreview() {
+    const previewBtn = document.getElementById('previewBtn');
+    previewBtn.disabled = true;
+    previewBtn.textContent = '正在整理...';
+    try {
+        const formData = new FormData();
+        formData.append('source_mode', uploadState.activeMode);
+        formData.append('source_name', document.getElementById('sourceNameInput').value || '');
+        if (uploadState.activeMode === 'text_paste') {
+            formData.append('content_text', document.getElementById('contentTextInput').value || '');
+        } else {
+            const fileInput = document.getElementById('contentFileInput');
+            if (!fileInput.files || !fileInput.files[0]) {
+                throw new Error(uploadState.activeMode === 'file' ? '请选择 md/txt 文件。' : '请选择图片文件。');
+            }
+            formData.append('file', fileInput.files[0]);
+        }
+        const data = await safeJsonFetch('/api/upload/knowledge-preview', {
+            method: 'POST',
+            body: formData,
+        });
+        uploadState.preview = data;
+        renderPreview();
+    } catch (error) {
+        showMessage(error.message);
+    } finally {
+        previewBtn.disabled = false;
+        previewBtn.textContent = '生成整理预览';
+    }
+}
+
+function renderPreview() {
+    const preview = uploadState.preview;
+    if (!preview) return;
+    document.getElementById('previewSection').classList.remove('hidden');
+    document.getElementById('previewMeta').textContent = `本次共识别 ${preview.item_count} 个章节分组，其中 ${preview.pending_count} 个需要你确认章节。`;
+    document.getElementById('previewList').innerHTML = (preview.items || []).map((item, index) => `
+        <div class="preview-item" data-preview-item="${index}">
+            <div class="preview-item__header">
+                <div>
+                    <span class="preview-status ${item.status === 'pending' ? 'preview-status--pending' : ''}">${item.status === 'pending' ? '待确认章节' : '已自动归类'}</span>
+                    <h3>${escapeHtml(item.chapter_title || '章节未命名')}</h3>
+                </div>
+                <div class="archive-count">${escapeHtml(item.book || '未识别科目')}</div>
+            </div>
+            <div class="preview-item__copy">${escapeHtml(item.chapter_summary || '')}</div>
+            <label class="field-label">归属章节</label>
+            <input class="paper-input preview-chapter-input" list="chapterDatalist" value="${escapeHtml(item.chapter_label || '')}" placeholder="搜索章节或保留为空放入待归类" />
+            <div class="candidate-row">
+                ${(item.chapter_candidates || []).map((candidate) => `<button type="button" class="candidate-button" onclick="fillPreviewCandidate(${index}, decodeURIComponent('${encodeURIComponent(candidate.label || '')}'))">${escapeHtml(candidate.label)}</button>`).join('')}
+            </div>
+            <div class="preview-kp-grid">
+                ${(item.knowledge_points || []).map((kp) => `
+                    <div class="preview-kp">
+                        <label class="field-label">知识点名称</label>
+                        <input class="paper-input preview-kp-name" value="${escapeHtml(kp.name)}" />
+                        <label class="field-label">摘要</label>
+                        <input class="paper-input preview-kp-summary" value="${escapeHtml(kp.summary)}" />
+                        <label class="field-label">笔记正文</label>
+                        <textarea class="paper-textarea paper-textarea--short preview-kp-body">${escapeHtml(kp.note_body)}</textarea>
+                    </div>
+                `).join('')}
+            </div>
+            <div class="composer-actions">
+                <button type="button" class="mini-button" onclick="addPreviewKnowledgePoint(${index})">添加知识点</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function addPreviewKnowledgePoint(index) {
+    const wrapper = document.querySelector(`[data-preview-item="${index}"] .preview-kp-grid`);
+    if (!wrapper) return;
+    wrapper.insertAdjacentHTML('beforeend', `
+        <div class="preview-kp">
+            <label class="field-label">知识点名称</label>
+            <input class="paper-input preview-kp-name" value="" />
+            <label class="field-label">摘要</label>
+            <input class="paper-input preview-kp-summary" value="" />
+            <label class="field-label">笔记正文</label>
+            <textarea class="paper-textarea paper-textarea--short preview-kp-body"></textarea>
+        </div>
+    `);
+}
+
+function collectPreviewItems() {
+    return Array.from(document.querySelectorAll('[data-preview-item]')).map((item, index) => {
+        const original = uploadState.preview.items[index];
+        const knowledgePoints = Array.from(item.querySelectorAll('.preview-kp')).map((node) => ({
+            name: node.querySelector('.preview-kp-name').value.trim(),
+            summary: node.querySelector('.preview-kp-summary').value.trim(),
+            note_body: node.querySelector('.preview-kp-body').value.trim(),
+        })).filter((kp) => kp.name && kp.note_body);
+        return {
+            local_id: original.local_id,
+            book: original.book,
+            chapter_number: original.chapter_number,
+            chapter_title: original.chapter_title,
+            chapter_summary: original.chapter_summary,
+            source_excerpt: original.source_excerpt,
+            chapter_candidates: original.chapter_candidates,
+            chapter_id: resolveChapterId(item.querySelector('.preview-chapter-input').value),
+            knowledge_points: knowledgePoints,
+        };
+    });
+}
+
+async function savePreview() {
+    if (!uploadState.preview) return;
+    try {
+        const payload = { preview_id: uploadState.preview.preview_id, items: collectPreviewItems() };
+        const result = await safeJsonFetch('/api/upload/knowledge-save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        showMessage(result.message || '保存成功');
+        dismissPreview();
+        await loadWorkspace();
+    } catch (error) {
+        showMessage(error.message);
+    }
+}
+
+function dismissPreview() {
+    uploadState.preview = null;
+    document.getElementById('previewSection').classList.add('hidden');
+    document.getElementById('previewList').innerHTML = '';
+}
+
+function fillPreviewCandidate(index, label) {
+    const input = document.querySelector(`[data-preview-item="${index}"] .preview-chapter-input`);
+    if (input) input.value = label;
+}
+
+function fillPendingCandidate(id, label) {
+    const input = document.getElementById(`pending-input-${id}`);
+    if (input) input.value = label;
+}
+
+async function resolvePending(id) {
+    const chapterInput = document.getElementById(`pending-input-${id}`);
+    const chapterId = resolveChapterId(chapterInput ? chapterInput.value : '');
+    if (!chapterId) {
+        showMessage('请先选择章节。');
+        return;
+    }
+    try {
+        const result = await safeJsonFetch(`/api/upload/pending/${id}/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chapter_id: chapterId }),
+        });
+        showMessage(result.message || '归类成功');
+        await loadWorkspace();
+    } catch (error) {
+        showMessage(error.message);
+    }
+}
+
+function findNoteById(noteId) {
+    const chapters = (uploadState.workspace && uploadState.workspace.chapters) || [];
+    for (const chapter of chapters) {
+        for (const note of (chapter.notes || [])) {
+            if (note.id === noteId) {
+                return { chapter, note };
+            }
+        }
+    }
+    return null;
+}
+
+function openEditor(noteId) {
+    const found = findNoteById(noteId);
+    if (!found) return;
+    uploadState.editorNote = found;
+    document.getElementById('editorChapterInput').value = found.chapter.chapter_label || found.chapter.chapter_id;
+    document.getElementById('editorConceptName').value = found.note.concept_name || '';
+    document.getElementById('editorNoteSummary').value = found.note.note_summary || '';
+    document.getElementById('editorNoteBody').value = found.note.note_body || '';
+    document.getElementById('editorModal').classList.remove('hidden');
+}
+
+function closeEditor() {
+    uploadState.editorNote = null;
+    document.getElementById('editorModal').classList.add('hidden');
+}
+
+async function saveEditor() {
+    if (!uploadState.editorNote) return;
+    try {
+        const chapterId = resolveChapterId(document.getElementById('editorChapterInput').value);
+        if (!chapterId) throw new Error('请选择章节。');
+        await safeJsonFetch(`/api/upload/knowledge-points/${uploadState.editorNote.note.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chapter_id: chapterId,
+                concept_name: document.getElementById('editorConceptName').value,
+                note_summary: document.getElementById('editorNoteSummary').value,
+                note_body: document.getElementById('editorNoteBody').value,
+            }),
+        });
+        closeEditor();
+        await loadWorkspace();
+    } catch (error) {
+        showMessage(error.message);
+    }
+}
+
+async function startPractice(noteId) {
+    try {
+        const payload = await safeJsonFetch(`/api/upload/knowledge-points/${noteId}/practice`, { method: 'POST' });
+        uploadState.practice = payload;
+        renderPractice();
+        document.getElementById('practiceModal').classList.remove('hidden');
+    } catch (error) {
+        showMessage(error.message);
+    }
+}
+
+function renderPractice() {
+    const practice = uploadState.practice;
+    if (!practice) return;
+    document.getElementById('practiceTitle').textContent = `${practice.concept_name} · 即时练习`;
+    document.getElementById('practiceQuestion').textContent = practice.question || '';
+    document.getElementById('practiceFeedback').classList.add('hidden');
+    document.getElementById('practiceFeedback').innerHTML = '';
+    document.getElementById('practiceOptions').innerHTML = Object.entries(practice.options || {}).map(([key, value]) => `
+        <label class="practice-option">
+            <input type="radio" name="practiceAnswer" value="${escapeHtml(key)}" />
+            <span><strong>${escapeHtml(key)}.</strong> ${escapeHtml(value)}</span>
+        </label>
+    `).join('');
+}
+
+function closePractice() {
+    uploadState.practice = null;
+    document.getElementById('practiceModal').classList.add('hidden');
+}
+
+async function submitPracticeAnswer() {
+    const selected = document.querySelector('input[name="practiceAnswer"]:checked');
+    if (!selected || !uploadState.practice) {
+        showMessage('请先选择答案。');
+        return;
+    }
+    try {
+        const payload = await safeJsonFetch('/api/upload/practice/grade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                practice_id: uploadState.practice.practice_id,
+                user_answer: selected.value,
+            }),
+        });
+        const feedback = document.getElementById('practiceFeedback');
+        feedback.classList.remove('hidden');
+        feedback.innerHTML = `
+            <div><strong>${payload.is_correct ? '回答正确' : '回答错误'}</strong></div>
+            <div>正确答案：${escapeHtml(payload.correct_answer || '')}</div>
+            <div>${escapeHtml(payload.explanation || '')}</div>
         `;
-        return div;
+    } catch (error) {
+        showMessage(error.message);
     }
-    
-    // 切换提及内容显示/隐藏
-    function toggleMention() {
-        const list = document.getElementById('mentionList');
-        const toggle = document.getElementById('mentionToggle');
-        
-        if (list.classList.contains('hidden')) {
-            list.classList.remove('hidden');
-            toggle.textContent = '▼';
-        } else {
-            list.classList.add('hidden');
-            toggle.textContent = '▶';
-        }
+}
+
+async function loadDailyReport(forceRegenerate) {
+    try {
+        const query = forceRegenerate ? '?force_regenerate=true' : '';
+        const data = await safeJsonFetch(`/api/upload/daily-report${query}`);
+        uploadState.report = data;
+        renderDailyReport();
+        document.getElementById('reportSection').classList.remove('hidden');
+    } catch (error) {
+        showMessage(error.message);
     }
-    
-    // 重新识别
-    document.getElementById('re识别Btn').addEventListener('click', () => {
-        document.getElementById('resultArea').classList.add('hidden');
-        document.getElementById('content').focus();
-    });
+}
 
-    // ========== 弹窗相关函数 ==========
+function renderDailyReport() {
+    const report = uploadState.report || {};
+    const body = document.getElementById('reportBody');
+    const created = report.created_today || [];
+    const updated = report.updated_today || [];
+    const plan = (report.review_plan && report.review_plan.days) || [];
+    const questions = report.practice_questions || [];
+    body.innerHTML = `
+        <div class="report-copy">日期：${escapeHtml(report.date || '')}</div>
+        <div class="report-grid">
+            <div class="recent-upload-item"><div class="stat-label">今日新增</div><div class="stat-value">${escapeHtml(created.length)}</div><div class="report-copy">新写入知识点</div></div>
+            <div class="recent-upload-item"><div class="stat-label">今日合并更新</div><div class="stat-value">${escapeHtml(updated.length)}</div><div class="report-copy">已有知识点被补充更新</div></div>
+            <div class="recent-upload-item"><div class="stat-label">知识点总量</div><div class="stat-value">${escapeHtml(report.totals ? report.totals.total_knowledge_points : 0)}</div><div class="report-copy">当前有效知识点</div></div>
+            <div class="recent-upload-item"><div class="stat-label">待归类</div><div class="stat-value">${escapeHtml(report.totals ? report.totals.pending_count : 0)}</div><div class="report-copy">还需要你确认章节</div></div>
+        </div>
+        <div class="report-section">
+            <div class="report-title">今日新增知识点</div>
+            ${created.length ? created.map((item) => `<div class="report-copy">• ${escapeHtml(item.chapter_label)} / ${escapeHtml(item.concept_name)}：${escapeHtml(item.note_summary)}</div>`).join('') : '<div class="empty-state">今天还没有新增知识点。</div>'}
+        </div>
+        <div class="report-section">
+            <div class="report-title">今日自动合并更新</div>
+            ${updated.length ? updated.map((item) => `<div class="report-copy">• ${escapeHtml(item.chapter_label)} / ${escapeHtml(item.concept_name)}：${escapeHtml(item.note_summary)}</div>`).join('') : '<div class="empty-state">今天没有知识点被合并更新。</div>'}
+        </div>
+        <div class="report-section">
+            <div class="report-title">未来 7 天复习节奏</div>
+            <div class="pressure-strip">
+                ${plan.map((item) => `<div class="pressure-pill"><div class="pressure-pill__date">${escapeHtml(item.date.slice(5))}</div><div class="pressure-pill__count">${escapeHtml(item.count)}</div><div class="pressure-pill__label">${escapeHtml(item.label)}</div></div>`).join('')}
+            </div>
+            <div class="report-copy" style="margin-top:0.85rem;">${escapeHtml((report.review_plan && report.review_plan.advice) || '')}</div>
+        </div>
+        <div class="report-section">
+            <div class="report-title">今日可直接作答的练习题</div>
+            ${questions.length ? questions.map((item, index) => `
+                <div class="report-question">
+                    <div class="archive-count">第 ${index + 1} 题 · ${escapeHtml(item.chapter_label)}</div>
+                    <div class="practice-question">${escapeHtml(item.question)}</div>
+                    <div class="practice-options">
+                        ${Object.entries(item.options || {}).map(([key, value]) => `<div class="practice-option"><span><strong>${escapeHtml(key)}.</strong> ${escapeHtml(value)}</span></div>`).join('')}
+                    </div>
+                </div>
+            `).join('') : '<div class="empty-state">暂无可生成的练习题。</div>'}
+        </div>
+        <div class="report-section">
+            <div class="report-title">答案与解析</div>
+            ${questions.length ? questions.map((item, index) => `<div class="report-copy"><strong>第 ${index + 1} 题 · ${escapeHtml(item.concept_name)}</strong><br>正确答案：${escapeHtml(item.correct_answer)}<br>解析：${escapeHtml(item.explanation)}</div>`).join('<br>') : '<div class="empty-state">暂无答案内容。</div>'}
+        </div>
+    `;
+}
 
-    // 显示识别结果弹窗
-    function displayResultModal(data) {
-        const extracted = data.extracted;
-
-        // 填充弹窗内容
-        document.getElementById('modalResultBook').textContent = extracted.book;
-        document.getElementById('modalResultEdition').textContent = extracted.edition || '-';
-        document.getElementById('modalResultChapter').textContent = extracted.chapter_number;
-        document.getElementById('modalResultTitle').textContent = extracted.chapter_title;
-        document.getElementById('modalResultSummary').textContent = extracted.summary || extracted.main_topic || '暂无摘要';
-
-        // 主体内容概括
-        if (extracted.main_topic) {
-            document.getElementById('modalMainTopicSection').classList.remove('hidden');
-            document.getElementById('modalMainTopic').textContent = extracted.main_topic;
-        } else {
-            document.getElementById('modalMainTopicSection').classList.add('hidden');
-        }
-
-        // 按重要性分组显示知识点
-        const concepts = extracted.concepts || [];
-        const mainConcepts = concepts.filter(c => c.importance === 'main' || !c.importance);
-        const secondaryConcepts = concepts.filter(c => c.importance === 'secondary');
-        const mentionConcepts = concepts.filter(c => c.importance === 'mention');
-
-        // 主体内容
-        const modalMainList = document.getElementById('modalMainList');
-        const modalMainSection = document.getElementById('modalMainConcepts');
-        modalMainList.innerHTML = '';
-
-        if (mainConcepts.length > 0) {
-            modalMainSection.classList.remove('hidden');
-            document.getElementById('modalMainCount').textContent = mainConcepts.length + '个';
-            mainConcepts.forEach(concept => {
-                modalMainList.appendChild(createConceptCard(concept, 'red'));
-            });
-        } else {
-            modalMainSection.classList.add('hidden');
-        }
-
-        // 次要内容
-        const modalSecondaryList = document.getElementById('modalSecondaryList');
-        const modalSecondarySection = document.getElementById('modalSecondaryConcepts');
-        modalSecondaryList.innerHTML = '';
-
-        if (secondaryConcepts.length > 0) {
-            modalSecondarySection.classList.remove('hidden');
-            document.getElementById('modalSecondaryCount').textContent = secondaryConcepts.length + '个';
-            secondaryConcepts.forEach(concept => {
-                modalSecondaryList.appendChild(createConceptCard(concept, 'yellow'));
-            });
-        } else {
-            modalSecondarySection.classList.add('hidden');
-        }
-
-        // 提及内容
-        const modalMentionList = document.getElementById('modalMentionList');
-        const modalMentionSection = document.getElementById('modalMentionConcepts');
-        modalMentionList.innerHTML = '';
-
-        if (mentionConcepts.length > 0) {
-            modalMentionSection.classList.remove('hidden');
-            document.getElementById('modalMentionCount').textContent = mentionConcepts.length + '个';
-            mentionConcepts.forEach(concept => {
-                modalMentionList.appendChild(createConceptCard(concept, 'green'));
-            });
-        } else {
-            modalMentionSection.classList.add('hidden');
-        }
-
-        // 设置学习链接
-        const chapterId = extracted.chapter_id;
-        document.getElementById('modalStartLearningBtn').href = `/chapter/${chapterId}`;
-
-        // 显示弹窗
-        document.getElementById('recognitionModal').classList.remove('hidden');
+function printDailyReport() {
+    if (!uploadState.report) {
+        showMessage('请先生成日报。');
+        return;
     }
+    document.body.classList.add('print-report');
+    window.print();
+    setTimeout(() => document.body.classList.remove('print-report'), 300);
+}
 
-    // 关闭识别结果弹窗
-    function closeRecognitionModal() {
-        document.getElementById('recognitionModal').classList.add('hidden');
+function handleModalBackdrop(event, id) {
+    if (event.target && event.target.id === id) {
+        if (id === 'editorModal') closeEditor();
+        if (id === 'practiceModal') closePractice();
     }
+}
 
-    // 切换弹窗中的提及内容显示/隐藏
-    function toggleModalMention() {
-        const list = document.getElementById('modalMentionList');
-        const toggle = document.getElementById('modalMentionToggle');
-
-        if (list.classList.contains('hidden')) {
-            list.classList.remove('hidden');
-            toggle.textContent = '▼';
-        } else {
-            list.classList.add('hidden');
-            toggle.textContent = '▶';
-        }
-    }
-
-    // 重新识别
-    function reRecognize() {
-        closeRecognitionModal();
-        document.getElementById('content').focus();
-    }
-
-    // 点击弹窗外部关闭
-    document.getElementById('recognitionModal').addEventListener('click', (e) => {
-        if (e.target.id === 'recognitionModal') {
-            closeRecognitionModal();
-        }
-    });
-
-    // ESC键关闭弹窗
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            closeRecognitionModal();
-        }
-    });
+document.addEventListener('DOMContentLoaded', () => {
+    const defaultModeButton = document.querySelector('.mode-pill.is-active');
+    setUploadMode('text_paste', defaultModeButton);
+    loadWorkspace();
+});
 </script>
 {% endblock %}

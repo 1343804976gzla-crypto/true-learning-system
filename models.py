@@ -4,8 +4,9 @@ True Learning System - Core Models
 """
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, Date, DateTime, 
-    Float, Boolean, ForeignKey, JSON, CheckConstraint, PrimaryKeyConstraint
+    create_engine, Column, Integer, String, Text, Date, DateTime,
+    Float, Boolean, ForeignKey, JSON, CheckConstraint, PrimaryKeyConstraint,
+    event,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -41,12 +42,26 @@ DATABASE_URL = _resolve_database_url()
 
 # 创建引擎
 engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False},
+    DATABASE_URL,
+    connect_args={"check_same_thread": False, "timeout": 30},
     echo=False  # 生产环境设为False
 )
 
 # 会话工厂
+@event.listens_for(engine, "connect")
+def _configure_sqlite_connection(dbapi_connection, _connection_record):
+    """Reduce transient SQLite write lock failures for concurrent web requests."""
+    try:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA busy_timeout = 30000")
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.close()
+    except Exception:
+        # Unsupported SQLite modes should not block app startup.
+        pass
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # 基类

@@ -947,17 +947,24 @@ class KnowledgeTreeResponse(BaseModel):
 class HistoryUploadItem(BaseModel):
     id: int
     date: str
+    recorded_at: Optional[str] = None
     book: str
     chapter_title: str
     chapter_id: str = ""
     concept_count: int
     summary: str = ""
     main_topic: str = ""
+    source_type: str = "upload"
+    source_label: str = ""
 
 
 class HistoryUploadResponse(BaseModel):
     total: int
     days: int
+    active_days: int = 0
+    average_uploads_per_active_day: float = 0.0
+    peak_date: Optional[str] = None
+    peak_count: int = 0
     uploads: List[HistoryUploadItem] = Field(default_factory=list)
 
 
@@ -966,7 +973,12 @@ class HistoryLearningStatsResponse(BaseModel):
     weekly_uploads: int
     latest_study_date: Optional[str] = None
     streak_days: int = 0
+    active_days: int = 0
+    average_uploads_per_active_day: float = 0.0
+    busiest_day: Optional[str] = None
+    busiest_day_count: int = 0
     book_distribution: Dict[str, int] = Field(default_factory=dict)
+    source_distribution: Dict[str, int] = Field(default_factory=dict)
 
 
 class HistoryTimelineDay(BaseModel):
@@ -978,6 +990,66 @@ class HistoryTimelineDay(BaseModel):
 class HistoryTimelineResponse(BaseModel):
     days: int
     timeline: List[HistoryTimelineDay] = Field(default_factory=list)
+
+
+class HistoryReviewTaskSummary(BaseModel):
+    task_id: int
+    chapter_id: str
+    book: str
+    chapter_title: str
+    unit_id: int
+    unit_title: str
+    unit_index: int
+    excerpt: str = ""
+    summary: str = ""
+    estimated_minutes: int = 0
+    due_reason: str
+    mastery_status: str
+    next_round: int = 1
+    answered_count: int = 0
+    question_count: int = 0
+    remaining_questions: int = 0
+    resume_position: int = 0
+    scheduled_for: str
+    carry_over_days: int = 0
+    status: str
+    ai_recommended_status: Optional[str] = None
+    user_selected_status: Optional[str] = None
+    grading_score: Optional[float] = None
+
+
+class HistoryReviewQuestionItem(BaseModel):
+    id: int
+    position: int
+    prompt: str
+    reference_answer: str
+    key_points: List[str] = Field(default_factory=list)
+    explanation: str = ""
+    source_excerpt: str = ""
+    user_answer: str = ""
+    ai_score: Optional[int] = None
+    ai_feedback: str = ""
+    good_points: List[str] = Field(default_factory=list)
+    missing_points: List[str] = Field(default_factory=list)
+    improvement_suggestion: str = ""
+
+
+class HistoryReviewTaskDetailResponse(HistoryReviewTaskSummary):
+    content_version: int = 1
+    source_content: str = ""
+    questions: List[HistoryReviewQuestionItem] = Field(default_factory=list)
+    overall_feedback: str = ""
+
+
+class HistoryReviewPlanResponse(BaseModel):
+    date: str
+    time_budget_minutes: int = 0
+    estimated_total_minutes: int = 0
+    remaining_minutes: int = 0
+    task_count: int = 0
+    carry_over_count: int = 0
+    completed_today_count: int = 0
+    tasks: List[HistoryReviewTaskSummary] = Field(default_factory=list)
 
 
 class DashboardWeeklyTrendItem(BaseModel):

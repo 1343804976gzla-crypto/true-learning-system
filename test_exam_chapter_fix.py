@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session as SASession, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import main
@@ -338,6 +339,130 @@ def test_list_chapters_grouped_filters_placeholder_rows(session_factory):
     )
 
 
+def test_list_chapters_grouped_filters_synthetic_rows_and_sorts_naturally(session_factory):
+    session = session_factory()
+    seed_chapters(session)
+    session.add_all(
+        [
+            Chapter(
+                id="physio_ch2",
+                book=BOOK_PHYSIOLOGY,
+                edition="test",
+                chapter_number="2",
+                chapter_title="\u7ec6\u80de\u7684\u57fa\u672c\u529f\u80fd",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+            Chapter(
+                id="physio_ch10",
+                book=BOOK_PHYSIOLOGY,
+                edition="test",
+                chapter_number="10",
+                chapter_title="\u5fc3\u808c\u7684\u751f\u7406\u7279\u6027",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+            Chapter(
+                id="agent-topic-chat-1234567890abcdef-chapter-a",
+                book=BOOK_PHYSIOLOGY,
+                edition="test",
+                chapter_number="04",
+                chapter_title="\u7ec6\u80de\u7535\u6d3b\u52a8",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+            Chapter(
+                id="tracking-upload-1234567890abcdef-chapter",
+                book=BOOK_PHYSIOLOGY,
+                edition="test",
+                chapter_number="5",
+                chapter_title="\u80ba\u901a\u6c14",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+            Chapter(
+                id="chapter-1234567890abcdef",
+                book="Internal Medicine",
+                edition="test",
+                chapter_number="1",
+                chapter_title="Cardiology",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+        ]
+    )
+    session.commit()
+
+    grouped = asyncio.run(main.list_chapters_grouped(db=session))
+
+    assert "Internal Medicine" not in grouped
+    assert [item["id"] for item in grouped[BOOK_PHYSIOLOGY]] == [
+        "physio_ch2",
+        "physio_ch10",
+        "physio_ch16",
+        "physio_ch17",
+    ]
+
+
+def test_quiz_service_chapter_catalog_ignores_synthetic_rows_and_sorts_naturally(monkeypatch, session_factory):
+    session = session_factory()
+    seed_chapters(session)
+    session.add_all(
+        [
+            Chapter(
+                id="physio_ch2",
+                book=BOOK_PHYSIOLOGY,
+                edition="test",
+                chapter_number="2",
+                chapter_title="\u7ec6\u80de\u7684\u57fa\u672c\u529f\u80fd",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+            Chapter(
+                id="physio_ch10",
+                book=BOOK_PHYSIOLOGY,
+                edition="test",
+                chapter_number="10",
+                chapter_title="\u5fc3\u808c\u7684\u751f\u7406\u7279\u6027",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+            Chapter(
+                id="topic-1234567890abcdef-a",
+                book=BOOK_PHYSIOLOGY,
+                edition="test",
+                chapter_number="04",
+                chapter_title="\u4e13\u9898\u7ec6\u80de\u7535\u6d3b\u52a8",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+            Chapter(
+                id="tracking-upload-1234567890abcdef-chapter",
+                book=BOOK_PHYSIOLOGY,
+                edition="test",
+                chapter_number="5",
+                chapter_title="\u80ba\u901a\u6c14",
+                concepts=[],
+                first_uploaded=date.today(),
+            ),
+        ]
+    )
+    session.commit()
+    session.close()
+
+    install_fake_get_db(monkeypatch, session_factory)
+    monkeypatch.setattr(quiz_service_module, "get_ai_client", lambda: FakeAI({}))
+
+    service = quiz_service_module.QuizService()
+    monkeypatch.setattr(service, "_extract_book_hint", lambda content: BOOK_PHYSIOLOGY)
+
+    catalog = service._get_chapter_catalog("\u751f\u7406\u5b66 \u590d\u4e60")
+
+    assert "topic-1234567890abcdef-a" not in catalog
+    assert catalog.index("physio_ch2") < catalog.index("physio_ch10")
+    assert catalog.index("physio_ch10") < catalog.index("physio_ch16")
+
+
 def test_submit_exam_uses_uploaded_content_fallback_for_wrong_answer_chapter(monkeypatch, session_factory):
     session = session_factory()
     seed_chapters(session)
@@ -481,10 +606,104 @@ def test_batch_exam_api_flow_resolves_real_chapter_from_uploaded_content(monkeyp
         session.close()
 
 
+def test_batch_submit_returns_result_when_commit_is_locked(monkeypatch, session_factory):
+    session = session_factory()
+    seed_chapters(session)
+    session.close()
+
+    class FakeQuizService:
+        def grade_paper(self, questions, answers, confidence):
+            details = []
+            correct_count = 0
+            for index, question in enumerate(questions):
+                user_answer = answers[index]
+                is_correct = user_answer == question["correct_answer"]
+                if is_correct:
+                    correct_count += 1
+                details.append(
+                    {
+                        "id": question["id"],
+                        "type": question["type"],
+                        "difficulty": question["difficulty"],
+                        "user_answer": user_answer,
+                        "correct_answer": question["correct_answer"],
+                        "is_correct": is_correct,
+                        "confidence": confidence.get(str(index)),
+                        "explanation": question["explanation"],
+                        "key_point": question["key_point"],
+                    }
+                )
+
+            wrong_count = len(questions) - correct_count
+            return {
+                "score": int(correct_count / len(questions) * 100),
+                "correct_count": correct_count,
+                "wrong_count": wrong_count,
+                "total": len(questions),
+                "wrong_by_difficulty": {"基础": wrong_count, "提高": 0, "难题": 0},
+                "confidence_analysis": {"sure": 0, "unsure": 0, "no": 0},
+                "details": details,
+                "weak_points": [question["key_point"] for question in questions if question["correct_answer"] != answers[question["id"] - 1]],
+                "analysis": "Mock analysis",
+            }
+
+        def _infer_chapter_prediction(self, content):
+            return None
+
+    monkeypatch.setattr(quiz_batch, "get_quiz_service", lambda: FakeQuizService())
+    quiz_batch._exam_cache.clear()
+    quiz_batch._detail_cache.clear()
+
+    questions = [make_valid_question(i) for i in range(1, 6)]
+    exam_id = "locked-commit-exam"
+    quiz_batch._exam_cache[exam_id] = {
+        "chapter_id": "physio_ch16",
+        "chapter_prediction": {
+            "book": BOOK_PHYSIOLOGY,
+            "chapter_id": "physio_ch16",
+            "chapter_title": TITLE_GASTRIC,
+            "confidence": "high",
+        },
+        "questions": questions,
+        "created_at": date.today().isoformat(),
+        "num_questions": 5,
+        "uploaded_content": "gastric physiology " * 40,
+        "fuzzy_options": {},
+        "exam_wrong_questions": [],
+    }
+
+    try:
+        submit_db = session_factory()
+        try:
+            def locked_commit(self):
+                raise OperationalError("COMMIT", {}, Exception("database is locked"))
+
+            monkeypatch.setattr(SASession, "commit", locked_commit)
+
+            submit_data = asyncio.run(
+                quiz_batch.submit_exam(
+                    exam_id,
+                    request=quiz_batch.SubmitRequest(
+                        answers=["A", "B", "A", "B", "A"],
+                        confidence={"0": "sure", "1": "unsure", "2": "sure", "3": "no", "4": "sure"},
+                    ),
+                    db=submit_db,
+                )
+            )
+            assert submit_data["score"] == 60
+            assert submit_data["correct_count"] == 3
+            assert exam_id in quiz_batch._detail_cache
+        finally:
+            submit_db.close()
+    finally:
+        quiz_batch._exam_cache.clear()
+        quiz_batch._detail_cache.clear()
+
+
 def test_quiz_batch_modal_prefills_unique_title_match_only(tmp_path):
     template_path = Path(r"C:\Users\35456\true-learning-system\templates\quiz_batch.html")
     template_text = template_path.read_text(encoding="utf-8")
-    helper_start = template_text.index("function isSelectableChapterId")
+    helper_start = template_text.index("const INVALID_CHAPTER_IDS")
     helper_end = template_text.index("let uploadedContent = '';")
     helper_snippet = "const chapterId = '0';\n" + template_text[helper_start:helper_end]
 
@@ -524,3 +743,56 @@ console.log(vague ? vague.chapter.id + ':' + vague.score : 'null');
     lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     assert lines[-2] == "physio_ch17:100"
     assert lines[-1] == "null"
+
+
+def test_quiz_batch_modal_auto_confirms_high_confidence_unique_match(tmp_path):
+    template_path = Path(r"C:\Users\35456\true-learning-system\templates\quiz_batch.html")
+    template_text = template_path.read_text(encoding="utf-8")
+    helper_start = template_text.index("const INVALID_CHAPTER_IDS")
+    helper_end = template_text.index("let uploadedContent = '';")
+    helper_snippet = "const chapterId = '0';\n" + template_text[helper_start:helper_end]
+
+    script = helper_snippet + """
+let chaptersGrouped = {
+  '\\u751f\\u7406\\u5b66': [
+    { id: 'physio_ch15', number: '15', title: '\\u6d88\\u5316\\u6982\\u8ff0' },
+    { id: 'physio_ch16', number: '16', title: '\\u53e3\\u8154\\u98df\\u7ba1\\u548c\\u80c3\\u5185\\u6d88\\u5316' },
+    { id: 'physio_ch17', number: '17', title: '\\u80a0\\u5185\\u6d88\\u5316\\u4e0e\\u5438\\u6536' }
+  ]
+};
+const autoHigh = resolveAutoConfirmedChapterMatch({
+  book: '\\u751f\\u7406\\u5b66',
+  chapter_id: '',
+  chapter_title: '\\u80a0\\u5185\\u6d88\\u5316\\u548c\\u5438\\u6536',
+  confidence: 'high'
+});
+const autoMedium = resolveAutoConfirmedChapterMatch({
+  book: '\\u751f\\u7406\\u5b66',
+  chapter_id: '',
+  chapter_title: '\\u80a0\\u5185\\u6d88\\u5316\\u548c\\u5438\\u6536',
+  confidence: 'medium'
+});
+const autoVague = resolveAutoConfirmedChapterMatch({
+  book: '\\u751f\\u7406\\u5b66',
+  chapter_id: '',
+  chapter_title: '\\u6d88\\u5316\\u7cfb\\u7edf',
+  confidence: 'high'
+});
+console.log(autoHigh ? autoHigh.chapter.id : 'null');
+console.log(autoMedium ? autoMedium.chapter.id : 'null');
+console.log(autoVague ? autoVague.chapter.id : 'null');
+"""
+
+    script_path = tmp_path / "quiz_batch_modal_auto_confirm.js"
+    script_path.write_text(script, encoding="utf-8")
+
+    result = subprocess.run(
+        ["node", str(script_path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    assert lines[-3:] == ["physio_ch17", "null", "null"]

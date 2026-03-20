@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}True Learning System - Agent{% endblock %}
+{% block title %}True Learning System - 临床考研 Agent{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -124,6 +124,55 @@
     .agent-shell.is-history-open .agent-backdrop {
         opacity: 1;
         pointer-events: auto;
+    }
+
+    .agent-background {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        overflow: hidden;
+        pointer-events: none;
+        border-radius: inherit;
+        opacity: 0.9;
+        transition: opacity 0.3s ease;
+    }
+
+    .agent-shell.has-messages .agent-background {
+        opacity: 0.42;
+    }
+
+    .agent-background::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+            radial-gradient(circle at 50% 22%, rgba(255, 255, 255, 0.7), transparent 24%),
+            radial-gradient(circle at 18% 78%, rgba(203, 220, 239, 0.3), transparent 26%);
+        opacity: 0.7;
+    }
+
+    .agent-background-svg {
+        position: absolute;
+        inset: -22% -10%;
+        width: 120%;
+        height: 144%;
+        color: rgba(15, 23, 42, 0.18);
+    }
+
+    .agent-background-svg.is-mirrored {
+        transform: scaleX(-1);
+        opacity: 0.56;
+    }
+
+    .agent-background-svg path {
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-dasharray: 96 184;
+        stroke-dashoffset: -120;
+        opacity: 0.16;
+        animation: none;
     }
 
     .agent-layout {
@@ -465,10 +514,7 @@
         min-height: auto;
         width: 100%;
         margin: 0;
-        display: grid;
-        grid-template-columns: minmax(0, 1.08fr) minmax(18rem, 0.92fr);
-        gap: 1.35rem;
-        align-items: stretch;
+        display: block;
         padding: 0;
         text-align: left;
     }
@@ -485,7 +531,9 @@
     }
 
     .agent-hero-copydeck {
+        width: 100%;
         padding: clamp(1.35rem, 2.5vw, 2.2rem);
+        border-bottom: 0;
         background:
             radial-gradient(circle at 0% 0%, rgba(126, 169, 214, 0.32), transparent 34%),
             linear-gradient(145deg, rgba(242, 247, 252, 0.96), rgba(228, 237, 246, 0.84));
@@ -542,11 +590,12 @@
 
     .agent-hero-title {
         font-size: clamp(2.55rem, 5.6vw, 4.3rem);
-        line-height: 1.08;
+        line-height: 1.02;
         letter-spacing: -0.045em;
         font-weight: 600;
         color: #132033;
-        text-wrap: balance;
+        white-space: nowrap;
+        text-wrap: nowrap;
     }
 
     .agent-hero-accent {
@@ -683,9 +732,9 @@
     }
 
     .agent-shell:not(.has-messages) .agent-stage {
-        justify-content: flex-end;
-        padding-top: clamp(1.4rem, 4.4vh, 4rem);
-        padding-bottom: clamp(0.35rem, 1.2vh, 0.65rem);
+        justify-content: center;
+        padding-top: clamp(0.6rem, 2.2vh, 1.6rem);
+        padding-bottom: clamp(0.15rem, 0.8vh, 0.35rem);
     }
 
     .agent-shell:not(.has-messages) .agent-composer {
@@ -698,8 +747,9 @@
     }
 
     .agent-shell:not(.has-messages) .agent-hero-title {
-        max-width: 10ch;
-        font-size: clamp(2.45rem, 5.2vw, 4.1rem);
+        max-width: none;
+        font-size: clamp(2.7rem, 5.4vw, 4.5rem);
+        color: rgba(27, 42, 60, 0.9);
     }
 
     .agent-shell:not(.has-messages) .agent-hero-copy {
@@ -1113,13 +1163,15 @@
     }
 
     .agent-send-button:not(.is-empty):not(:disabled)::before {
-        opacity: 1;
-        animation: agentSendSheen 2.4s ease-in-out infinite;
+        opacity: 0.68;
+        transform: translateX(0);
+        animation: none;
     }
 
     .agent-send-button:not(.is-empty):not(:disabled) .agent-send-arrow {
         opacity: 1;
-        animation: agentSendReady 1.8s ease-in-out infinite;
+        transform: translateY(0) scale(1);
+        animation: none;
     }
 
     @keyframes agentBlink {
@@ -1180,12 +1232,39 @@
         }
     }
 
+    @keyframes agentPathDrift {
+        0% {
+            stroke-dasharray: 16 240;
+            stroke-dashoffset: 0;
+            opacity: 0.08;
+        }
+        35% {
+            stroke-dasharray: 96 180;
+            opacity: 0.24;
+        }
+        70% {
+            stroke-dasharray: 132 160;
+            opacity: 0.18;
+        }
+        100% {
+            stroke-dasharray: 16 240;
+            stroke-dashoffset: -420;
+            opacity: 0.08;
+        }
+    }
+
     @media (prefers-reduced-motion: reduce) {
         .agent-layout,
         .agent-history-panel,
         .agent-history-head,
-        .agent-history-list {
+        .agent-history-list,
+        .agent-send-arrow,
+        .agent-send-spinner,
+        .agent-thinking-dot,
+        .agent-background-svg path {
             transition-duration: 0.01ms !important;
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
         }
     }
 
@@ -1263,6 +1342,25 @@
 
     .dark .agent-backdrop {
         background: rgba(2, 6, 12, 0.48);
+    }
+
+    .dark .agent-background {
+        opacity: 0.86;
+    }
+
+    .dark .agent-shell.has-messages .agent-background {
+        opacity: 0.34;
+    }
+
+    .dark .agent-background::before {
+        background:
+            radial-gradient(circle at 50% 18%, rgba(132, 165, 201, 0.16), transparent 24%),
+            radial-gradient(circle at 18% 78%, rgba(54, 84, 118, 0.22), transparent 28%);
+        opacity: 0.9;
+    }
+
+    .dark .agent-background-svg {
+        color: rgba(214, 227, 241, 0.28);
     }
 
     .dark .agent-history-panel {
@@ -1576,6 +1674,12 @@
             grid-template-columns: minmax(0, 1fr);
         }
 
+        .agent-background-svg {
+            inset: -30% -44%;
+            width: 188%;
+            height: 162%;
+        }
+
         .agent-history-panel {
             position: fixed;
             top: 1rem;
@@ -1638,7 +1742,7 @@
         }
 
         .agent-hero-title {
-            font-size: clamp(2rem, 10vw, 3rem);
+            font-size: clamp(1.55rem, 7vw, 2.55rem);
         }
 
         .agent-shell:not(.has-messages) .agent-hero-title {
@@ -1704,8 +1808,8 @@
         }
 
         .agent-shell:not(.has-messages) .agent-hero-title {
-            max-width: 10ch;
-            font-size: clamp(1.85rem, 4vw, 3rem);
+            max-width: none;
+            font-size: clamp(1.7rem, 4vh, 2.5rem);
         }
 
         .agent-shell:not(.has-messages) .agent-hero-copy {
@@ -1730,7 +1834,7 @@
         }
 
         .agent-hero-title {
-            font-size: clamp(2rem, 5vw, 3.1rem);
+            font-size: clamp(1.7rem, 4.4vw, 2.7rem);
         }
 
         .agent-hero-copy {
@@ -1747,6 +1851,7 @@
 
 {% block content %}
 <section class="agent-shell" id="agentApp">
+    <div class="agent-background" id="agentBackground" aria-hidden="true"></div>
     <div class="agent-backdrop" id="agentHistoryBackdrop"></div>
     <div class="agent-layout">
         <aside class="agent-history-panel" id="agentHistoryPanel" aria-label="会话记录" tabindex="-1">
@@ -1770,60 +1875,19 @@
                     <div class="agent-badge"><span class="agent-badge-dot"></span><span>夜间专注模式</span></div>
                 </div>
                 <div class="agent-toolbar-right">
-                    <div class="agent-model-pill"><span class="agent-model-pill-dot"></span><span>考研辅导 Agent</span></div>
+                    <div class="agent-model-pill"><span class="agent-model-pill-dot"></span><span>临床考研 Agent</span></div>
                 </div>
             </div>
 
             <div class="agent-stage">
-                <div class="agent-hero" id="agentHero">
-                    <div class="agent-hero-copydeck">
-                        <div class="agent-eyebrow">学习助教 Agent</div>
-                        <div class="agent-hero-signal" aria-hidden="true">
-                            <span class="agent-hero-signal-dot"></span>
-                            <span class="agent-hero-signal-text">今晚适合先拆题，再找错因，最后把下一轮复习动作排清楚。</span>
-                        </div>
-                        <h1 class="agent-hero-title">今晚先攻克哪个 <span class="agent-hero-accent">考研问题</span>？</h1>
-                        <p class="agent-hero-copy">可以直接提问高数、英语、政治或专业课题目，也可以让 Agent 帮你拆解知识点、总结错因、制定下一轮复习动作。</p>
-                        <div class="agent-chip-row" aria-hidden="true">
-                            <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">高数</span></div>
-                            <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">英语</span></div>
-                            <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">政治</span></div>
-                            <div class="agent-chip"><span class="agent-chip-dot"></span><span class="agent-chip-label">专业课</span></div>
-                        </div>
-                    </div>
-                    <div class="agent-hero-board" aria-label="推荐开场问题">
-                        <div class="agent-hero-board-head">
-                            <div class="agent-eyebrow">直接开始</div>
-                            <p class="agent-hero-board-copy">点一下就把问题带入输入框，适合直接处理临床考研里最容易卡分的知识点和病例题。</p>
-                        </div>
-                        <div class="agent-prompt-grid">
-                            <button type="button" class="agent-prompt-card" data-agent-prompt="这个西医综合知识点我总混淆，帮我对比讲清概念、常考陷阱和记忆抓手。">
-                                <span class="agent-prompt-kicker">西综易混</span>
-                                <strong class="agent-prompt-title">把高频易混点讲透</strong>
-                                <span class="agent-prompt-copy">适合生理、病理、内科和外科里容易混淆的概念与鉴别点。</span>
-                            </button>
-                            <button type="button" class="agent-prompt-card" data-agent-prompt="按临床思路帮我拆这道病例分析题，依次讲诊断依据、鉴别诊断和下一步处理。">
-                                <span class="agent-prompt-kicker">病例分析</span>
-                                <strong class="agent-prompt-title">按临床思路拆病例题</strong>
-                                <span class="agent-prompt-copy">从症状、体征、检查到诊断和处理，按考试答题顺序梳理清楚。</span>
-                            </button>
-                            <button type="button" class="agent-prompt-card" data-agent-prompt="我今晚只有半小时，结合临床考研复习特点，帮我排一个先提分后巩固的复习顺序。">
-                                <span class="agent-prompt-kicker">今晚复习</span>
-                                <strong class="agent-prompt-title">先排今晚的提分顺序</strong>
-                                <span class="agent-prompt-copy">适合快速决定先看哪章、刷哪类题、怎么复盘最划算。</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
                 <div class="agent-chat-stream" id="agentStream" aria-live="polite"></div>
             </div>
 
             <form class="agent-composer" id="agentComposer">
-                <div class="agent-composer-label">开始对话</div>
                 <!-- Enter 鍙戦€侊紝Shift+Enter 鎹㈣ -->
                 <div class="agent-composer-shell">
                     <div class="agent-composer-body">
-                        <textarea id="agentInput" class="agent-textarea" rows="1" placeholder="比如：帮我拆解这道 408 大题的思路。Enter 发送，Shift+Enter 换行"></textarea>
+                        <textarea id="agentInput" class="agent-textarea" rows="1" placeholder="比如：帮我分析这道病例题的诊断思路。Enter 发送，Shift+Enter 换行"></textarea>
                         <button type="submit" class="agent-send-button is-empty" id="agentSend" aria-label="发送">
                             <span class="agent-send-arrow" aria-hidden="true">
                                 <svg class="agent-send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -1886,13 +1950,13 @@
         };
         const el = {
             root: document.getElementById('agentApp'),
+            background: document.getElementById('agentBackground'),
             historyBackdrop: document.getElementById('agentHistoryBackdrop'),
             historyPanel: document.getElementById('agentHistoryPanel'),
             historyList: document.getElementById('agentHistoryList'),
             historyToggle: document.getElementById('agentHistoryToggle'),
             historyClose: document.getElementById('agentHistoryClose'),
             newSession: document.getElementById('agentNewSession'),
-            hero: document.getElementById('agentHero'),
             stream: document.getElementById('agentStream'),
             composer: document.getElementById('agentComposer'),
             input: document.getElementById('agentInput'),
@@ -1950,6 +2014,23 @@
             return window.crypto && window.crypto.randomUUID
                 ? window.crypto.randomUUID()
                 : `req-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+        }
+
+        function buildFloatingPaths(position) {
+            const paths = Array.from({ length: 28 }, (_, index) => {
+                const d = `M-${380 - index * 5 * position} -${189 + index * 6}C-${380 - index * 5 * position} -${189 + index * 6} -${312 - index * 5 * position} ${216 - index * 6} ${152 - index * 5 * position} ${343 - index * 6}C${616 - index * 5 * position} ${470 - index * 6} ${684 - index * 5 * position} ${875 - index * 6} ${684 - index * 5 * position} ${875 - index * 6}`;
+                const width = (0.55 + index * 0.045).toFixed(2);
+                const duration = (18 + index * 0.55).toFixed(2);
+                const delay = (-1.2 * (index % 8)).toFixed(2);
+                const opacity = Math.min(0.42, 0.08 + index * 0.012).toFixed(3);
+                return `<path d="${d}" stroke-width="${width}" stroke-opacity="${opacity}" style="--duration:${duration}s; --delay:${delay}s"></path>`;
+            }).join('');
+            return `<svg class="agent-background-svg${position < 0 ? ' is-mirrored' : ''}" viewBox="0 0 696 316" fill="none" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><title>Clinical Agent Background Paths</title>${paths}</svg>`;
+        }
+
+        function initializeBackground() {
+            if (!el.background) return;
+            el.background.innerHTML = `${buildFloatingPaths(1)}${buildFloatingPaths(-1)}`;
         }
 
         function applyHistoryState() {
@@ -2118,19 +2199,6 @@
             }
         }
 
-        function prefillComposer(prompt) {
-            const value = String(prompt || '').trim();
-            if (!value || state.isStreaming) return;
-            el.input.value = value;
-            persistDraft();
-            setStatus(COMPOSER_HINT);
-            syncComposerHeight();
-            syncSendState();
-            el.input.focus();
-            const cursor = el.input.value.length;
-            el.input.setSelectionRange(cursor, cursor);
-        }
-
         function wait(ms) {
             return new Promise((resolve) => window.setTimeout(resolve, ms));
         }
@@ -2194,7 +2262,7 @@
             const isUser = message.role === 'user';
             const article = document.createElement('article');
             article.className = `agent-message${isUser ? ' is-user' : ''}`;
-            article.innerHTML = `<div class="agent-avatar">${isUser ? '我' : 'AI'}</div><div class="agent-bubble"><div class="agent-message-meta"><span>${isUser ? '你' : '学习 Agent'}</span><span>${escapeHtml(shortDate(message.created_at))}</span></div><div class="agent-message-body"></div></div>`;
+            article.innerHTML = `<div class="agent-avatar">${isUser ? '我' : 'AI'}</div><div class="agent-bubble"><div class="agent-message-meta"><span>${isUser ? '你' : '临床考研 Agent'}</span><span>${escapeHtml(shortDate(message.created_at))}</span></div><div class="agent-message-body"></div></div>`;
             setMessageBody(article.querySelector('.agent-message-body'), message.role, message.content || '');
             return article;
         }
@@ -2241,7 +2309,7 @@
             setConversationPresence(true);
             const article = document.createElement('article');
             article.className = 'agent-message';
-            article.innerHTML = '<div class="agent-avatar">AI</div><div class="agent-bubble"><div class="agent-message-meta"><span>学习 Agent</span><span>刚刚</span></div><div class="agent-message-body agent-streaming-copy"></div></div>';
+            article.innerHTML = '<div class="agent-avatar">AI</div><div class="agent-bubble"><div class="agent-message-meta"><span>临床考研 Agent</span><span>刚刚</span></div><div class="agent-message-body agent-streaming-copy"></div></div>';
             state.pendingAssistantArticle = article;
             state.pendingAssistantBody = article.querySelector('.agent-message-body');
             el.stream.appendChild(article);
@@ -2628,13 +2696,6 @@
                 if (!retry || !state.currentSessionId || state.messagesLoading) return;
                 await loadMessages(state.currentSessionId);
             });
-            if (el.hero) {
-                el.hero.addEventListener('click', (event) => {
-                    const trigger = event.target.closest('[data-agent-prompt]');
-                    if (!trigger) return;
-                    prefillComposer(trigger.getAttribute('data-agent-prompt'));
-                });
-            }
             el.composer.addEventListener('submit', async (event) => {
                 event.preventDefault();
                 await sendMessage();
@@ -2667,6 +2728,7 @@
         async function bootstrap() {
             state.deviceId = getDeviceId();
             state.historyCollapsed = localStorage.getItem(HISTORY_COLLAPSE_KEY) === '1';
+            initializeBackground();
             bindEvents();
             applyHistoryState();
             restoreDraft();

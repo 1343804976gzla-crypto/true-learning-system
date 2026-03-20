@@ -1,635 +1,4 @@
-{% extends "base.html" %}
-
-{% block title %}细节强化练习{% endblock %}
-
-{% block extra_css %}
-<style>
-    .practice-confidence-pill-row {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 0.7rem;
-    }
-
-    .practice-confidence-pill {
-        --practice-confidence-rgb: 59, 130, 246;
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        min-width: 6.25rem;
-        padding: 0.68rem 0.95rem;
-        border-radius: 999px;
-        border: 1px solid rgba(var(--practice-confidence-rgb), 0.2);
-        background:
-            linear-gradient(180deg, rgba(255,255,255,0.86), rgba(241,245,249,0.72)),
-            radial-gradient(circle at top, rgba(var(--practice-confidence-rgb), 0.12), transparent 65%);
-        color: rgba(var(--practice-confidence-rgb), 0.96);
-        box-shadow:
-            inset 0 1px 0 rgba(255,255,255,0.56),
-            0 10px 22px rgba(15, 23, 42, 0.06);
-        transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease,
-            background 180ms ease, color 180ms ease, opacity 180ms ease, filter 180ms ease;
-        will-change: transform;
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-    }
-
-    .practice-confidence-pill::after {
-        content: "";
-        position: absolute;
-        inset: 1px;
-        border-radius: inherit;
-        background: linear-gradient(135deg, rgba(255,255,255,0.28), transparent 58%);
-        opacity: 0.7;
-        pointer-events: none;
-    }
-
-    .practice-confidence-pill:hover:not(.is-selected):not(.is-muted) {
-        transform: translateY(-1px);
-        border-color: rgba(var(--practice-confidence-rgb), 0.32);
-        box-shadow:
-            inset 0 1px 0 rgba(255,255,255,0.6),
-            0 14px 24px rgba(15, 23, 42, 0.08);
-    }
-
-    .practice-confidence-pill:focus-visible {
-        outline: 2px solid rgba(37, 99, 235, 0.34);
-        outline-offset: 3px;
-    }
-
-    .practice-confidence-pill__key,
-    .practice-confidence-pill__label {
-        position: relative;
-        z-index: 1;
-    }
-
-    .practice-confidence-pill__key {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.55rem;
-        height: 1.55rem;
-        border-radius: 999px;
-        background: rgba(255,255,255,0.78);
-        color: inherit;
-        font-size: 0.74rem;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.62);
-    }
-
-    .practice-confidence-pill__label {
-        font-size: 0.82rem;
-        font-weight: 700;
-        letter-spacing: 0.02em;
-    }
-
-    .practice-confidence-pill--sure {
-        --practice-confidence-rgb: 34, 197, 94;
-    }
-
-    .practice-confidence-pill--unsure {
-        --practice-confidence-rgb: 245, 158, 11;
-    }
-
-    .practice-confidence-pill--no {
-        --practice-confidence-rgb: 239, 68, 68;
-    }
-
-    .practice-confidence-pill.is-selected {
-        transform: translateY(-2px) scale(1.018);
-        border-color: rgba(var(--practice-confidence-rgb), 0.52);
-        background:
-            linear-gradient(180deg, rgba(255,255,255,0.94), rgba(var(--practice-confidence-rgb), 0.12)),
-            radial-gradient(circle at top, rgba(var(--practice-confidence-rgb), 0.18), transparent 68%);
-        color: rgba(var(--practice-confidence-rgb), 1);
-        box-shadow:
-            0 16px 28px rgba(var(--practice-confidence-rgb), 0.12),
-            inset 0 0 0 1px rgba(255,255,255,0.46);
-    }
-
-    .practice-confidence-pill.is-selected .practice-confidence-pill__key {
-        background: rgba(var(--practice-confidence-rgb), 0.16);
-        box-shadow: inset 0 0 0 1px rgba(var(--practice-confidence-rgb), 0.14);
-    }
-
-    .practice-confidence-pill.is-muted {
-        opacity: 0.56;
-        filter: saturate(0.72);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.32);
-    }
-
-    .practice-confidence-pill.is-bump {
-        animation: practice-confidence-pop 320ms cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    .practice-confidence-status {
-        position: relative;
-        margin-top: 0.9rem;
-        padding: 0.85rem 1rem 0.85rem 1.15rem;
-        border-radius: 1rem;
-        border: 1px solid rgba(148, 163, 184, 0.18);
-        background: linear-gradient(180deg, rgba(248,250,252,0.9), rgba(241,245,249,0.76));
-        color: #475569;
-        font-size: 0.9rem;
-        font-weight: 600;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.48);
-    }
-
-    .practice-confidence-status::before {
-        content: "";
-        position: absolute;
-        left: 0.7rem;
-        top: 50%;
-        width: 0.24rem;
-        height: 1.6rem;
-        border-radius: 999px;
-        background: rgba(148, 163, 184, 0.4);
-        transform: translateY(-50%);
-    }
-
-    .practice-confidence-status.is-sure {
-        border-color: rgba(34, 197, 94, 0.22);
-        background: linear-gradient(180deg, rgba(240,253,244,0.94), rgba(220,252,231,0.74));
-        color: #166534;
-    }
-
-    .practice-confidence-status.is-sure::before {
-        background: rgba(34, 197, 94, 0.78);
-    }
-
-    .practice-confidence-status.is-unsure {
-        border-color: rgba(245, 158, 11, 0.22);
-        background: linear-gradient(180deg, rgba(255,251,235,0.94), rgba(254,243,199,0.76));
-        color: #b45309;
-    }
-
-    .practice-confidence-status.is-unsure::before {
-        background: rgba(245, 158, 11, 0.82);
-    }
-
-    .practice-confidence-status.is-no {
-        border-color: rgba(239, 68, 68, 0.22);
-        background: linear-gradient(180deg, rgba(254,242,242,0.94), rgba(254,226,226,0.72));
-        color: #b91c1c;
-    }
-
-    .practice-confidence-status.is-no::before {
-        background: rgba(239, 68, 68, 0.82);
-    }
-
-    .practice-fuzzy-panel {
-        margin-top: 0.9rem;
-        padding: 0.95rem 1rem;
-        border-radius: 1rem;
-        border: 1px solid rgba(245, 158, 11, 0.18);
-        background: linear-gradient(180deg, rgba(255,251,235,0.84), rgba(254,249,195,0.5));
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.48);
-    }
-
-    .practice-fuzzy-title {
-        font-size: 0.76rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        color: #b45309;
-    }
-
-    .practice-fuzzy-choices {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.65rem;
-        margin-top: 0.75rem;
-    }
-
-    .practice-fuzzy-chip {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 2.7rem;
-        padding: 0.52rem 0.8rem;
-        border-radius: 999px;
-        border: 1px solid rgba(245, 158, 11, 0.24);
-        background:
-            linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,251,235,0.64)),
-            radial-gradient(circle at top, rgba(245,158,11,0.08), transparent 72%);
-        color: #b45309;
-        font-size: 0.82rem;
-        font-weight: 700;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.56), 0 8px 16px rgba(245,158,11,0.06);
-        transition: transform 170ms ease, border-color 170ms ease, background 170ms ease,
-            box-shadow 170ms ease, color 170ms ease, opacity 170ms ease, filter 170ms ease;
-        will-change: transform;
-    }
-
-    .practice-fuzzy-chip::after {
-        content: "";
-        position: absolute;
-        inset: 1px;
-        border-radius: inherit;
-        background: linear-gradient(135deg, rgba(255,255,255,0.32), transparent 60%);
-        opacity: 0.72;
-        pointer-events: none;
-    }
-
-    .practice-fuzzy-chip:hover {
-        transform: translateY(-1px);
-        border-color: rgba(245, 158, 11, 0.36);
-        background:
-            linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,247,220,0.72)),
-            radial-gradient(circle at top, rgba(245,158,11,0.1), transparent 72%);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.62), 0 12px 18px rgba(245,158,11,0.1);
-    }
-
-    .practice-fuzzy-chip.is-selected {
-        transform: translateY(-2px) scale(1.05);
-        border-color: rgba(217, 119, 6, 0.5);
-        background:
-            linear-gradient(180deg, rgba(255,247,220,0.98), rgba(253,230,138,0.86)),
-            radial-gradient(circle at top, rgba(245,158,11,0.2), transparent 74%);
-        color: #92400e;
-        box-shadow: 0 14px 22px rgba(245, 158, 11, 0.16), inset 0 0 0 1px rgba(255,255,255,0.38);
-    }
-
-    .practice-fuzzy-chip.is-muted {
-        opacity: 0.5;
-        filter: saturate(0.72);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
-    }
-
-    .practice-fuzzy-chip.is-bump {
-        animation: practice-fuzzy-pop 280ms cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    .practice-fuzzy-summary {
-        margin-top: 0.7rem;
-        font-size: 0.76rem;
-        line-height: 1.5;
-        color: #b45309;
-    }
-
-    @keyframes practice-confidence-pop {
-        0% {
-            transform: scale(0.96);
-        }
-        55% {
-            transform: translateY(-2px) scale(1.035);
-        }
-        100% {
-            transform: translateY(-2px) scale(1.018);
-        }
-    }
-
-    @keyframes practice-fuzzy-pop {
-        0% {
-            transform: scale(0.94);
-        }
-        55% {
-            transform: translateY(-2px) scale(1.08);
-        }
-        100% {
-            transform: translateY(-2px) scale(1.05);
-        }
-    }
-
-    @media (max-width: 767px) {
-        .practice-confidence-pill-row {
-            justify-content: flex-start;
-        }
-
-        .practice-confidence-pill {
-            flex: 1 1 calc(50% - 0.35rem);
-            min-width: 0;
-        }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-        .practice-confidence-pill,
-        .practice-fuzzy-chip {
-            transition: none;
-        }
-
-        .practice-confidence-pill.is-bump,
-        .practice-fuzzy-chip.is-bump {
-            animation: none;
-        }
-    }
-</style>
-{% endblock %}
-
-{% block content %}
-<div class="quiz-immersive-page">
-    <div class="quiz-immersive-bg" aria-hidden="true">
-        <div class="quiz-immersive-overlay"></div>
-        <div class="quiz-immersive-glow"></div>
-        <div class="quiz-immersive-grid"></div>
-    </div>
-    <div class="quiz-immersive-content">
-<div class="quiz-hero-panel mb-6">
-    <div class="flex items-center text-sm text-gray-500 mb-2">
-        <a href="/" class="hover:text-blue-500">仪表盘</a>
-        <span class="mx-2">/</span>
-        <a href="/quiz/batch/0" class="hover:text-blue-500">整卷测试</a>
-        <span class="mx-2">/</span>
-        <span>细节强化</span>
-    </div>
-
-    <h1 class="text-2xl font-bold">细节强化练习</h1>
-    <p class="text-gray-500">基于整卷测试结果，针对薄弱知识点进行强化训练</p>
-</div>
-
-<!-- 无数据提示 -->
-<div id="noData" class="hidden bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
-    <p class="text-yellow-700">请先完成整卷测试，再来这里练习。</p>
-    <div class="mt-2">
-        <a href="/quiz/batch/0" class="text-blue-600 hover:underline">去进行整卷测试</a>
-        <button onclick="location.reload()" class="ml-4 text-blue-600 hover:underline">刷新页面重试</button>
-    </div>
-</div>
-
-<!-- 练习内容 -->
-<div id="practiceArea" class="hidden space-y-6">
-    <!-- 知识点选择 -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h3 class="font-bold text-lg mb-4">选择要练习的知识点（点击开始）</h3>
-        <div id="knowledgeList" class="space-y-3"></div>
-    </div>
-
-    <!-- 答题区域 -->
-    <div id="questionArea" class="hidden space-y-6">
-        <!-- 进度 -->
-        <div class="bg-white rounded-lg shadow p-4">
-            <div class="flex justify-between items-center mb-2">
-                <div class="flex items-center space-x-4">
-                    <span class="text-sm text-gray-500">练习进度</span>
-                    <span class="text-xs text-gray-400">| 1-5 选答案 / W后1-5选模糊项 | Q 确定 W 模糊 E 不会 | ↑↓ 切换</span>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <span id="knowledgeTitle" class="text-blue-600 font-medium"></span>
-                    <span id="questionProgress" class="text-sm font-bold text-blue-600">1/5</span>
-                </div>
-            </div>
-            <div class="bg-gray-200 rounded-full h-3">
-                <div id="practiceProgressBar" class="bg-blue-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
-            </div>
-        </div>
-
-        <!-- 题目容器 -->
-        <div id="questionsContainer"></div>
-
-        <!-- 底部操作 -->
-        <div class="bg-white rounded-lg shadow p-4 sticky bottom-4">
-            <div class="flex justify-between items-center">
-                <div class="text-sm text-gray-500">
-                    已答：<span id="answeredCount" class="font-bold text-blue-600">0</span>/<span id="totalPractice">5</span>
-                </div>
-                <div class="flex space-x-4">
-                    <button id="prevQuestion" type="button" class="text-gray-500 hover:text-gray-700 px-4">上一题</button>
-                    <button id="submitPracticeBtn" type="button" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600">下一题</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 练习结果 -->
-    <div id="resultArea" class="hidden space-y-6">
-        <div class="bg-white rounded-lg shadow p-6 text-center">
-            <div class="mb-3 text-sm text-gray-500">当前知识点</div>
-            <div id="resultKnowledgeTitle" class="text-2xl font-bold text-slate-700 mb-4"></div>
-            <div class="text-6xl mb-4" id="practiceEmoji"></div>
-            <div class="text-5xl font-bold text-blue-600 mb-2" id="practiceScore">0</div>
-            <div class="text-gray-500">分</div>
-            <div class="mt-4 flex justify-center space-x-6">
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-green-600" id="practiceCorrect">0</div>
-                    <div class="text-sm text-gray-500">正确</div>
-                </div>
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-red-600" id="practiceWrong">0</div>
-                    <div class="text-sm text-gray-500">错误</div>
-                </div>
-            </div>
-            <div class="mt-6 flex justify-center">
-                <button type="button" onclick="copyPracticeSummary()" id="copyPracticeSummaryBtn" class="bg-indigo-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-indigo-600 transition flex items-center">
-                    <span id="copyPracticeSummaryText">一键复制本知识点总结</span>
-                </button>
-            </div>
-        </div>
-
-        <!-- 答案解析 -->
-        <div class="bg-white rounded-lg shadow">
-            <div class="px-6 py-4 border-b">
-                <h3 class="font-bold text-lg">答案与解析</h3>
-            </div>
-            <div id="practiceDetails" class="divide-y"></div>
-        </div>
-
-        <div class="flex justify-center space-x-4">
-            <a href="/quiz/batch/0" class="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600">再做一套整卷</a>
-            <button type="button" onclick="backToList()" class="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600">继续练习其他知识点</button>
-            <button type="button" onclick="endStudySession()" class="bg-emerald-600 text-white px-6 py-3 rounded-lg hover:bg-emerald-700 font-bold">✅ 结束学习</button>
-        </div>
-    </div>
-</div>
-</div>
-</div>
-{% endblock %}
-
-{% block extra_js %}
-<script>
-    // ========== 安全工具函数 ==========
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    function handleFetchError(error, userMessage, showAlert = true) {
-        console.error('API Error:', error);
-        const message = userMessage || '操作失败，请稍后重试';
-        if (showAlert) alert(message);
-        return message;
-    }
-
-    async function safeFetch(url, options = {}, errorMessage = '请求失败') {
-        try {
-            const response = await fetch(url, options);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            return await response.json();
-        } catch (error) {
-            handleFetchError(error, errorMessage);
-            throw error;
-        }
-    }
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const examId = urlParams.get('exam_id');
-    const scoreFromUrl = urlParams.get('score') || '';
-
-    let examData = null;
-    let knowledgeMap = {};
-    let knowledgeStatsMap = {};
-    let orderedKnowledgePoints = [];
-    let currentKnowledge = null;
-    let practiceQuestions = [];
-    let currentPracticeIndex = 0;
-    let practiceAnswers = {};
-    let practiceConfidence = {};
-    let practiceFuzzyOptions = {};
-    let isPracticeMode = false;
-    let detailTrackingSessionId = null;
-    let detailTrackingCompleted = false;
-    let lastPracticeResult = null;
-
-    function revealMaskedExplanation(revealId, triggerBtn) {
-        const explanationEl = document.getElementById(revealId);
-        if (explanationEl) explanationEl.classList.remove('hidden');
-        if (triggerBtn) triggerBtn.classList.add('hidden');
-    }
-
-    function getQuestionKnowledgeKey(question, index) {
-        const keyPoint = (question && question.key_point ? question.key_point : '').toString().trim();
-        return keyPoint || ('考点' + (index + 1));
-    }
-
-    function buildKnowledgeMapFromQuestions(questions) {
-        const map = {};
-        (questions || []).forEach(function(q, i) {
-            const keyPoint = getQuestionKnowledgeKey(q, i);
-            if (!map[keyPoint]) {
-                map[keyPoint] = {
-                    type: q.type || 'A1',
-                    difficulty: q.difficulty || '基础',
-                    question: q.question || '',
-                    options: q.options || {},
-                    correct_answer: q.correct_answer || 'A',
-                    explanation: q.explanation || '',
-                    key_point: keyPoint
-                };
-            }
-        });
-        return map;
-    }
-
-    function getOrderedKnowledgePointsFromExamData(data, map) {
-        const ordered = [];
-        (data && Array.isArray(data.knowledge_points) ? data.knowledge_points : []).forEach(function(key) {
-            const normalized = (key || '').toString().trim();
-            if (normalized && map[normalized] && ordered.indexOf(normalized) === -1) {
-                ordered.push(normalized);
-            }
-        });
-        Object.keys(map || {}).forEach(function(key) {
-            if (ordered.indexOf(key) === -1) {
-                ordered.push(key);
-            }
-        });
-        return ordered;
-    }
-
-    function getKnowledgePracticeCount(keyPoint) {
-        const meta = knowledgeStatsMap[keyPoint] || {};
-        const count = parseInt(meta.practice_session_count, 10);
-        return Number.isFinite(count) && count > 0 ? count : 0;
-    }
-
-    function buildKnowledgeDetailHtml(meta) {
-        const detailBits = [];
-        const practiceCount = parseInt(meta.practice_session_count, 10) || 0;
-        detailBits.push(practiceCount > 0 ? ('已练习 ' + practiceCount + ' 次') : '未练习');
-        if ((meta.error_count || 0) > 0) {
-            detailBits.push('错' + meta.error_count + '题');
-        }
-        const severityText = getSeverityBadgeText(meta.severity_tag || '');
-        if (severityText) {
-            detailBits.push(severityText);
-        }
-        return detailBits.length > 0
-            ? '<div class="mt-1 text-sm text-gray-500">' + detailBits.join(' · ') + '</div>'
-            : '';
-    }
-
-    function renderKnowledgeList() {
-        const knowledgeList = document.getElementById('knowledgeList');
-        if (!knowledgeList) return;
-
-        knowledgeList.innerHTML = '';
-        orderedKnowledgePoints.forEach(function(key) {
-            const k = knowledgeMap[key];
-            if (!k) return;
-
-            const statusClass = k.difficulty === '鍩虹' ? 'text-green-600'
-                : (k.difficulty === '鎻愰珮' ? 'text-yellow-600' : 'text-red-600');
-            const meta = knowledgeStatsMap[key] || {};
-            const detailHtml = buildKnowledgeDetailHtml(meta);
-            const practiceCount = getKnowledgePracticeCount(key);
-            const badgeHtml = practiceCount > 0
-                ? '<span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">已做 ' + practiceCount + ' 次</span>'
-                : '<span class="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-600">未开始</span>';
-
-            const div = document.createElement('div');
-            div.className = 'flex items-center justify-between gap-4 p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-blue-50 cursor-pointer transition';
-            div.setAttribute('data-knowledge-key', key);
-            div.innerHTML =
-                '<div class="min-w-0 flex-1">' +
-                    '<div class="flex flex-wrap items-center gap-2">' +
-                        '<span class="font-bold text-lg">' + key + '</span>' +
-                        '<span class="ml-0 sm:ml-1 ' + statusClass + '">' + k.difficulty + '</span>' +
-                    '</div>' +
-                    detailHtml +
-                '</div>' +
-                '<div class="flex items-center gap-3 flex-shrink-0">' +
-                    badgeHtml +
-                    '<span class="bg-blue-500 text-white px-4 py-2 rounded-lg">开始练习</span>' +
-                '</div>';
-
-            div.addEventListener('click', async function() {
-                currentKnowledge = key;
-                currentPracticeIndex = 0;
-                practiceAnswers = {};
-                practiceConfidence = {};
-                practiceFuzzyOptions = {};
-                lastPracticeResult = null;
-                isPracticeMode = true;
-
-                document.getElementById('knowledgeList').parentElement.classList.add('hidden');
-                document.getElementById('questionArea').classList.remove('hidden');
-                document.getElementById('knowledgeTitle').textContent = key;
-
-                await startDetailTrackingSession(key);
-                await generateVariationQuestions(key);
-            });
-
-            knowledgeList.appendChild(div);
-        });
-    }
-
-    function bumpKnowledgePracticeCount(keyPoint) {
-        if (!keyPoint) return;
-        const meta = knowledgeStatsMap[keyPoint] || {
-            key_point: keyPoint,
-            error_count: 0,
-            severity_tag: '',
-            severity_weight: 0,
-            understanding: 0,
-            mastery_penalty: 0,
-            priority_score: 0,
-            original_order: 0,
-            practice_session_count: 0,
-            last_practiced_at: null
-        };
-        meta.practice_session_count = (parseInt(meta.practice_session_count, 10) || 0) + 1;
-        meta.last_practiced_at = new Date().toISOString();
-        knowledgeStatsMap[keyPoint] = meta;
-        renderKnowledgeList();
-    }
-
-    function normalizeOptionLetter(value) {
+function normalizeOptionLetter(value) {
         const normalized = String(value || '').trim().toUpperCase();
         return /^[A-E]$/.test(normalized) ? normalized : '';
     }
@@ -1155,6 +524,344 @@
         display.classList.remove('hidden');
     }
 
+    
+function setPracticeConfidenceButtonState(button, isSelected, isMuted) {
+        if (!button) return;
+
+        const wasSelected = button.classList.contains('is-selected');
+
+        button.classList.add('practice-confidence-pill');
+        setPracticeElementClassState(button, 'is-selected', !!isSelected);
+        setPracticeElementClassState(button, 'is-muted', !!isMuted);
+        setPracticePressedState(button, isSelected);
+
+        if (isSelected && !wasSelected) {
+            pulsePracticeConfidenceButton(button);
+        } else if (!isSelected && button._practiceConfidenceBumpTimer) {
+            clearTimeout(button._practiceConfidenceBumpTimer);
+            button._practiceConfidenceBumpTimer = null;
+            button.classList.remove('is-bump');
+        }
+    }
+
+    function renderPracticeConfidenceState(idx) {
+        const level = practiceConfidence[idx] || '';
+        const fuzzyOptions = getPracticeFuzzyOptions(idx);
+        const btnSure = document.getElementById('practice-btn-sure-' + idx);
+        const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
+        const btnNo = document.getElementById('practice-btn-no-' + idx);
+        const display = document.getElementById('practice-confidence-display-' + idx);
+        const panel = document.getElementById('practice-fuzzy-panel-' + idx);
+        const summary = document.getElementById('practice-fuzzy-summary-' + idx);
+
+        const buttonMap = {
+            sure: btnSure,
+            unsure: btnUnsure,
+            no: btnNo
+        };
+
+        Object.keys(buttonMap).forEach(function(key) {
+            setPracticeConfidenceButtonState(buttonMap[key], level === key, !!level && level !== key);
+        });
+
+        if (panel) {
+            setPracticeElementClassState(panel, 'hidden', level !== 'unsure');
+        }
+
+        if (!display) return;
+
+        display.textContent = '';
+        display.className = 'practice-confidence-status hidden';
+
+        if (!level) {
+            return;
+        }
+
+        if (level === 'sure') {
+            display.textContent = '已标记为“确定”，这题按正常节奏完成即可。';
+            display.classList.add('is-sure');
+        } else if (level === 'unsure') {
+            display.textContent = fuzzyOptions.length > 0
+                ? '已标记为“模糊”，当前犹豫选项：' + fuzzyOptions.join('、')
+                : '已标记为“模糊”，请补充你犹豫的选项。';
+            display.classList.add('is-unsure');
+            if (summary) {
+                summary.textContent = fuzzyOptions.length > 0
+                    ? '已标记：' + fuzzyOptions.join('、')
+                    : '可多选，包括你已选的答案';
+            }
+            updatePracticeFuzzyOptionButtons(idx);
+        } else {
+            display.textContent = '已标记为“不会”，提交后会进入重点复盘。';
+            display.classList.add('is-no');
+        }
+
+        display.classList.remove('hidden');
+    }
+
+    function buildPracticeFuzzyDetailHtml(detail) {
+        const fuzzyOptions = Array.isArray(detail && detail.fuzzy_options) ? detail.fuzzy_options : [];
+        if (fuzzyOptions.length === 0) {
+            return '';
+        }
+
+        let html = '<div class="mt-3 rounded-lg bg-yellow-50 border border-yellow-200 px-3 py-2 text-sm text-yellow-800">' +
+            '<div class="font-medium">模糊选项：' + fuzzyOptions.join('、') + '</div>';
+        fuzzyOptions.forEach(function(opt) {
+            const optionText = detail.option_texts && detail.option_texts[opt]
+                ? detail.option_texts[opt]
+                : ((detail.options && detail.options[opt]) || ('选项' + opt));
+            html += '<div class="mt-1">→ ' + opt + '. ' + escapeHtml(optionText) + '</div>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    function buildPracticeFuzzyReportSection(detail) {
+        const fuzzyOptions = Array.isArray(detail && detail.fuzzy_options) ? detail.fuzzy_options : [];
+        if (fuzzyOptions.length === 0) {
+            return '';
+        }
+
+        let report = '模糊选项：' + fuzzyOptions.join('、') + '\n';
+        fuzzyOptions.forEach(function(opt) {
+            const optionText = detail.option_texts && detail.option_texts[opt]
+                ? detail.option_texts[opt]
+                : ((detail.options && detail.options[opt]) || ('选项' + opt));
+            report += '  → ' + opt + '. ' + optionText + '\n';
+        });
+        return report;
+    }
+
+    function normalizePracticeAnswerLetters(answer, question) {
+        const allowed = new Set(getPracticeOptionLetters(question));
+        const seen = new Set();
+        const matches = String(answer || '').toUpperCase().match(/[A-E]/g) || [];
+
+        return matches.filter(function(letter) {
+            if (!allowed.has(letter) || seen.has(letter)) {
+                return false;
+            }
+            seen.add(letter);
+            return true;
+        }).sort();
+    }
+
+    function formatPracticeAnswerLetters(letters, emptyText) {
+        return letters && letters.length > 0 ? letters.join('、') : (emptyText || '无');
+    }
+
+    function analyzePracticeAnswer(detail) {
+        const question = detail || {};
+        const userLetters = normalizePracticeAnswerLetters(question.user_answer, question);
+        const correctLetters = normalizePracticeAnswerLetters(question.correct_answer, question);
+        const missingLetters = correctLetters.filter(function(letter) {
+            return !userLetters.includes(letter);
+        });
+        const extraLetters = userLetters.filter(function(letter) {
+            return !correctLetters.includes(letter);
+        });
+        const isMultipleChoice = question.type === 'X';
+        let issueLabel = '完全正确';
+        let issueTone = 'success';
+        let issueNarrative = '你的答案与标准答案一致。';
+
+        if (!question.is_correct) {
+            if (userLetters.length === 0) {
+                issueLabel = '未作答';
+                issueTone = 'neutral';
+                issueNarrative = '这题未作答，正确答案是 ' + formatPracticeAnswerLetters(correctLetters, '无') + '。';
+            } else if (missingLetters.length > 0 && extraLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '少选 + 多选' : '错选';
+                issueTone = 'danger';
+                issueNarrative = '这题漏选 ' + formatPracticeAnswerLetters(missingLetters) +
+                    '，同时' + (isMultipleChoice ? '多选 ' : '错选 ') + formatPracticeAnswerLetters(extraLetters) + '。';
+            } else if (missingLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '少选' : '错选';
+                issueTone = 'warning';
+                issueNarrative = isMultipleChoice
+                    ? '这题漏选 ' + formatPracticeAnswerLetters(missingLetters) + '。'
+                    : '这题没有选到正确答案 ' + formatPracticeAnswerLetters(missingLetters) + '。';
+            } else if (extraLetters.length > 0) {
+                issueLabel = isMultipleChoice ? '多选' : '错选';
+                issueTone = 'danger';
+                issueNarrative = '这题' + (isMultipleChoice ? '多选 ' : '错选 ') + formatPracticeAnswerLetters(extraLetters) + '。';
+            } else {
+                issueLabel = '答案不匹配';
+                issueTone = 'danger';
+                issueNarrative = '这题答案与标准答案不一致，请结合解析复盘。';
+            }
+        }
+
+        return {
+            isCorrect: !!question.is_correct,
+            questionType: question.type || '',
+            userLetters: userLetters,
+            correctLetters: correctLetters,
+            missingLetters: missingLetters,
+            extraLetters: extraLetters,
+            issueLabel: issueLabel,
+            issueTone: issueTone,
+            issueNarrative: issueNarrative
+        };
+    }
+
+    function buildPracticeAnswerSummaryCard(label, value, tone) {
+        const toneClassMap = {
+            user: 'bg-blue-50 border-blue-200 text-blue-700',
+            correct: 'bg-green-50 border-green-200 text-green-700',
+            missing: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+            extra: 'bg-red-50 border-red-200 text-red-700'
+        };
+        const toneClass = toneClassMap[tone] || 'bg-gray-50 border-gray-200 text-gray-700';
+
+        return '<div class="rounded-xl border px-4 py-3 ' + toneClass + '">' +
+            '<div class="text-xs font-semibold tracking-wide opacity-75">' + escapeHtml(label) + '</div>' +
+            '<div class="mt-2 text-base font-bold">' + escapeHtml(value) + '</div>' +
+            '</div>';
+    }
+
+    function buildPracticeAnswerSummaryHtml(review) {
+        const cards = [
+            buildPracticeAnswerSummaryCard('你的答案', formatPracticeAnswerLetters(review.userLetters, '未作答'), 'user'),
+            buildPracticeAnswerSummaryCard('正确答案', formatPracticeAnswerLetters(review.correctLetters, '无'), 'correct')
+        ];
+
+        if (!review.isCorrect && review.missingLetters.length > 0) {
+            cards.push(buildPracticeAnswerSummaryCard('漏选项', formatPracticeAnswerLetters(review.missingLetters), 'missing'));
+        }
+
+        if (!review.isCorrect && review.extraLetters.length > 0) {
+            cards.push(buildPracticeAnswerSummaryCard(
+                review.questionType === 'X' ? '多选项' : '错选项',
+                formatPracticeAnswerLetters(review.extraLetters),
+                'extra'
+            ));
+        }
+
+        return '<div class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">' + cards.join('') + '</div>';
+    }
+
+    function buildPracticeAnswerIssueHtml(review) {
+        if (review.isCorrect) {
+            return '';
+        }
+
+        const toneClassMap = {
+            warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+            danger: 'bg-red-50 border-red-200 text-red-700',
+            neutral: 'bg-gray-50 border-gray-200 text-gray-700'
+        };
+        const toneClass = toneClassMap[review.issueTone] || toneClassMap.neutral;
+
+        return '<div class="mb-4 rounded-xl border px-4 py-3 ' + toneClass + '">' +
+            '<div class="flex flex-wrap items-center gap-2">' +
+            '<span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs font-bold">错因：' +
+            escapeHtml(review.issueLabel) + '</span>' +
+            '<span class="text-sm font-medium">' + escapeHtml(review.issueNarrative) + '</span>' +
+            '</div></div>';
+    }
+
+    function buildPracticeAnswerOptionRowHtml(detail, optionLetter, review) {
+        const options = detail && detail.options ? detail.options : {};
+        const optionText = escapeHtml(options[optionLetter] || ('选项 ' + optionLetter));
+        const isSelected = review.userLetters.includes(optionLetter);
+        const isCorrect = review.correctLetters.includes(optionLetter);
+        let rowClass = 'bg-gray-50 border-gray-200';
+        let flagClass = 'bg-white border border-gray-200 text-gray-500';
+        let letterClass = 'bg-gray-200 text-gray-600';
+        let flagText = '未涉及';
+
+        if (isCorrect && isSelected) {
+            rowClass = 'bg-green-50 border-green-200';
+            flagClass = 'bg-green-100 text-green-700';
+            letterClass = 'bg-green-600 text-white';
+            flagText = '选对了';
+        } else if (isCorrect) {
+            rowClass = 'bg-yellow-50 border-yellow-200';
+            flagClass = 'bg-yellow-100 text-yellow-800';
+            letterClass = 'bg-yellow-500 text-white';
+            flagText = '漏选';
+        } else if (isSelected) {
+            rowClass = 'bg-red-50 border-red-200';
+            flagClass = 'bg-red-100 text-red-700';
+            letterClass = 'bg-red-500 text-white';
+            flagText = review.questionType === 'X' ? '多选了' : '错选';
+        }
+
+        return '<div class="flex flex-col gap-3 rounded-xl border px-4 py-3 sm:flex-row sm:items-start sm:justify-between ' + rowClass + '">' +
+            '<div class="flex min-w-0 items-start gap-3">' +
+            '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ' + letterClass + '">' +
+            optionLetter + '</span>' +
+            '<span class="min-w-0 text-sm leading-6 text-gray-800">' + optionText + '</span>' +
+            '</div>' +
+            '<span class="inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-bold ' + flagClass + '">' +
+            flagText + '</span>' +
+            '</div>';
+    }
+
+    function buildPracticeAnswerOptionsHtml(detail, review) {
+        const rows = getPracticeOptionLetters(detail).map(function(optionLetter) {
+            return buildPracticeAnswerOptionRowHtml(detail, optionLetter, review);
+        });
+        return '<div class="mb-4 space-y-2">' + rows.join('') + '</div>';
+    }
+
+    function renderPracticeConfidenceState(idx) {
+        const level = practiceConfidence[idx] || '';
+        const fuzzyOptions = getPracticeFuzzyOptions(idx);
+        const btnSure = document.getElementById('practice-btn-sure-' + idx);
+        const btnUnsure = document.getElementById('practice-btn-unsure-' + idx);
+        const btnNo = document.getElementById('practice-btn-no-' + idx);
+        const display = document.getElementById('practice-confidence-display-' + idx);
+        const panel = document.getElementById('practice-fuzzy-panel-' + idx);
+        const summary = document.getElementById('practice-fuzzy-summary-' + idx);
+
+        const buttonMap = {
+            sure: btnSure,
+            unsure: btnUnsure,
+            no: btnNo
+        };
+
+        Object.keys(buttonMap).forEach(function(key) {
+            setPracticeConfidenceButtonState(buttonMap[key], level === key, !!level && level !== key);
+        });
+
+        if (panel) {
+            setPracticeElementClassState(panel, 'hidden', level !== 'unsure');
+        }
+
+        if (!display) return;
+
+        display.textContent = '';
+        display.className = 'practice-confidence-status hidden';
+
+        if (!level) {
+            return;
+        }
+
+        if (level === 'sure') {
+            display.textContent = '已标记为“确定”，这题按正常节奏完成即可。';
+            display.classList.add('is-sure');
+        } else if (level === 'unsure') {
+            display.textContent = fuzzyOptions.length > 0
+                ? '？模糊选项：' + fuzzyOptions.join('、')
+                : '已标记为“模糊”，请勾选具体选项。';
+            display.classList.add('is-unsure');
+            if (summary) {
+                summary.textContent = fuzzyOptions.length > 0
+                    ? '已标记：' + fuzzyOptions.join('、')
+                    : '请勾选具体选项，可多选，包括你已选的答案';
+            }
+            updatePracticeFuzzyOptionButtons(idx);
+        } else {
+            display.textContent = '已标记为“不会”，提交后会进入重点复盘。';
+            display.classList.add('is-no');
+        }
+
+        display.classList.remove('hidden');
+    }
+
     function getSeverityBadgeText(tag) {
         if (tag === 'stubborn') return '顽固病灶';
         if (tag === 'critical') return '致命盲区';
@@ -1250,8 +957,7 @@
     }
 
     async function completeDetailTrackingSession(score, totalQuestions) {
-        if (typeof detailTrackingSessionId === 'undefined' || !detailTrackingSessionId) return;
-        if (typeof safeFetch !== 'function') return;
+        if (!detailTrackingSessionId) return;
         try {
             await safeFetch('/api/tracking/session/' + detailTrackingSessionId + '/complete', {
                 method: 'POST',
@@ -1270,9 +976,6 @@
     const originalCompleteDetailTrackingSession = completeDetailTrackingSession;
     completeDetailTrackingSession = async function(score, totalQuestions) {
         await originalCompleteDetailTrackingSession(score, totalQuestions);
-        if (typeof detailTrackingCompleted === 'undefined') return;
-        if (typeof detailTrackingSessionId === 'undefined') return;
-        if (typeof bumpKnowledgePracticeCount !== 'function') return;
         if (!detailTrackingCompleted && currentKnowledge && detailTrackingSessionId) {
             detailTrackingCompleted = true;
             bumpKnowledgePracticeCount(currentKnowledge);
@@ -1412,145 +1115,8 @@
         if (shouldRecordPracticeQuestion(idx)) recordDetailQuestionAnswer(idx);
     }
 
-    function selectPracticeOption(opt) {
-        const q = practiceQuestions[currentPracticeIndex];
-        if (!q) return;
-        const isMultiple = (q.type || 'A1') === 'X';
-        const currentAnswer = practiceAnswers[currentPracticeIndex] || '';
-
-        if (isMultiple) {
-            // 多选题：切换选中状态
-            const selected = currentAnswer ? currentAnswer.split('') : [];
-            const optIndex = selected.indexOf(opt);
-
-            if (optIndex > -1) {
-                // 已选中，取消选中
-                selected.splice(optIndex, 1);
-            } else {
-                // 未选中，添加选中
-                selected.push(opt);
-            }
-
-            practiceAnswers[currentPracticeIndex] = selected.sort().join('');
-
-            // 更新UI
-            document.querySelectorAll('input[name="practiceOpt"]').forEach(function(cb) {
-                const isChecked = selected.includes(cb.value);
-                cb.checked = isChecked;
-                if (isChecked) {
-                    cb.closest('label').classList.add('border-blue-500', 'bg-blue-50');
-                } else {
-                    cb.closest('label').classList.remove('border-blue-500', 'bg-blue-50');
-                }
-            });
-        } else {
-            // 单选题：如果已选中则取消，否则选中
-            if (currentAnswer === opt) {
-                // 已选中该选项，取消选择
-                practiceAnswers[currentPracticeIndex] = '';
-                document.querySelectorAll('[data-opt]').forEach(function(label) {
-                    label.classList.remove('border-blue-500', 'bg-blue-50');
-                });
-                // 取消radio选中
-                const radio = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
-                if (radio) radio.checked = false;
-            } else {
-                // 选中该选项
-                practiceAnswers[currentPracticeIndex] = opt;
-                document.querySelectorAll('[data-opt]').forEach(function(label) {
-                    if (label.dataset.opt === opt) label.classList.add('border-blue-500', 'bg-blue-50');
-                    else label.classList.remove('border-blue-500', 'bg-blue-50');
-                });
-            }
-        }
-
-        const statusEl = document.getElementById('status-' + currentPracticeIndex);
-        if (statusEl) {
-            statusEl.textContent = '✓';
-            statusEl.className = 'text-green-500 text-xl font-bold';
-        }
-
-        updateAnsweredCount();
-        recordDetailQuestionAnswer(currentPracticeIndex);
-    }
-
-    function displayPracticeQuestion() {
-        const q = practiceQuestions[currentPracticeIndex];
-        if (!q) return;
-
-        const container = document.getElementById('questionsContainer');
-        const isMultiple = q.type === 'X';
-        const inputType = isMultiple ? 'checkbox' : 'radio';
-        const optionLetters = getPracticeOptionLetters(q);
-        const variationBadge = q.variation_type
-            ? '<span class="bg-purple-100 text-purple-700 px-2 py-1 rounded text-sm ml-2">' + q.variation_type + '</span>'
-            : '';
-
-        let optionsHtml = '';
-        optionLetters.forEach(function(opt) {
-            optionsHtml += '<label class="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:border-blue-500 transition option-label" data-opt="' + opt + '">' +
-                '<input type="' + inputType + '" name="practiceOpt" value="' + opt + '" class="mt-1 mr-3" onchange="selectPracticeOption(\'' + opt + '\')">' +
-                '<span class="font-bold mr-2">' + opt + '.</span><span>' + (q.options[opt] || ('选项' + opt)) + '</span></label>';
-        });
-
-        container.innerHTML =
-            '<div class="bg-white rounded-lg shadow p-6">' +
-            '<div class="flex items-center justify-between mb-4">' +
-            '<div class="flex items-center space-x-2">' +
-            '<span class="bg-blue-100 text-blue-800 px-3 py-1 rounded text-sm font-bold">第' + (currentPracticeIndex + 1) + '题</span>' +
-            '<span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-sm">' + (q.type || 'A1') + (q.type === 'X' ? '（多选）' : '') + '</span>' +
-            '<span class="text-purple-600 text-sm font-medium">变式</span>' + variationBadge +
-            '</div>' +
-            '<span id="status-' + currentPracticeIndex + '" class="text-gray-300 text-xl">○</span>' +
-            '</div>' +
-            '<div class="mb-4"><p class="text-lg font-medium leading-relaxed">' + escapeHtml(q.question) + '</p></div>' +
-            '<div class="space-y-2 mb-4">' + optionsHtml + '</div>' +
-            '<div class="pt-4 border-t border-gray-100">' +
-            '<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">' +
-            '<span class="text-sm font-medium text-gray-500">自我评估</span>' +
-            '<div class="practice-confidence-pill-row">' +
-            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'sure\')" id="practice-btn-sure-' + currentPracticeIndex + '" data-level="sure" aria-pressed="false" class="practice-confidence-pill practice-confidence-pill--sure"><span class="practice-confidence-pill__key">Q</span><span class="practice-confidence-pill__label">确定</span></button>' +
-            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'unsure\')" id="practice-btn-unsure-' + currentPracticeIndex + '" data-level="unsure" aria-pressed="false" class="practice-confidence-pill practice-confidence-pill--unsure"><span class="practice-confidence-pill__key">W</span><span class="practice-confidence-pill__label">模糊</span></button>' +
-            '<button type="button" onclick="setPracticeConfidence(' + currentPracticeIndex + ', \'no\')" id="practice-btn-no-' + currentPracticeIndex + '" data-level="no" aria-pressed="false" class="practice-confidence-pill practice-confidence-pill--no"><span class="practice-confidence-pill__key">E</span><span class="practice-confidence-pill__label">不会</span></button>' +
-            '</div></div>' +
-            '<div id="practice-confidence-display-' + currentPracticeIndex + '" class="practice-confidence-status hidden" aria-live="polite"></div>' +
-            buildPracticeFuzzyOptionsPanelHtml(currentPracticeIndex) +
-            '</div>' +
-            '</div>';
-
-        // 恢复之前保存的答案（如果有）
-        // 使用 hasOwnProperty 确保键真实存在，避免 undefined 被误判
-        if (practiceAnswers.hasOwnProperty(currentPracticeIndex) && practiceAnswers[currentPracticeIndex]) {
-            const savedAns = practiceAnswers[currentPracticeIndex];
-            if (isMultiple) {
-                savedAns.split('').forEach(function(opt) {
-                    const input = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
-                    if (input) {
-                        input.checked = true;
-                        input.closest('label').classList.add('border-blue-500', 'bg-blue-50');
-                    }
-                });
-            } else {
-                const input = document.querySelector('input[name="practiceOpt"][value="' + savedAns + '"]');
-                if (input) {
-                    input.checked = true;
-                    input.closest('label').classList.add('border-blue-500', 'bg-blue-50');
-                }
-            }
-            const statusEl = document.getElementById('status-' + currentPracticeIndex);
-            if (statusEl) {
-                statusEl.textContent = '✓';
-                statusEl.className = 'text-green-500 text-xl font-bold';
-            }
-        }
-
-        // 恢复信心度
-        renderPracticeConfidenceState(currentPracticeIndex);
-
-        updatePracticeControls();
-    }
-
-    function submitPractice() {
+    
+function submitPractice() {
         let correctCount = 0;
         const details = [];
 
@@ -1607,11 +1173,7 @@
         document.getElementById('practiceWrong').textContent = total - correctCount;
         document.getElementById('practiceEmoji').textContent = score >= 80 ? '🏆' : score >= 60 ? '👍' : '📚';
 
-        if (typeof completeDetailTrackingSession === 'function') {
-            Promise.resolve(completeDetailTrackingSession(score, total)).catch(function(error) {
-                console.error('[Tracking] 瀹屾垚缁嗚妭缁冧範浼氳瘽澶辫触:', error);
-            });
-        }
+        completeDetailTrackingSession(score, total);
 
         const container = document.getElementById('practiceDetails');
         container.innerHTML = '';
@@ -1824,198 +1386,81 @@
         });
     }
 
-    function bindEvents() {
-        document.getElementById('prevQuestion').addEventListener('click', function() {
-            if (currentPracticeIndex > 0) {
-                currentPracticeIndex--;
-                displayPracticeQuestion();
-            }
-        });
-
-        document.getElementById('submitPracticeBtn').addEventListener('click', function() {
-            // 检查当前题目是否已回答（排除空字符串）
-            const currentAnswer = practiceAnswers[currentPracticeIndex];
-            if (!currentAnswer || currentAnswer.length === 0) {
-                alert('请先完成当前题目。');
-                return;
-            }
-
-            if (currentPracticeIndex < practiceQuestions.length - 1) {
-                currentPracticeIndex++;
-                displayPracticeQuestion();
-            } else {
-                submitPractice();
-            }
-        });
-
-        document.addEventListener('keydown', function(e) {
-            const questionArea = document.getElementById('questionArea');
-            if (!questionArea || questionArea.classList.contains('hidden') || !isPracticeMode) return;
-
-            const key = e.key;
-            if (key >= '1' && key <= '5') {
-                if (tryTogglePracticeFuzzyOptionByShortcut(currentPracticeIndex, key)) {
-                    e.preventDefault();
-                    return;
-                }
-
-                const opt = getPracticeShortcutOptionByKey(key, practiceQuestions[currentPracticeIndex]);
-                const input = document.querySelector('input[name="practiceOpt"][value="' + opt + '"]');
-                if (input && opt) {
-                    input.checked = true;
-                    selectPracticeOption(opt);
-                }
-                e.preventDefault();
-                return;
-            }
-
-            const keyLower = key.toLowerCase();
-            if (keyLower === 'q') { setPracticeConfidence(currentPracticeIndex, 'sure'); e.preventDefault(); }
-            if (keyLower === 'w') { setPracticeConfidence(currentPracticeIndex, 'unsure'); e.preventDefault(); }
-            if (keyLower === 'e') { setPracticeConfidence(currentPracticeIndex, 'no'); e.preventDefault(); }
-
-            if (key === 'ArrowDown') {
-                if (currentPracticeIndex < practiceQuestions.length - 1) {
-                    currentPracticeIndex++;
-                    displayPracticeQuestion();
-                }
-                e.preventDefault();
-            }
-
-            if (key === 'ArrowUp') {
-                if (currentPracticeIndex > 0) {
-                    currentPracticeIndex--;
-                    displayPracticeQuestion();
-                }
-                e.preventDefault();
-            }
-
-            if (key === 'Enter') {
-                const currentAnswer = practiceAnswers[currentPracticeIndex];
-                if (!currentAnswer || currentAnswer.length === 0) return;
-                if (currentPracticeIndex < practiceQuestions.length - 1) {
-                    currentPracticeIndex++;
-                    displayPracticeQuestion();
-                } else {
-                    submitPractice();
-                }
-                e.preventDefault();
-            }
-        });
+    
+const elements = {};
+function createClassList(target) {
+  return {
+    add: function() {
+      const set = new Set((target.className || '').split(/\s+/).filter(Boolean));
+      Array.from(arguments).forEach(function(cls) { set.add(cls); });
+      target.className = Array.from(set).join(' ');
+    },
+    remove: function() {
+      const removeSet = new Set(Array.from(arguments));
+      target.className = (target.className || '')
+        .split(/\s+/)
+        .filter(function(cls) { return cls && !removeSet.has(cls); })
+        .join(' ');
+    },
+    contains: function(cls) {
+      return (target.className || '').split(/\s+/).filter(Boolean).includes(cls);
     }
-
-    function initPractice() {
-        if (!examData) {
-            document.getElementById('noData').classList.remove('hidden');
-            return;
-        }
-
-        document.getElementById('practiceArea').classList.remove('hidden');
-
-        const questions = examData.questions || [];
-        knowledgeStatsMap = examData.knowledge_point_stats || {};
-
-        // 构建知识点映射：每个知识点对应第一道相关题目
-        knowledgeMap = buildKnowledgeMapFromQuestions(questions);
-        orderedKnowledgePoints = getOrderedKnowledgePointsFromExamData(examData, knowledgeMap);
-
-        const knowledgeList = document.getElementById('knowledgeList');
-        knowledgeList.innerHTML = '';
-        orderedKnowledgePoints.forEach(function(key) {
-            const k = knowledgeMap[key];
-            if (!k) return;
-
-            const statusClass = k.difficulty === '基础' ? 'text-green-600'
-                : (k.difficulty === '提高' ? 'text-yellow-600' : 'text-red-600');
-            const meta = knowledgeStatsMap[key] || {};
-            const detailBits = [];
-            if ((meta.error_count || 0) > 0) {
-                detailBits.push('错' + meta.error_count + '题');
-            }
-            const severityText = getSeverityBadgeText(meta.severity_tag || '');
-            if (severityText) {
-                detailBits.push(severityText);
-            }
-            const detailHtml = detailBits.length > 0
-                ? '<div class="mt-1 text-sm text-red-500">' + detailBits.join(' · ') + '</div>'
-                : '';
-
-            const div = document.createElement('div');
-            div.className = 'flex items-center justify-between p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-blue-50 cursor-pointer transition';
-            div.innerHTML = '<div><span class="font-bold text-lg">' + key + '</span><span class="ml-2 ' + statusClass + '">' + k.difficulty + '</span>' + detailHtml + '</div>' +
-                '<span class="bg-blue-500 text-white px-4 py-2 rounded-lg">开始练习</span>';
-
-            div.addEventListener('click', async function() {
-                currentKnowledge = key;
-                currentPracticeIndex = 0;
-                practiceAnswers = {};
-                practiceConfidence = {};
-                practiceFuzzyOptions = {};
-                lastPracticeResult = null;
-                isPracticeMode = true;
-
-                document.getElementById('knowledgeList').parentElement.classList.add('hidden');
-                document.getElementById('questionArea').classList.remove('hidden');
-                document.getElementById('knowledgeTitle').textContent = key;
-
-                await startDetailTrackingSession(key);
-                await generateVariationQuestions(key);
-            });
-
-            knowledgeList.appendChild(div);
-        });
-
-        renderKnowledgeList();
-    }
-
-    window.selectPracticeOption = selectPracticeOption;
-    window.setPracticeConfidence = setPracticeConfidence;
-    window.togglePracticeFuzzyOption = togglePracticeFuzzyOption;
-    window.copyPracticeSummary = copyPracticeSummary;
-    window.retryGeneration = async function(keyPoint) {
-        currentPracticeIndex = 0;
-        practiceAnswers = {};
-        practiceConfidence = {};
-        practiceFuzzyOptions = {};
-        lastPracticeResult = null;
-        await generateVariationQuestions(keyPoint);
-    };
-    window.backToList = function() {
-        document.getElementById('resultArea').classList.add('hidden');
-        document.getElementById('questionArea').classList.add('hidden');
-        document.getElementById('knowledgeList').parentElement.classList.remove('hidden');
-        isPracticeMode = false;
-        detailTrackingSessionId = null;
-        renderKnowledgeList();
-    };
-    window.endStudySession = function() {
-        const score = document.getElementById('practiceScore').textContent;
-        const correct = document.getElementById('practiceCorrect').textContent;
-        const wrong = document.getElementById('practiceWrong').textContent;
-        const total = parseInt(correct, 10) + parseInt(wrong, 10);
-        const accuracy = total > 0 ? Math.round((parseInt(correct, 10) / total) * 100) + '%' : '0%';
-        alert(
-            '本次学习已结束！\n\n' +
-            '得分：' + score + ' 分\n' +
-            '正确率：' + accuracy + '\n' +
-            '正确：' + correct + ' 题 / 错误：' + wrong + ' 题\n\n' +
-            '数据已记录到学习轨迹，继续加油！'
-        );
-        window.location.href = '/';
-    };
-
-    (async function initPage() {
-        console.log('开始读取整卷测试数据...');
-        examData = await loadExamData();
-        if (examData) {
-            examData.score = scoreFromUrl;
-            bindEvents();
-            initPractice();
-        } else {
-            document.getElementById('noData').classList.remove('hidden');
-        }
-    })();
-</script>
-    </div>
-</div>
-{% endblock %}
+  };
+}
+function registerElement(id, className) {
+  const element = { id: id, textContent: '', innerHTML: '', className: className || '', children: [], appendChild: function(child) { this.children.push(child); } };
+  element.classList = createClassList(element);
+  elements[id] = element;
+  return element;
+}
+const document = {
+  getElementById: function(id) { return Object.prototype.hasOwnProperty.call(elements, id) ? elements[id] : null; },
+  createElement: function() { const element = { className: '', innerHTML: '', children: [], appendChild: function(child) { this.children.push(child); } }; element.classList = createClassList(element); return element; }
+};
+globalThis.document = document;
+globalThis.alert = function(message) { throw new Error('Unexpected alert: ' + message); };
+globalThis.setTimeout = function(fn) { fn(); return 0; };
+let copiedText = '';
+Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: function(text) { copiedText = text; return Promise.resolve(); } } }, configurable: true });
+function escapeHtml(text) { return text || ''; }
+function buildMaskedExplanationHtml() { return '<div>??</div>'; }
+function completeDetailTrackingSession() { return Promise.resolve(); }
+let currentKnowledge = '????';
+let practiceQuestions = [{ question: '??????????????', type: 'A1', difficulty: '??', options: { A: '??A??', B: '??B??', C: '??C??', D: '??D??', E: '??E??' }, correct_answer: 'C', explanation: '????' }];
+let currentPracticeIndex = 0;
+let practiceAnswers = { 0: 'D' };
+let practiceConfidence = {};
+let practiceFuzzyOptions = {};
+let lastPracticeResult = null;
+registerElement('practice-btn-sure-0');
+registerElement('practice-btn-unsure-0');
+registerElement('practice-btn-no-0');
+registerElement('practice-confidence-display-0', 'mt-2 text-sm text-center hidden');
+registerElement('practice-fuzzy-panel-0', 'hidden');
+registerElement('practice-fuzzy-summary-0');
+registerElement('practice-fuzzy-opt-0-A');
+registerElement('practice-fuzzy-opt-0-B');
+registerElement('practice-fuzzy-opt-0-C');
+registerElement('practice-fuzzy-opt-0-D');
+registerElement('practice-fuzzy-opt-0-E');
+registerElement('questionArea');
+registerElement('resultArea', 'hidden');
+registerElement('resultKnowledgeTitle');
+registerElement('practiceScore');
+registerElement('practiceCorrect');
+registerElement('practiceWrong');
+registerElement('practiceEmoji');
+registerElement('practiceDetails');
+registerElement('copyPracticeSummaryBtn', 'bg-indigo-500 hover:bg-indigo-600');
+registerElement('copyPracticeSummaryText');
+elements.copyPracticeSummaryText.textContent = '??????????';
+(async function main() {
+  setPracticeConfidence(0, 'unsure');
+  tryTogglePracticeFuzzyOptionByShortcut(0, '4');
+  tryTogglePracticeFuzzyOptionByShortcut(0, '3');
+  submitPractice();
+  copyPracticeSummary();
+  await Promise.resolve();
+  await Promise.resolve();
+  console.log(JSON.stringify({ copiedText: copiedText, detailHtml: elements.practiceDetails.children[0].innerHTML, btnText: elements.copyPracticeSummaryText.textContent, btnClass: elements.copyPracticeSummaryBtn.className }));
+})().catch(function(error) { console.error('ERRNAME', error && error.name); console.error('ERRMSG', error && error.message); console.error(error && error.stack); process.exit(1); });

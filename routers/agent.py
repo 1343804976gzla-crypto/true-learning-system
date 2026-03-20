@@ -430,7 +430,7 @@ async def get_agent_tools() -> List[AgentToolDefinition]:
     return list_available_agent_tools()
 
 
-@router.get("/reference/status")
+@router.get("/reference/status", response_model=dict)
 async def get_agent_reference_status() -> dict:
     return {
         "mem0": get_mem0_bridge_status(),

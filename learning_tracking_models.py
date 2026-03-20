@@ -423,6 +423,146 @@ class DailyReviewPaperItem(Base):
     paper = relationship("DailyReviewPaper", back_populates="items")
 
 
+class ChapterReviewChapter(Base):
+    """
+    章节复习主表
+    基于上传内容构建，按 actor + chapter 维度保存合并后的原文与复习状态。
+    """
+    __tablename__ = "chapter_review_chapters"
+    __table_args__ = (
+        UniqueConstraint("actor_key", "chapter_id", name="uq_chapter_review_actor_chapter"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
+    actor_key = Column(String, nullable=False, index=True)
+    chapter_id = Column(String, nullable=False, index=True)
+    book = Column(String, nullable=False, index=True)
+    chapter_number = Column(String, nullable=True)
+    chapter_title = Column(String, nullable=False)
+    ai_summary = Column(Text, nullable=True)
+    merged_raw_content = Column(Text, nullable=False)
+    cleaned_content = Column(Text, nullable=False)
+    content_version = Column(Integer, default=1)
+    first_uploaded_date = Column(Date, nullable=True, index=True)
+    last_uploaded_date = Column(Date, nullable=True, index=True)
+    last_reviewed_at = Column(Date, nullable=True)
+    next_due_date = Column(Date, nullable=True, index=True)
+    review_status = Column(String, default="pending", index=True)
+    total_units = Column(Integer, default=0)
+    total_estimated_minutes = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    units = relationship("ChapterReviewUnit", back_populates="review_chapter", cascade="all, delete-orphan")
+    tasks = relationship("ChapterReviewTask", back_populates="review_chapter", cascade="all, delete-orphan")
+
+
+class ChapterReviewUnit(Base):
+    """
+    章节复习单元
+    把长章节切成更适合每日复习的若干块，每块固定生成 10 道简答题。
+    """
+    __tablename__ = "chapter_review_units"
+    __table_args__ = (
+        UniqueConstraint("review_chapter_id", "content_version", "unit_index", name="uq_chapter_review_unit_version_index"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    review_chapter_id = Column(Integer, ForeignKey("chapter_review_chapters.id"), nullable=False, index=True)
+    content_version = Column(Integer, default=1, index=True)
+    unit_index = Column(Integer, nullable=False)
+    unit_title = Column(String, nullable=False)
+    raw_text = Column(Text, nullable=False)
+    cleaned_text = Column(Text, nullable=False)
+    excerpt = Column(Text, nullable=True)
+    char_count = Column(Integer, default=0)
+    estimated_minutes = Column(Integer, default=0)
+    next_round = Column(Integer, default=1, index=True)
+    completed_rounds = Column(Integer, default=0)
+    next_due_date = Column(Date, nullable=True, index=True)
+    last_reviewed_at = Column(Date, nullable=True)
+    last_status_label = Column(String, nullable=True)
+    review_status = Column(String, default="pending", index=True)
+    carry_over_count = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    review_chapter = relationship("ChapterReviewChapter", back_populates="units")
+    tasks = relationship("ChapterReviewTask", back_populates="unit", cascade="all, delete-orphan")
+
+
+class ChapterReviewTask(Base):
+    """
+    每日复习任务
+    一个任务对应一个复习单元，可顺延、暂停并在第二天继续完成。
+    """
+    __tablename__ = "chapter_review_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
+    actor_key = Column(String, nullable=False, index=True)
+    review_chapter_id = Column(Integer, ForeignKey("chapter_review_chapters.id"), nullable=False, index=True)
+    unit_id = Column(Integer, ForeignKey("chapter_review_units.id"), nullable=False, index=True)
+    content_version = Column(Integer, default=1, index=True)
+    scheduled_for = Column(Date, nullable=False, index=True)
+    due_reason = Column(String, nullable=False)
+    priority_bucket = Column(String, default="due", index=True)
+    priority_score = Column(Float, default=0.0)
+    estimated_minutes = Column(Integer, default=0)
+    question_count = Column(Integer, default=10)
+    answered_count = Column(Integer, default=0)
+    resume_position = Column(Integer, default=0)
+    status = Column(String, default="pending", index=True)
+    ai_recommended_status = Column(String, nullable=True)
+    user_selected_status = Column(String, nullable=True)
+    grading_score = Column(Float, nullable=True)
+    source_label = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    started_at = Column(DateTime, nullable=True)
+    graded_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    review_chapter = relationship("ChapterReviewChapter", back_populates="tasks")
+    unit = relationship("ChapterReviewUnit", back_populates="tasks")
+    questions = relationship("ChapterReviewTaskQuestion", back_populates="task", cascade="all, delete-orphan")
+
+
+class ChapterReviewTaskQuestion(Base):
+    """
+    复习任务题目快照
+    保存生成的简答题、参考答案、解析与用户作答，便于中断续做与 PDF 导出。
+    """
+    __tablename__ = "chapter_review_task_questions"
+    __table_args__ = (
+        UniqueConstraint("task_id", "position", name="uq_chapter_review_task_question_position"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("chapter_review_tasks.id"), nullable=False, index=True)
+    position = Column(Integer, nullable=False)
+    prompt = Column(Text, nullable=False)
+    reference_answer = Column(Text, nullable=False)
+    key_points = Column(JSON, nullable=True)
+    explanation = Column(Text, nullable=True)
+    source_excerpt = Column(Text, nullable=True)
+    user_answer = Column(Text, nullable=True)
+    ai_score = Column(Integer, nullable=True)
+    ai_feedback = Column(Text, nullable=True)
+    good_points = Column(JSON, nullable=True)
+    missing_points = Column(JSON, nullable=True)
+    improvement_suggestion = Column(Text, nullable=True)
+    judged_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    task = relationship("ChapterReviewTask", back_populates="questions")
+
+
 class BatchExamState(Base):
     """
     鎵归噺璇曞嵎鐢熸垚鐘舵€佸揩鐓э紝鐢ㄤ簬鐢熸垚鍚庡埌鎻愪氦鍓嶇殑鎸佷箙鍖栦笌 actor 闅旂
@@ -460,6 +600,10 @@ def create_learning_tracking_tables():
         WrongAnswerRetry.__table__,
         DailyReviewPaper.__table__,
         DailyReviewPaperItem.__table__,
+        ChapterReviewChapter.__table__,
+        ChapterReviewUnit.__table__,
+        ChapterReviewTask.__table__,
+        ChapterReviewTaskQuestion.__table__,
         BatchExamState.__table__,
     ])
     print("✅ 学习轨迹记录表创建完成")

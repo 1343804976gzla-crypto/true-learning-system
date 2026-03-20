@@ -3,23 +3,66 @@
 """
 
 import hashlib
+import io
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from api_contracts import (
     HistoryLearningStatsResponse,
+    HistoryReviewPlanResponse,
+    HistoryReviewTaskDetailResponse,
     HistoryTimelineResponse,
     HistoryUploadResponse,
 )
 from models import get_db, DailyUpload, Chapter
 from learning_tracking_models import LearningSession
+from services.chapter_review_service import (
+    DEFAULT_REVIEW_TIME_BUDGET_MINUTES,
+    complete_task_with_status,
+    ensure_daily_review_plan,
+    ensure_task_questions,
+    export_today_review_pdf,
+    grade_task_answers,
+    save_task_progress,
+    serialize_task_detail,
+)
 from services.data_identity import DEFAULT_DEVICE_ID, resolve_request_actor_scope
 
 router = APIRouter(prefix="/api/history", tags=["history"])
+
+
+class ReviewTaskAnswerPayload(BaseModel):
+    question_id: Optional[int] = None
+    position: Optional[int] = None
+    user_answer: str = ""
+
+
+class ReviewTaskAutosaveRequest(BaseModel):
+    answers: List[ReviewTaskAnswerPayload] = Field(default_factory=list)
+    resume_position: int = 0
+
+
+class ReviewTaskCompleteRequest(BaseModel):
+    selected_status: str
+
+
+def _serialize_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat(timespec="seconds")
+
+
+def _source_label(source_type: str) -> str:
+    return {
+        "upload": "内容上传",
+        "session": "学习会话",
+    }.get(source_type, "学习记录")
 
 
 def _apply_actor_scope(query, model, *, actor: dict):
@@ -83,12 +126,14 @@ def _merge_history_records(
             {
                 "id": int(upload.id),
                 "date": upload.date,
+                "recorded_at": upload.created_at or datetime.combine(upload.date, datetime.min.time()),
                 "book": ai_data.get("book", "未知"),
                 "chapter_title": ai_data.get("chapter_title", "未识别章节"),
                 "chapter_id": ai_data.get("chapter_id", ""),
                 "concept_count": len(ai_data.get("concepts", [])),
                 "summary": ai_data.get("summary", ""),
                 "main_topic": ai_data.get("main_topic", ""),
+                "source_type": "upload",
                 "sort_datetime": upload.created_at or datetime.combine(upload.date, datetime.min.time()),
             }
         )
@@ -108,12 +153,14 @@ def _merge_history_records(
         record = {
             "id": _stable_synthetic_upload_id(session.id),
             "date": study_date,
+            "recorded_at": sort_datetime,
             "book": getattr(chapter, "book", None) or "未识别",
             "chapter_title": getattr(chapter, "chapter_title", None) or (session.title or "未识别章节"),
             "chapter_id": str(session.chapter_id or ""),
             "concept_count": len(getattr(chapter, "concepts", None) or []),
             "summary": raw_content[:160],
             "main_topic": session.knowledge_point or "",
+            "source_type": "session",
             "sort_datetime": sort_datetime,
         }
         existing = fallback_records.get(dedupe_key)
@@ -208,22 +255,44 @@ async def get_upload_history(
     actor = resolve_request_actor_scope()
     snapshot = _build_history_snapshot(db, actor=actor, start_date=start_date)
 
+    count_by_date: dict[date, int] = {}
     result = []
     for record in snapshot["records"]:
+        record_date = record["date"]
+        count_by_date[record_date] = count_by_date.get(record_date, 0) + 1
+        summary = str(record.get("summary") or "")
+        summary_preview = summary if len(summary) <= 100 else summary[:100].rstrip() + "..."
+        source_type = str(record.get("source_type") or "upload")
         result.append({
             "id": int(record["id"]),
-            "date": record["date"].isoformat(),
+            "date": record_date.isoformat(),
+            "recorded_at": _serialize_datetime(record.get("recorded_at")),
             "book": record.get("book", "未知"),
             "chapter_title": record.get("chapter_title", "未识别"),
             "chapter_id": record.get("chapter_id", ""),
             "concept_count": int(record.get("concept_count") or 0),
-            "summary": (record.get("summary", "")[:100] + "...") if record.get("summary") else "",
+            "summary": summary_preview,
             "main_topic": record.get("main_topic", ""),
+            "source_type": source_type,
+            "source_label": _source_label(source_type),
         })
-    
+
+    peak_date = None
+    peak_count = 0
+    if count_by_date:
+        peak_date_obj, peak_count = max(count_by_date.items(), key=lambda item: (item[1], item[0]))
+        peak_date = peak_date_obj.isoformat()
+
+    active_days = len(count_by_date)
+    average_uploads_per_active_day = round(len(result) / active_days, 1) if active_days else 0.0
+
     return {
         "total": len(result),
         "days": days,
+        "active_days": active_days,
+        "average_uploads_per_active_day": average_uploads_per_active_day,
+        "peak_date": peak_date,
+        "peak_count": peak_count,
         "uploads": result
     }
 
@@ -243,18 +312,37 @@ async def get_learning_stats(
     weekly_uploads = sum(1 for record in records if record.get("date") and record["date"] >= week_ago)
 
     book_stats = {}
+    source_stats = {}
+    count_by_date: dict[date, int] = {}
     for record in records:
+        record_date = record.get("date")
+        if record_date:
+            count_by_date[record_date] = count_by_date.get(record_date, 0) + 1
         book = str(record.get("book") or "未知")
         book_stats[book] = book_stats.get(book, 0) + 1
+        source_label = _source_label(str(record.get("source_type") or "upload"))
+        source_stats[source_label] = source_stats.get(source_label, 0) + 1
     all_study_dates = snapshot["all_study_dates"]
     streak_days = _compute_streak_days(all_study_dates)
-    
+    active_days = len(all_study_dates)
+    average_uploads_per_active_day = round(total_uploads / active_days, 1) if active_days else 0.0
+    busiest_day = None
+    busiest_day_count = 0
+    if count_by_date:
+        busiest_day_obj, busiest_day_count = max(count_by_date.items(), key=lambda item: (item[1], item[0]))
+        busiest_day = busiest_day_obj.isoformat()
+
     return {
         "total_uploads": total_uploads,
         "weekly_uploads": weekly_uploads,
         "latest_study_date": all_study_dates[-1].isoformat() if all_study_dates else None,
         "streak_days": streak_days,
-        "book_distribution": book_stats
+        "active_days": active_days,
+        "average_uploads_per_active_day": average_uploads_per_active_day,
+        "busiest_day": busiest_day,
+        "busiest_day_count": busiest_day_count,
+        "book_distribution": book_stats,
+        "source_distribution": source_stats,
     }
 
 
@@ -292,3 +380,102 @@ async def get_learning_timeline(
         "days": days,
         "timeline": timeline
     }
+
+
+@router.get("/review-plan", response_model=HistoryReviewPlanResponse)
+async def get_today_review_plan(
+    time_budget_minutes: int = Query(default=DEFAULT_REVIEW_TIME_BUDGET_MINUTES, ge=15, le=120),
+    review_date: Optional[date] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    actor = resolve_request_actor_scope()
+    payload = ensure_daily_review_plan(
+        db,
+        actor_key=actor["actor_key"],
+        target_date=review_date,
+        time_budget_minutes=time_budget_minutes,
+    )
+    db.commit()
+    return payload
+
+
+@router.get("/review-task/{task_id}", response_model=HistoryReviewTaskDetailResponse)
+async def get_review_task_detail(
+    task_id: int,
+    db: Session = Depends(get_db),
+):
+    actor = resolve_request_actor_scope()
+    task = await ensure_task_questions(db, actor_key=actor["actor_key"], task_id=task_id)
+    db.commit()
+    return serialize_task_detail(task)
+
+
+@router.post("/review-task/{task_id}/autosave", response_model=HistoryReviewTaskDetailResponse)
+async def autosave_review_task(
+    task_id: int,
+    body: ReviewTaskAutosaveRequest,
+    db: Session = Depends(get_db),
+):
+    actor = resolve_request_actor_scope()
+    payload = save_task_progress(
+        db,
+        actor_key=actor["actor_key"],
+        task_id=task_id,
+        answers=[item.model_dump() for item in body.answers],
+        resume_position=body.resume_position,
+    )
+    db.commit()
+    return payload
+
+
+@router.post("/review-task/{task_id}/grade", response_model=HistoryReviewTaskDetailResponse)
+async def grade_review_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+):
+    actor = resolve_request_actor_scope()
+    payload = await grade_task_answers(db, actor_key=actor["actor_key"], task_id=task_id)
+    db.commit()
+    return payload
+
+
+@router.post("/review-task/{task_id}/complete", response_model=HistoryReviewTaskDetailResponse)
+async def complete_review_task(
+    task_id: int,
+    body: ReviewTaskCompleteRequest,
+    db: Session = Depends(get_db),
+):
+    actor = resolve_request_actor_scope()
+    payload = complete_task_with_status(
+        db,
+        actor_key=actor["actor_key"],
+        task_id=task_id,
+        selected_status=body.selected_status,
+    )
+    db.commit()
+    return payload
+
+
+@router.get("/review-pdf", response_model=None, response_class=StreamingResponse)
+async def export_review_pdf(
+    review_date: Optional[date] = Query(default=None),
+    time_budget_minutes: int = Query(default=DEFAULT_REVIEW_TIME_BUDGET_MINUTES, ge=15, le=120),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    actor = resolve_request_actor_scope()
+    pdf_bytes = await export_today_review_pdf(
+        db,
+        actor_key=actor["actor_key"],
+        target_date=review_date,
+        time_budget_minutes=time_budget_minutes,
+    )
+    db.commit()
+    filename = f"chapter-review-{(review_date or date.today()).isoformat()}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Cache-Control": "no-store",
+        },
+    )

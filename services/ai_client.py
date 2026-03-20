@@ -15,10 +15,16 @@ import asyncio
 import time as _time
 import logging
 import threading
-from typing import AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from pathlib import Path
 import openai
 from dotenv import load_dotenv
+from services.llm_audit import (
+    create_llm_call_context,
+    derive_llm_call_context,
+    extract_response_usage,
+    log_llm_attempt,
+)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(BASE_DIR / ".env")
@@ -218,6 +224,33 @@ class AIClient:
         )
         return any(k in msg for k in keywords)
 
+    def _response_text_content(self, response: Any) -> str:
+        try:
+            choices = getattr(response, "choices", None) or []
+            if not choices:
+                return ""
+            message = getattr(choices[0], "message", None)
+            content = getattr(message, "content", None) if message is not None else None
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts: List[str] = []
+                for item in content:
+                    if isinstance(item, dict):
+                        text = item.get("text")
+                    else:
+                        text = getattr(item, "text", None)
+                    if text:
+                        parts.append(str(text))
+                return "".join(parts)
+        except Exception:
+            return ""
+        return ""
+
+    def _client_base_url(self, client: Any) -> str | None:
+        base_url = getattr(client, "base_url", None)
+        return str(base_url) if base_url is not None else None
+
     async def _call_model_with_retries(
         self,
         client,
@@ -285,6 +318,117 @@ class AIClient:
             raise RuntimeError(f"{provider_name}调用失败（未知错误）")
         raise last_error
 
+    async def _call_model_with_audit(
+        self,
+        client,
+        model: str,
+        provider_name: str,
+        messages: list,
+        max_tokens: int,
+        temperature: float,
+        timeout: int,
+        pool_name: str,
+        pool_index: int,
+        pool_size: int,
+        audit_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        provider_key = provider_name.split("/", 1)[0]
+        max_attempts = 2
+        model_deadline = _time.time() + timeout
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, max_attempts + 1):
+            remaining = model_deadline - _time.time()
+            if remaining < 5:
+                print(
+                    f"[AIClient] {provider_name} 鏃堕棿涓嶈冻"
+                    f"({remaining:.0f}s)锛屽仠姝㈤噸璇?"
+                )
+                break
+
+            attempt_timeout = max(10, int(remaining))
+            started = _time.time()
+            try:
+                def _call():
+                    return client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
+
+                loop = asyncio.get_event_loop()
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(None, _call),
+                    timeout=attempt_timeout,
+                )
+                response_text = self._response_text_content(response)
+                finish_reason = None
+                try:
+                    choices = getattr(response, "choices", None) or []
+                    if choices:
+                        finish_reason = getattr(choices[0], "finish_reason", None)
+                except Exception:
+                    finish_reason = None
+                log_llm_attempt(
+                    provider=provider_key,
+                    model=model,
+                    provider_display=provider_name,
+                    base_url=self._client_base_url(client),
+                    pool_name=pool_name,
+                    pool_index=pool_index,
+                    pool_size=pool_size,
+                    attempt=attempt,
+                    status="success",
+                    elapsed_ms=int((_time.time() - started) * 1000),
+                    output_chars=len(response_text),
+                    finish_reason=str(finish_reason) if finish_reason is not None else None,
+                    usage=extract_response_usage(response),
+                    response_id=getattr(response, "id", None),
+                    audit_context=audit_context,
+                )
+                return response_text
+            except asyncio.TimeoutError:
+                last_error = TimeoutError(
+                    f"{provider_name}璇锋眰瓒呮椂({attempt_timeout}s)"
+                )
+            except Exception as e:
+                last_error = e
+
+            log_llm_attempt(
+                provider=provider_key,
+                model=model,
+                provider_display=provider_name,
+                base_url=self._client_base_url(client),
+                pool_name=pool_name,
+                pool_index=pool_index,
+                pool_size=pool_size,
+                attempt=attempt,
+                status="error",
+                elapsed_ms=int((_time.time() - started) * 1000),
+                output_chars=0,
+                error=last_error,
+                audit_context=audit_context,
+            )
+
+            if (
+                attempt < max_attempts
+                and last_error
+                and self._is_transient_error(last_error)
+            ):
+                wait_s = attempt
+                print(
+                    f"[AIClient] {provider_name} 临时错误，"
+                    f"第{attempt}次重试，{wait_s}s后继续: {last_error}"
+                )
+                await asyncio.sleep(wait_s)
+                continue
+            break
+
+        if last_error is None:
+            raise RuntimeError(f"{provider_name}璋冪敤澶辫触锛堟湭鐭ラ敊璇級")
+        raise last_error
+
     async def _call_pool(
         self,
         pool: List[PoolEntry],
@@ -293,6 +437,7 @@ class AIClient:
         max_tokens: int,
         temperature: float,
         timeout: int,
+        audit_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         遍历模型池，依次尝试每个模型。
@@ -327,7 +472,7 @@ class AIClient:
 
             try:
                 start = _time.time()
-                result = await self._call_model_with_retries(
+                result = await self._call_model_with_audit(
                     client=client,
                     model=model,
                     provider_name=display,
@@ -335,6 +480,10 @@ class AIClient:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     timeout=per_model_time,
+                    pool_name=pool_name,
+                    pool_index=i + 1,
+                    pool_size=len(pool),
+                    audit_context=audit_context,
                 )
                 elapsed = _time.time() - start
                 logger.info(f"✅ {display} 成功，耗时: {elapsed:.1f}s, 输出长度: {len(result)} 字符")
@@ -366,6 +515,7 @@ class AIClient:
         use_heavy: bool = False,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        audit_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """生成文本内容。use_heavy=True 走 Heavy池，否则走 Light池。
 
@@ -377,6 +527,16 @@ class AIClient:
             preferred_model=preferred_model,
         )
         messages = [{"role": "user", "content": prompt}]
+        call_context = audit_context or create_llm_call_context(
+            call_kind="content",
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+            use_heavy=use_heavy,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+        )
 
         return await self._call_pool(
             pool=pool,
@@ -385,6 +545,7 @@ class AIClient:
             max_tokens=max_tokens,
             temperature=temperature,
             timeout=timeout,
+            audit_context=call_context,
         )
 
     def _resolve_text_pool(self, use_heavy: bool) -> Tuple[List[PoolEntry], str]:
@@ -551,6 +712,7 @@ class AIClient:
         use_heavy: bool = False,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        audit_context: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[str]:
         pool, pool_name = self._compose_text_pool(
             use_heavy=use_heavy,
@@ -558,6 +720,16 @@ class AIClient:
             preferred_model=preferred_model,
         )
         messages = [{"role": "user", "content": prompt}]
+        call_context = audit_context or create_llm_call_context(
+            call_kind="stream",
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+            use_heavy=use_heavy,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+        )
         deadline = _time.time() + timeout
         last_error: Optional[Exception] = None
 
@@ -568,6 +740,8 @@ class AIClient:
 
             per_model_time = max(15, int(remaining / max(1, len(pool) - index)))
             emitted = False
+            output_chars = 0
+            started = _time.time()
             logger.info(f"=== {pool_name}池开始流式调用: {display}, 分配超时 {per_model_time}s ===")
 
             try:
@@ -582,10 +756,40 @@ class AIClient:
                 ):
                     if chunk:
                         emitted = True
+                        output_chars += len(chunk)
                         yield chunk
+                log_llm_attempt(
+                    provider=display.split("/", 1)[0],
+                    model=model,
+                    provider_display=display,
+                    base_url=self._client_base_url(client),
+                    pool_name=pool_name,
+                    pool_index=index + 1,
+                    pool_size=len(pool),
+                    attempt=1,
+                    status="success",
+                    elapsed_ms=int((_time.time() - started) * 1000),
+                    output_chars=output_chars,
+                    audit_context=call_context,
+                )
                 return
             except Exception as exc:
                 last_error = exc
+                log_llm_attempt(
+                    provider=display.split("/", 1)[0],
+                    model=model,
+                    provider_display=display,
+                    base_url=self._client_base_url(client),
+                    pool_name=pool_name,
+                    pool_index=index + 1,
+                    pool_size=len(pool),
+                    attempt=1,
+                    status="error",
+                    elapsed_ms=int((_time.time() - started) * 1000),
+                    output_chars=output_chars,
+                    error=exc,
+                    audit_context=call_context,
+                )
                 logger.error(f"❌ {display} 流式失败: {type(exc).__name__}: {str(exc)[:120]}")
                 if emitted:
                     raise
@@ -601,6 +805,18 @@ class AIClient:
                 use_heavy=use_heavy,
                 preferred_provider=preferred_provider,
                 preferred_model=preferred_model,
+                audit_context=derive_llm_call_context(
+                    call_context,
+                    call_kind="content",
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=max(15, int(deadline - _time.time())),
+                    use_heavy=use_heavy,
+                    preferred_provider=preferred_provider,
+                    preferred_model=preferred_model,
+                    phase="stream_fallback_text",
+                ),
             )
             if fallback_text:
                 yield fallback_text
@@ -627,6 +843,7 @@ class AIClient:
         timeout: int,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        audit_context: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """解析 JSON，失败时尝试提取/修复。"""
         cleaned = self._strip_code_fence(text)
@@ -662,6 +879,21 @@ class AIClient:
             use_heavy=False,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
+            audit_context=derive_llm_call_context(
+                audit_context,
+                call_kind="json_repair",
+                messages=[{"role": "user", "content": repair_prompt}],
+                max_tokens=min(max_tokens, 2400),
+                temperature=0.0,
+                timeout=min(timeout, 120),
+                use_heavy=False,
+                preferred_provider=preferred_provider,
+                preferred_model=preferred_model,
+                phase="json_repair",
+                metadata={
+                    "schema_keys": sorted(str(key) for key in schema.keys())[:40],
+                },
+            ),
         )
         repaired = self._strip_code_fence(repaired)
         try:
@@ -681,12 +913,27 @@ class AIClient:
         use_heavy: bool = False,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        audit_context: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """生成 JSON。use_heavy=True 走 Heavy池，否则走 Light池。
 
         timeout: generate_json 的总时间预算（秒），内部所有重试共享此预算。
         """
         deadline = _time.time() + timeout
+        root_messages = [{"role": "user", "content": prompt}]
+        call_context = audit_context or create_llm_call_context(
+            call_kind="json",
+            messages=root_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+            use_heavy=use_heavy,
+            preferred_provider=preferred_provider,
+            preferred_model=preferred_model,
+            metadata={
+                "schema_keys": sorted(str(key) for key in schema.keys())[:40],
+            },
+        )
 
         json_prompt = (
             f"{prompt}\n\n请返回JSON格式：\n"
@@ -719,6 +966,18 @@ class AIClient:
                 use_heavy=use_heavy,
                 preferred_provider=preferred_provider,
                 preferred_model=preferred_model,
+                audit_context=derive_llm_call_context(
+                    call_context,
+                    call_kind="json_prompt",
+                    messages=[{"role": "user", "content": current_prompt}],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=int(remaining),
+                    use_heavy=use_heavy,
+                    preferred_provider=preferred_provider,
+                    preferred_model=preferred_model,
+                    phase=f"json_prompt_{i}",
+                ),
             )
             try:
                 repair_remaining = max(15, int(deadline - _time.time()))
@@ -729,6 +988,18 @@ class AIClient:
                     repair_remaining,
                     preferred_provider=preferred_provider,
                     preferred_model=preferred_model,
+                    audit_context=derive_llm_call_context(
+                        call_context,
+                        call_kind="json_parse",
+                        messages=[{"role": "assistant", "content": text}],
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        timeout=repair_remaining,
+                        use_heavy=use_heavy,
+                        preferred_provider=preferred_provider,
+                        preferred_model=preferred_model,
+                        phase=f"json_parse_{i}",
+                    ),
                 )
             except Exception as e:
                 last_error = e
@@ -761,6 +1032,18 @@ class AIClient:
                     max_tokens=min(max_tokens, 3200),
                     temperature=min(temperature, 0.2),
                     timeout=fast_timeout,
+                    audit_context=derive_llm_call_context(
+                        call_context,
+                        call_kind="json_fast_fallback",
+                        messages=[{"role": "user", "content": fast_prompt}],
+                        max_tokens=min(max_tokens, 3200),
+                        temperature=min(temperature, 0.2),
+                        timeout=fast_timeout,
+                        use_heavy=False,
+                        preferred_provider=preferred_provider,
+                        preferred_model=preferred_model,
+                        phase="json_fast_fallback",
+                    ),
                 )
                 repair_remaining = max(15, int(deadline - _time.time()))
                 return await self._parse_json_with_repair(
@@ -770,6 +1053,18 @@ class AIClient:
                     timeout=repair_remaining,
                     preferred_provider=preferred_provider,
                     preferred_model=preferred_model,
+                    audit_context=derive_llm_call_context(
+                        call_context,
+                        call_kind="json_parse",
+                        messages=[{"role": "assistant", "content": text}],
+                        max_tokens=min(max_tokens, 3200),
+                        temperature=min(temperature, 0.2),
+                        timeout=repair_remaining,
+                        use_heavy=False,
+                        preferred_provider=preferred_provider,
+                        preferred_model=preferred_model,
+                        phase="json_fast_parse",
+                    ),
                 )
             except Exception as e:
                 last_error = e

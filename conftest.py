@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-import agent_models  # noqa: F401
-
 _fd, _db_path = tempfile.mkstemp(prefix="tls-pytest-", suffix=".db")
 os.close(_fd)
 
@@ -16,14 +14,20 @@ os.close(_fd)
 os.environ["DATABASE_PATH"] = str(Path(_db_path).resolve())
 os.environ["OPENVIKING_SYNC_ENABLED"] = "false"
 os.environ["SINGLE_USER_MODE"] = "true"
+os.environ["AGENT_DUPLICATE_WAIT_TIMEOUT_SECONDS"] = "300"
+
+import agent_models  # noqa: F401
+import knowledge_upload_models  # noqa: F401
 
 from learning_tracking_models import create_learning_tracking_tables
+from knowledge_upload_models import create_knowledge_upload_tables
 from models import Base, engine, init_db
 from services.data_identity import clear_identity_caches_for_tests
 
 
 init_db()
 create_learning_tracking_tables()
+create_knowledge_upload_tables()
 clear_identity_caches_for_tests()
 
 _TEST_DEF_PATTERN = re.compile(r"^(?:async\s+def|def)\s+test_|^class\s+Test", re.MULTILINE)
@@ -53,6 +57,7 @@ def reset_test_database():
         db_file.unlink()
     Base.metadata.create_all(bind=engine, checkfirst=True)
     create_learning_tracking_tables()
+    create_knowledge_upload_tables()
     data_identity._IDENTITY_SCHEMA_READY = False
     agent_runtime._AGENT_SCHEMA_READY = False
     agent_runtime.ensure_agent_schema()

@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Set
 from services.ai_client import get_ai_client
+from utils.chapter_catalog import clean_batch_chapter_rows, chapter_number_sort_key
 
 # 配置日志
 logging.basicConfig(
@@ -528,29 +529,20 @@ class QuizService:
                     Chapter.chapter_number,
                     Chapter.chapter_title,
                 )
-                .order_by(Chapter.book, Chapter.chapter_number)
                 .all()
             )
         finally:
             db.close()
 
-        real_rows: List[Dict[str, str]] = []
-        for ch_id, ch_book, ch_num, ch_title in rows:
-            if self._is_placeholder_chapter(
-                chapter_id=ch_id,
-                book=ch_book,
-                chapter_title=ch_title,
-                chapter_number=ch_num,
-            ):
-                continue
-            real_rows.append(
-                {
-                    "id": ch_id,
-                    "book": ch_book,
-                    "chapter_number": ch_num,
-                    "chapter_title": ch_title,
-                }
-            )
+        real_rows = clean_batch_chapter_rows(
+            {
+                "id": ch_id,
+                "book": ch_book,
+                "chapter_number": ch_num,
+                "chapter_title": ch_title,
+            }
+            for ch_id, ch_book, ch_num, ch_title in rows
+        )
 
         self._chapter_rows_cache = real_rows
         self._chapter_books_cache = sorted(
@@ -608,7 +600,7 @@ class QuizService:
             candidates.sort(
                 key=lambda x: (
                     len(x.get("chapter_title", "") or ""),
-                    x.get("chapter_number", ""),
+                    chapter_number_sort_key(x.get("chapter_number", "")),
                     x.get("id", ""),
                 )
             )
@@ -1811,7 +1803,6 @@ class QuizService:
                 if q_key == base_key:
                     print(f"[Variation] 第{i+1}题与原题重复，跳过")
                     continue
-                seen_questions.add(q_key)
 
                 # 确保所有必需字段都存在
                 v["options"] = options
@@ -1819,6 +1810,15 @@ class QuizService:
                 v["difficulty"] = v.get("difficulty") or base_diff
                 v["correct_answer"] = v.get("correct_answer") or base_question.get("correct_answer", "A")
 
+                if self._variation_looks_like_placeholder(v):
+                    print(f"[Variation] 第{i+1}题包含占位内容，跳过")
+                    continue
+
+                if not self._is_variation_on_topic(key_point, base_question, v):
+                    print(f"[Variation] 第{i+1}题与考点不相关，跳过")
+                    continue
+
+                seen_questions.add(q_key)
                 valid_variations.append(v)
 
             # 若 AI 去重后数量不足，则用保底变式补齐，确保前端始终拿到完整练习集。
@@ -1854,6 +1854,69 @@ class QuizService:
         # 只保留中文字符和英文字母
         chars = re.findall(r'[\u4e00-\u9fa5a-zA-Z]', text)
         return ''.join(chars)[:60]  # 取前60字符作为指纹
+
+    def _variation_validation_text(self, variation: Dict[str, Any]) -> str:
+        options = variation.get("options") or {}
+        parts = [
+            variation.get("question", ""),
+            variation.get("explanation", ""),
+            " ".join(str(options.get(opt) or "") for opt in ["A", "B", "C", "D", "E"]),
+        ]
+        return " ".join(str(part or "") for part in parts)
+
+    def _variation_topic_ngrams(self, text: str) -> Set[str]:
+        normalized = "".join(re.findall(r'[\u4e00-\u9fa5A-Za-z0-9]+', str(text or ""))).lower()
+        if len(normalized) < 2:
+            return set()
+
+        ngrams = {normalized[i:i + 2] for i in range(len(normalized) - 1)}
+        if len(normalized) >= 3:
+            ngrams.update(normalized[i:i + 3] for i in range(len(normalized) - 2))
+        return ngrams
+
+    def _variation_looks_like_placeholder(self, variation: Dict[str, Any]) -> bool:
+        text = self._variation_validation_text(variation).lower()
+        if not text.strip():
+            return True
+
+        placeholder_markers = (
+            "???",
+            "？？？",
+            "placeholder",
+            "todo",
+            "tbd",
+            "待补充",
+            "示例",
+            "xxx",
+        )
+        return any(marker in text for marker in placeholder_markers)
+
+    def _is_variation_on_topic(self, key_point: str, base_question: Dict[str, Any], variation: Dict[str, Any]) -> bool:
+        source_text = " ".join(
+            [
+                str(key_point or ""),
+                str(base_question.get("question", "") or ""),
+                str(base_question.get("explanation", "") or ""),
+                " ".join(str((base_question.get("options") or {}).get(opt) or "") for opt in ["A", "B", "C", "D", "E"]),
+            ]
+        )
+        candidate_text = self._variation_validation_text(variation)
+
+        source_ngrams = self._variation_topic_ngrams(source_text)
+        candidate_ngrams = self._variation_topic_ngrams(candidate_text)
+        if not source_ngrams or not candidate_ngrams:
+            return False
+
+        overlap = source_ngrams & candidate_ngrams
+        candidate_normalized = "".join(re.findall(r'[\u4e00-\u9fa5A-Za-z0-9]+', candidate_text)).lower()
+        source_terms = {
+            term.lower()
+            for term in re.findall(r'[\u4e00-\u9fa5A-Za-z0-9]{2,12}', source_text)
+            if len(term) >= 2
+        }
+        exact_hits = {term for term in source_terms if term and term in candidate_normalized}
+
+        return len(overlap) >= 3 or len(exact_hits) >= 2 or (len(overlap) >= 2 and len(exact_hits) >= 1)
 
     def _create_variation_from_base(self, id: int, key_point: str, base_question: Dict) -> Dict:
         """基于原题创建保底变式，确保题量稳定。"""

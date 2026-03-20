@@ -298,6 +298,7 @@
         position: sticky;
         bottom: 1rem;
         z-index: 20;
+        padding: clamp(0.75rem, 1.8vw, 1rem);
     }
 
     #questionsList {
@@ -309,7 +310,22 @@
         flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
-        gap: 1rem;
+        gap: 0.75rem;
+    }
+
+    .quiz-submit-meta {
+        line-height: 1.1;
+    }
+
+    .quiz-submit-count {
+        font-size: 1rem;
+        line-height: 1;
+    }
+
+    .quiz-submit-btn {
+        padding: 0.625rem 1.5rem;
+        font-size: 1rem;
+        line-height: 1.2;
     }
 
     .quiz-question-card {
@@ -1447,13 +1463,13 @@
     <div id="questionsList" class="space-y-6"></div>
 
     <!-- 提交按钮 -->
-    <div class="quiz-sticky-submit bg-white rounded-lg shadow p-6">
+    <div class="quiz-sticky-submit bg-white rounded-lg shadow">
         <div class="quiz-submit-row">
-            <div class="text-sm text-gray-500">
-                已答: <span id="answeredCount" class="font-bold text-blue-600 text-lg">0</span>/<span id="totalCount">10</span>
+            <div class="quiz-submit-meta text-sm text-gray-500">
+                已答: <span id="answeredCount" class="quiz-submit-count font-bold text-blue-600">0</span>/<span id="totalCount">10</span>
             </div>
             <button id="submitBtn" type="button" disabled
-                    class="bg-blue-500 text-white px-8 py-3 rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed text-lg font-medium">
+                    class="quiz-submit-btn bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed font-medium">
                 提交答卷
             </button>
         </div>
@@ -1788,18 +1804,59 @@
         return normalized !== '' && !INVALID_CHAPTER_IDS.has(normalized);
     }
 
+    function isSyntheticChapterId(value) {
+        const normalized = (value || '').toString().trim().toLowerCase();
+        if (!normalized) return false;
+        return normalized.startsWith('agent-') ||
+            normalized.startsWith('seed-') ||
+            normalized.startsWith('history-chapter') ||
+            normalized.startsWith('backfill-') ||
+            normalized.startsWith('contract-') ||
+            normalized.startsWith('topic-') ||
+            normalized.startsWith('tracking-upload-') ||
+            /^chapter-[0-9a-f]{8,}$/i.test(normalized) ||
+            /^[a-z0-9-]+-[0-9a-f]{8,}-chapter(?:-[a-z])?$/i.test(normalized);
+    }
+
+    function compareChapterCatalogItems(left, right) {
+        const leftNumber = (left && left.number ? left.number : '').toString();
+        const rightNumber = (right && right.number ? right.number : '').toString();
+        const numberDiff = leftNumber.localeCompare(rightNumber, 'zh-Hans-CN', {
+            numeric: true,
+            sensitivity: 'base'
+        });
+        if (numberDiff !== 0) return numberDiff;
+
+        const leftTitle = (left && left.title ? left.title : '').toString();
+        const rightTitle = (right && right.title ? right.title : '').toString();
+        const titleDiff = leftTitle.localeCompare(rightTitle, 'zh-Hans-CN', {
+            numeric: true,
+            sensitivity: 'base'
+        });
+        if (titleDiff !== 0) return titleDiff;
+
+        return (left && left.id ? left.id : '').toString().localeCompare(
+            (right && right.id ? right.id : '').toString(),
+            'en',
+            { numeric: true, sensitivity: 'base' }
+        );
+    }
+
     function normalizeChapterCatalog(rawCatalog) {
         const normalizedCatalog = {};
-        Object.keys(rawCatalog || {}).forEach(function(book) {
+        Object.keys(rawCatalog || {}).sort(function(a, b) {
+            return a.localeCompare(b, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+        }).forEach(function(book) {
             const validChapters = (rawCatalog[book] || []).filter(function(ch) {
                 const title = (ch.title || '').toString().trim();
                 const number = (ch.number || '').toString().trim();
                 return isSelectableChapterId(ch.id) &&
+                    !isSyntheticChapterId(ch.id) &&
                     number !== '0' &&
                     title !== '待人工归类' &&
                     title !== '未知章节' &&
                     !title.startsWith('自动补齐章节');
-            });
+            }).sort(compareChapterCatalogItems);
             if (validChapters.length > 0) {
                 normalizedCatalog[book] = validChapters;
             }
@@ -1888,6 +1945,25 @@
             return matches[0];
         }
         return null;
+    }
+
+    function getPredictionConfidenceLevel(prediction) {
+        const normalized = (prediction && prediction.confidence ? prediction.confidence : 'medium')
+            .toString()
+            .trim()
+            .toLowerCase();
+        return ['high', 'medium', 'low'].includes(normalized) ? normalized : 'medium';
+    }
+
+    function resolveAutoConfirmedChapterMatch(prediction) {
+        const matchedPrediction = findPredictedChapterMatch(prediction);
+        if (!matchedPrediction || !matchedPrediction.chapter || !isSelectableChapterId(matchedPrediction.chapter.id)) {
+            return null;
+        }
+        if (matchedPrediction.matchedBy === 'id') {
+            return matchedPrediction;
+        }
+        return getPredictionConfidenceLevel(prediction) === 'high' ? matchedPrediction : null;
     }
 
     let uploadedContent = '';
@@ -2902,46 +2978,32 @@
             pendingExamData = data;
             const prediction = data.chapter_prediction;
 
-            if (prediction && isSelectableChapterId(prediction.chapter_id)) {
-                // 检查 AI 预测的章节是否在真实章节列表中
-                let predictionValid = false;
-                if (prediction.book && chaptersGrouped[prediction.book]) {
-                    predictionValid = chaptersGrouped[prediction.book].some(
-                        ch => ch.id === prediction.chapter_id
+            const autoMatchedPrediction = resolveAutoConfirmedChapterMatch(prediction);
+            if (autoMatchedPrediction) {
+                try {
+                    await fetch('/api/quiz/batch/confirm-chapter/' + examId, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chapter_id: autoMatchedPrediction.chapter.id })
+                    });
+                    confirmedChapterId = autoMatchedPrediction.chapter.id;
+                    console.log(
+                        '[Chapter] AI自动确认章节:',
+                        autoMatchedPrediction.chapter.id,
+                        autoMatchedPrediction.chapter.title,
+                        'matchedBy=',
+                        autoMatchedPrediction.matchedBy,
+                        'confidence=',
+                        getPredictionConfidenceLevel(prediction)
                     );
-                }
-                // 也在所有科目中查找（防止 book 字段不匹配）
-                if (!predictionValid) {
-                    for (const book in chaptersGrouped) {
-                        if (chaptersGrouped[book].some(ch => ch.id === prediction.chapter_id)) {
-                            predictionValid = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (predictionValid) {
-                    // AI预测有效，自动确认章节
-                    try {
-                        await fetch('/api/quiz/batch/confirm-chapter/' + examId, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ chapter_id: prediction.chapter_id })
-                        });
-                        confirmedChapterId = prediction.chapter_id;
-                        console.log('[Chapter] AI自动确认章节:', prediction.chapter_id, prediction.chapter_title);
-                    } catch(e) {
-                        console.warn('[Chapter] 自动确认失败，使用原始ID:', e);
-                    }
-                    proceedToExam();
-                } else {
-                    // AI预测的章节无效，弹出确认弹窗让用户选择
-                    console.warn('[Chapter] AI预测章节无效:', prediction.chapter_id, '，弹出选择弹窗');
+                } catch(e) {
+                    console.warn('[Chapter] 自动确认失败，改为弹出选择弹窗:', e);
                     showChapterConfirmModal(data);
+                    return;
                 }
+                proceedToExam();
             } else {
-                // 无AI预测，弹出章节确认弹窗
-                console.log('[Chapter] 无AI章节预测，弹出选择弹窗');
+                console.log('[Chapter] 未达到自动确认条件，弹出章节确认弹窗');
                 showChapterConfirmModal(data);
             }
 
@@ -3115,15 +3177,20 @@
                 }
 
                 if (targetChapterId) {
-                    setTimeout(function() {
-                        var chapterSelect = document.getElementById('confirmChapter');
-                        chapterSelect.value = targetChapterId;
-                        if (chapterSelect.value === targetChapterId) {
-                            console.log('[Chapter] ✅ 章节预选成功:', targetChapterId);
-                        } else {
-                            console.warn('[Chapter] ⚠️ 章节预选失败，ID不在下拉列表中');
-                        }
-                    }, 150);
+                    var chapterSelect = document.getElementById('confirmChapter');
+                    chapterSelect.value = targetChapterId;
+                    if (chapterSelect.value === targetChapterId) {
+                        console.log('[Chapter] ✅ 章节预选成功:', targetChapterId);
+                    } else {
+                        setTimeout(function() {
+                            chapterSelect.value = targetChapterId;
+                            if (chapterSelect.value === targetChapterId) {
+                                console.log('[Chapter] ✅ 章节延迟预选成功:', targetChapterId);
+                            } else {
+                                console.warn('[Chapter] ⚠️ 章节预选失败，ID不在下拉列表中');
+                            }
+                        }, 150);
+                    }
                 }
             } else if (prediction.book) {
                 console.warn('[Chapter] ⚠️ AI 预测的科目不存在:', prediction.book);
@@ -3427,6 +3494,8 @@
             for (let i = 0; i < numQuestions; i++) {
                 answers.push(userAnswers[i] || '');
             }
+
+            await flushQueuedQuestionRecords(true);
 
             const submitData = {
                 answers: answers,
@@ -4118,7 +4187,7 @@
             const cleanUserAnswer = cleanAnswer(answer);
             const cleanCorrectAnswer = cleanAnswer(basePayload.correct_answer);
 
-            await fetch('/api/tracking/session/' + trackingSessionId + '/question', {
+            const response = await fetch('/api/tracking/session/' + trackingSessionId + '/question', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(Object.assign({}, basePayload, {
@@ -4129,6 +4198,18 @@
                     confidence: confidence
                 }))
             });
+
+            if (response.status === 404) {
+                console.warn('[Tracking] 会话不存在，停止继续记录:', trackingSessionId);
+                trackingSessionId = null;
+                trackingSessionPromise = null;
+                pendingQuestionRecordIndices.clear();
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error('记录题目失败');
+            }
         } catch (error) {
             console.error('[Tracking] 记录题目失败:', error);
         }

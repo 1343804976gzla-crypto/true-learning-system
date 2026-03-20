@@ -1,22 +1,35 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from uuid import uuid4
 
-from learning_tracking_models import LearningSession, QuestionRecord, WrongAnswerV2
+from learning_tracking_models import LearningActivity, LearningSession, QuestionRecord, WrongAnswerV2
 from models import DailyUpload, SessionLocal
 from services.agent_tools import execute_agent_tool
 
 
 async def test_agent_tools_include_legacy_anonymous_device_data():
     legacy_device_id = "local-default"
-    current_device_id = "local-current"
+    suffix = uuid4().hex
+    current_device_id = f"local-current-{suffix}"
     now = datetime.now()
+    legacy_session_id = f"legacy-session-{suffix}"
+    current_session_id = f"current-session-{suffix}"
+    legacy_fingerprint = f"legacy-fingerprint-{suffix}"
+    current_fingerprint = f"current-fingerprint-{suffix}"
 
     with SessionLocal() as db:
+        db.query(LearningActivity).delete()
+        db.query(QuestionRecord).delete()
+        db.query(LearningSession).delete()
+        db.query(WrongAnswerV2).delete()
+        db.query(DailyUpload).delete()
+        db.commit()
+
         db.add_all(
             [
                 LearningSession(
-                    id="legacy-session",
+                    id=legacy_session_id,
                     device_id=legacy_device_id,
                     session_type="detail_practice",
                     title="Legacy session",
@@ -29,7 +42,7 @@ async def test_agent_tools_include_legacy_anonymous_device_data():
                     duration_seconds=300,
                 ),
                 LearningSession(
-                    id="current-session",
+                    id=current_session_id,
                     device_id=current_device_id,
                     session_type="detail_practice",
                     title="Current session",
@@ -42,7 +55,7 @@ async def test_agent_tools_include_legacy_anonymous_device_data():
                     duration_seconds=300,
                 ),
                 QuestionRecord(
-                    session_id="legacy-session",
+                    session_id=legacy_session_id,
                     device_id=legacy_device_id,
                     question_index=1,
                     question_type="A1",
@@ -55,7 +68,7 @@ async def test_agent_tools_include_legacy_anonymous_device_data():
                     answered_at=now - timedelta(days=3),
                 ),
                 QuestionRecord(
-                    session_id="current-session",
+                    session_id=current_session_id,
                     device_id=current_device_id,
                     question_index=1,
                     question_type="A1",
@@ -81,7 +94,7 @@ async def test_agent_tools_include_legacy_anonymous_device_data():
                 ),
                 WrongAnswerV2(
                     device_id=legacy_device_id,
-                    question_fingerprint="legacy-fingerprint",
+                    question_fingerprint=legacy_fingerprint,
                     question_text="legacy wrong",
                     options={"A": "1", "B": "2"},
                     correct_answer="A",
@@ -95,7 +108,7 @@ async def test_agent_tools_include_legacy_anonymous_device_data():
                 ),
                 WrongAnswerV2(
                     device_id=current_device_id,
-                    question_fingerprint="current-fingerprint",
+                    question_fingerprint=current_fingerprint,
                     question_text="current wrong",
                     options={"A": "1", "B": "2"},
                     correct_answer="A",

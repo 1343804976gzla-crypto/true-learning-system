@@ -2,219 +2,2084 @@
 
 {% block title %}学习历史 - True Learning System{% endblock %}
 
+{% block extra_css %}
+<style>
+    .history-shell {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .history-card {
+        position: relative;
+        overflow: hidden;
+        border-radius: 1.75rem;
+        border: 1px solid rgba(139, 115, 85, 0.14);
+        background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 245, 236, 0.96)),
+            rgba(255, 255, 255, 0.9);
+        box-shadow:
+            0 18px 40px rgba(139, 115, 85, 0.1),
+            inset 0 1px 0 rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+    }
+
+    .history-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(140deg, rgba(255, 255, 255, 0.22), transparent 42%);
+        opacity: 0.7;
+    }
+
+    .history-hero {
+        padding: 2rem;
+        background:
+            radial-gradient(circle at top left, rgba(212, 191, 156, 0.28), transparent 34%),
+            radial-gradient(circle at 85% 18%, rgba(111, 90, 65, 0.14), transparent 28%),
+            linear-gradient(135deg, rgba(255, 252, 247, 0.98), rgba(245, 236, 221, 0.94));
+    }
+
+    .history-hero-grid {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.95fr);
+        gap: 1.5rem;
+        align-items: end;
+    }
+
+    .history-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.4rem 0.8rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.62);
+        color: rgba(86, 67, 46, 0.9);
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+
+    .history-title {
+        margin-top: 1rem;
+        color: #2f261d;
+        font-size: clamp(2rem, 4vw, 3.3rem);
+        line-height: 1.05;
+    }
+
+    .history-lead {
+        margin-top: 0.9rem;
+        max-width: 40rem;
+        color: rgba(65, 53, 40, 0.76);
+        font-size: 1rem;
+        line-height: 1.8;
+    }
+
+    .history-hero-note {
+        display: grid;
+        gap: 0.9rem;
+        padding: 1.15rem;
+        border-radius: 1.4rem;
+        background: rgba(255, 255, 255, 0.64);
+        border: 1px solid rgba(139, 115, 85, 0.12);
+        box-shadow: 0 16px 36px rgba(139, 115, 85, 0.08);
+    }
+
+    .history-hero-note-label {
+        color: rgba(87, 67, 47, 0.72);
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+
+    .history-hero-note-value {
+        color: #2f261d;
+        font-size: 1.65rem;
+        font-weight: 700;
+        line-height: 1.1;
+    }
+
+    .history-hero-note-text {
+        color: rgba(65, 53, 40, 0.74);
+        font-size: 0.92rem;
+        line-height: 1.65;
+    }
+
+    .history-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .history-panel-copy {
+        position: relative;
+        z-index: 1;
+        padding: 1.4rem 1.5rem 0;
+    }
+
+    .history-panel-title {
+        color: #2f261d;
+        font-size: 1.18rem;
+        font-weight: 700;
+        line-height: 1.3;
+    }
+
+    .history-panel-subtitle {
+        margin-top: 0.4rem;
+        color: rgba(78, 65, 53, 0.68);
+        font-size: 0.93rem;
+        line-height: 1.6;
+    }
+
+    .history-filter-shell {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        min-width: 10rem;
+    }
+
+    .history-filter-label {
+        color: rgba(82, 67, 49, 0.66);
+        font-size: 0.74rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+
+    .history-filter {
+        min-height: 2.95rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(139, 115, 85, 0.18);
+        background: rgba(255, 255, 255, 0.84);
+        color: #2f261d;
+        font-size: 0.95rem;
+        font-weight: 600;
+        box-shadow: 0 10px 24px rgba(139, 115, 85, 0.08);
+    }
+
+    .history-filter:focus {
+        outline: none;
+        border-color: rgba(139, 115, 85, 0.4);
+        box-shadow: 0 0 0 3px rgba(139, 115, 85, 0.12);
+    }
+
+    .history-stat-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 1rem;
+    }
+
+    .history-stat-card {
+        padding: 1.35rem 1.4rem;
+    }
+
+    .history-stat-label {
+        color: rgba(90, 72, 53, 0.62);
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+
+    .history-stat-value {
+        margin-top: 0.85rem;
+        color: #2f261d;
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .history-stat-note {
+        margin-top: 0.75rem;
+        color: rgba(76, 63, 52, 0.7);
+        font-size: 0.88rem;
+        line-height: 1.5;
+    }
+
+    .history-analytics-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.92fr);
+        gap: 1rem;
+    }
+
+    .history-chart-shell {
+        position: relative;
+        z-index: 1;
+        padding: 0 1.5rem 1.5rem;
+    }
+
+    .history-window-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.85rem;
+        margin-top: 1.2rem;
+    }
+
+    .history-window-metric {
+        padding: 0.9rem 1rem;
+        border-radius: 1.15rem;
+        background: rgba(255, 255, 255, 0.58);
+        border: 1px solid rgba(139, 115, 85, 0.1);
+    }
+
+    .history-window-label {
+        color: rgba(92, 74, 55, 0.58);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+
+    .history-window-value {
+        margin-top: 0.55rem;
+        color: #2f261d;
+        font-size: 1.35rem;
+        font-weight: 700;
+        line-height: 1.15;
+    }
+
+    .history-chart-panel {
+        margin-top: 1.1rem;
+        padding: 1.1rem 1rem 0.95rem;
+        border-radius: 1.35rem;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(248, 241, 230, 0.58));
+        border: 1px solid rgba(139, 115, 85, 0.12);
+    }
+
+    .history-bars {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(10px, 1fr);
+        align-items: end;
+        gap: 0.38rem;
+        min-height: 13rem;
+        padding-top: 1rem;
+    }
+
+    .history-bar {
+        position: relative;
+        display: block;
+        width: 100%;
+        min-height: 0.6rem;
+        border-radius: 999px;
+        border: 0;
+        background: linear-gradient(180deg, rgba(139, 115, 85, 0.28), rgba(139, 115, 85, 0.72));
+        box-shadow: 0 8px 20px rgba(139, 115, 85, 0.14);
+        transition: transform 0.22s ease, filter 0.22s ease;
+        cursor: default;
+    }
+
+    .history-bar:hover {
+        transform: translateY(-2px);
+        filter: saturate(1.08);
+    }
+
+    .history-bar.is-idle {
+        background: rgba(196, 180, 154, 0.36);
+        box-shadow: none;
+    }
+
+    .history-bar.is-peak {
+        background: linear-gradient(180deg, rgba(111, 90, 65, 0.28), rgba(111, 90, 65, 0.92));
+    }
+
+    .history-axis {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-top: 0.85rem;
+        color: rgba(91, 76, 61, 0.62);
+        font-size: 0.8rem;
+    }
+
+    .history-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        margin-top: 1rem;
+    }
+
+    .history-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.48rem 0.7rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.56);
+        color: rgba(76, 63, 51, 0.78);
+        font-size: 0.82rem;
+        border: 1px solid rgba(139, 115, 85, 0.1);
+    }
+
+    .review-board {
+        position: relative;
+        z-index: 1;
+        padding: 1.5rem;
+        display: grid;
+        gap: 1rem;
+    }
+
+    .review-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .review-title {
+        color: #2f261d;
+        font-size: 1.35rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+
+    .review-subtitle {
+        margin-top: 0.35rem;
+        color: rgba(78, 65, 53, 0.7);
+        font-size: 0.94rem;
+        line-height: 1.65;
+    }
+
+    .review-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        flex-wrap: wrap;
+    }
+
+    .review-budget {
+        min-height: 2.75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(139, 115, 85, 0.18);
+        background: rgba(255, 255, 255, 0.72);
+        color: #2f261d;
+        font-size: 0.9rem;
+        font-weight: 600;
+        padding: 0 1rem;
+    }
+
+    .review-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2.75rem;
+        padding: 0.75rem 1.1rem;
+        border-radius: 999px;
+        border: 1px solid rgba(139, 115, 85, 0.18);
+        background: rgba(255, 255, 255, 0.7);
+        color: #5c4833;
+        font-size: 0.9rem;
+        font-weight: 700;
+        text-decoration: none;
+        transition: transform 0.2s ease, background 0.2s ease;
+    }
+
+    .review-button:hover {
+        transform: translateY(-1px);
+        background: rgba(255, 255, 255, 0.9);
+    }
+
+    .review-button.is-primary {
+        background: linear-gradient(135deg, rgba(139, 115, 85, 0.18), rgba(111, 90, 65, 0.3));
+    }
+
+    .review-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.9rem;
+    }
+
+    .review-metric {
+        padding: 1rem;
+        border-radius: 1.2rem;
+        background: rgba(255, 255, 255, 0.56);
+        border: 1px solid rgba(139, 115, 85, 0.1);
+    }
+
+    .review-metric-label {
+        color: rgba(92, 74, 55, 0.58);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+
+    .review-metric-value {
+        margin-top: 0.55rem;
+        color: #2f261d;
+        font-size: 1.3rem;
+        font-weight: 700;
+    }
+
+    .review-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr);
+        gap: 1rem;
+    }
+
+    .review-list,
+    .review-detail {
+        display: grid;
+        gap: 0.85rem;
+    }
+
+    .review-task-card,
+    .review-detail-shell {
+        padding: 1rem;
+        border-radius: 1.3rem;
+        background: rgba(255, 255, 255, 0.56);
+        border: 1px solid rgba(139, 115, 85, 0.11);
+    }
+
+    .review-task-card.is-active {
+        border-color: rgba(111, 90, 65, 0.34);
+        box-shadow: 0 16px 30px rgba(139, 115, 85, 0.08);
+    }
+
+    .review-task-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
+    }
+
+    .review-task-title {
+        color: #2f261d;
+        font-size: 1rem;
+        font-weight: 700;
+        line-height: 1.35;
+    }
+
+    .review-task-meta,
+    .review-detail-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem 0.9rem;
+        margin-top: 0.75rem;
+        color: rgba(88, 73, 59, 0.68);
+        font-size: 0.82rem;
+    }
+
+    .review-task-excerpt {
+        margin-top: 0.65rem;
+        color: rgba(67, 56, 45, 0.78);
+        font-size: 0.9rem;
+        line-height: 1.7;
+    }
+
+    .review-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.34rem 0.62rem;
+        border-radius: 999px;
+        background: rgba(139, 115, 85, 0.09);
+        color: rgba(86, 68, 49, 0.88);
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+
+    .review-pill.is-weak { background: rgba(220, 38, 38, 0.1); color: #b91c1c; }
+    .review-pill.is-normal { background: rgba(14, 116, 144, 0.1); color: #155e75; }
+    .review-pill.is-mastered { background: rgba(22, 163, 74, 0.1); color: #166534; }
+    .review-pill.is-progress { background: rgba(202, 138, 4, 0.12); color: #a16207; }
+
+    .review-task-actions,
+    .review-detail-actions,
+    .review-status-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-top: 0.9rem;
+    }
+
+    .review-inline-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2.55rem;
+        padding: 0.65rem 1rem;
+        border-radius: 999px;
+        border: 1px solid rgba(139, 115, 85, 0.16);
+        background: rgba(255, 255, 255, 0.74);
+        color: #5c4833;
+        font-size: 0.86rem;
+        font-weight: 700;
+        transition: transform 0.2s ease, background 0.2s ease;
+    }
+
+    .review-inline-button:hover {
+        transform: translateY(-1px);
+        background: rgba(255, 255, 255, 0.92);
+    }
+
+    .review-inline-button.is-primary { background: linear-gradient(135deg, rgba(139, 115, 85, 0.16), rgba(111, 90, 65, 0.26)); }
+    .review-inline-button.is-danger { background: rgba(220, 38, 38, 0.08); color: #b91c1c; }
+    .review-inline-button.is-success { background: rgba(22, 163, 74, 0.09); color: #166534; }
+
+    .review-reference-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem;
+        margin-top: 1rem;
+    }
+
+    .review-source-card {
+        padding: 0.95rem 1rem;
+        border-radius: 1.15rem;
+        background: rgba(255, 255, 255, 0.46);
+        border: 1px solid rgba(139, 115, 85, 0.1);
+    }
+
+    .review-source-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .review-source-label {
+        color: rgba(92, 74, 55, 0.58);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+
+    .review-source-content {
+        margin-top: 0.7rem;
+        color: rgba(52, 43, 34, 0.84);
+        font-size: 0.9rem;
+        line-height: 1.75;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .review-question-list {
+        display: grid;
+        gap: 0.85rem;
+        margin-top: 1rem;
+    }
+
+    .review-question-card {
+        padding: 0.95rem;
+        border-radius: 1.15rem;
+        background: rgba(255, 255, 255, 0.5);
+        border: 1px solid rgba(139, 115, 85, 0.1);
+    }
+
+    .review-question-title {
+        color: #2f261d;
+        font-size: 0.95rem;
+        font-weight: 700;
+        line-height: 1.55;
+    }
+
+    .review-question-support,
+    .review-question-feedback {
+        margin-top: 0.55rem;
+        color: rgba(88, 73, 59, 0.7);
+        font-size: 0.82rem;
+        line-height: 1.65;
+    }
+
+    .review-answer-input {
+        width: 100%;
+        min-height: 7.5rem;
+        margin-top: 0.7rem;
+        border-radius: 1rem;
+        border: 1px solid rgba(139, 115, 85, 0.16);
+        background: rgba(255, 255, 255, 0.82);
+        padding: 0.9rem 1rem;
+        color: #2f261d;
+        font-size: 0.92rem;
+        line-height: 1.7;
+        resize: vertical;
+    }
+
+    .review-answer-input:focus {
+        outline: none;
+        border-color: rgba(111, 90, 65, 0.34);
+        box-shadow: 0 0 0 3px rgba(139, 115, 85, 0.12);
+    }
+
+    .review-score {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin-top: 0.55rem;
+        color: #155e75;
+        font-size: 0.82rem;
+        font-weight: 700;
+    }
+
+    .review-save-note {
+        color: rgba(88, 73, 59, 0.68);
+        font-size: 0.82rem;
+    }
+
+    .history-breakdown-shell {
+        position: relative;
+        z-index: 1;
+        padding: 0 1.5rem 1.5rem;
+        display: grid;
+        gap: 1rem;
+    }
+
+    .history-breakdown-card {
+        padding: 1rem;
+        border-radius: 1.25rem;
+        background: rgba(255, 255, 255, 0.56);
+        border: 1px solid rgba(139, 115, 85, 0.11);
+    }
+
+    .history-breakdown-title {
+        color: #2f261d;
+        font-size: 0.95rem;
+        font-weight: 700;
+    }
+
+    .history-breakdown-list {
+        display: grid;
+        gap: 0.8rem;
+        margin-top: 0.95rem;
+    }
+
+    .history-breakdown-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 0.8rem;
+        align-items: center;
+    }
+
+    .history-breakdown-copy {
+        min-width: 0;
+    }
+
+    .history-breakdown-name {
+        color: rgba(47, 38, 29, 0.92);
+        font-size: 0.9rem;
+        font-weight: 600;
+        line-height: 1.4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .history-breakdown-bar {
+        width: 100%;
+        height: 0.42rem;
+        margin-top: 0.42rem;
+        border-radius: 999px;
+        background: rgba(196, 180, 154, 0.32);
+        overflow: hidden;
+    }
+
+    .history-breakdown-bar > span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, rgba(139, 115, 85, 0.72), rgba(111, 90, 65, 0.96));
+    }
+
+    .history-breakdown-count {
+        color: rgba(76, 63, 51, 0.72);
+        font-size: 0.82rem;
+        font-weight: 700;
+    }
+
+    .history-list-shell {
+        position: relative;
+        z-index: 1;
+        padding: 0 1.5rem 1.5rem;
+    }
+
+    .history-day-group {
+        padding: 1.15rem 0;
+        border-top: 1px solid rgba(139, 115, 85, 0.12);
+    }
+
+    .history-day-group:first-child {
+        border-top: 0;
+        padding-top: 0.35rem;
+    }
+
+    .history-day-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.9rem;
+    }
+
+    .history-day-title {
+        color: #2f261d;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+    .history-day-subtitle {
+        margin-top: 0.18rem;
+        color: rgba(78, 65, 53, 0.62);
+        font-size: 0.82rem;
+    }
+
+    .history-day-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.42rem 0.72rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(139, 115, 85, 0.12);
+        color: rgba(76, 63, 51, 0.75);
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    .history-log-list {
+        display: grid;
+        gap: 0.85rem;
+    }
+
+    .history-log-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 1rem;
+        padding: 1rem 1.05rem;
+        border-radius: 1.25rem;
+        background: rgba(255, 255, 255, 0.54);
+        border: 1px solid rgba(139, 115, 85, 0.1);
+        transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+
+    .history-log-item:hover {
+        transform: translateY(-1px);
+        border-color: rgba(139, 115, 85, 0.2);
+        box-shadow: 0 16px 32px rgba(139, 115, 85, 0.08);
+    }
+
+    .history-log-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem 0.7rem;
+    }
+
+    .history-log-book {
+        color: #2f261d;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+    .history-log-separator {
+        color: rgba(139, 115, 85, 0.52);
+    }
+
+    .history-log-chapter {
+        color: rgba(59, 49, 38, 0.78);
+        font-size: 0.92rem;
+        font-weight: 500;
+    }
+
+    .history-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.32rem 0.6rem;
+        border-radius: 999px;
+        background: rgba(139, 115, 85, 0.09);
+        color: rgba(86, 68, 49, 0.88);
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+    }
+
+    .history-log-summary {
+        margin-top: 0.62rem;
+        color: rgba(67, 56, 45, 0.78);
+        font-size: 0.92rem;
+        line-height: 1.72;
+    }
+
+    .history-log-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem 1rem;
+        margin-top: 0.8rem;
+        color: rgba(88, 73, 59, 0.64);
+        font-size: 0.8rem;
+    }
+
+    .history-log-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+    }
+
+    .history-log-action {
+        align-self: center;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 6rem;
+        min-height: 2.7rem;
+        padding: 0.75rem 0.95rem;
+        border-radius: 999px;
+        text-decoration: none;
+        font-size: 0.84rem;
+        font-weight: 700;
+        transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
+    }
+
+    .history-log-action.is-link {
+        background: linear-gradient(135deg, rgba(139, 115, 85, 0.14), rgba(111, 90, 65, 0.22));
+        color: #5c4833;
+    }
+
+    .history-log-action.is-link:hover {
+        transform: translateY(-1px);
+        background: linear-gradient(135deg, rgba(139, 115, 85, 0.18), rgba(111, 90, 65, 0.3));
+    }
+
+    .history-log-action.is-muted {
+        background: rgba(196, 180, 154, 0.18);
+        color: rgba(111, 90, 65, 0.62);
+        cursor: default;
+    }
+
+    .history-empty {
+        padding: 2rem 1rem;
+        text-align: center;
+        color: rgba(82, 67, 49, 0.66);
+        font-size: 0.95rem;
+        line-height: 1.8;
+    }
+
+    .history-empty strong {
+        display: block;
+        color: #2f261d;
+        font-size: 1.02rem;
+        margin-bottom: 0.35rem;
+    }
+
+    .dark .history-card {
+        border-color: rgba(148, 163, 184, 0.14);
+        background:
+            linear-gradient(180deg, rgba(17, 24, 39, 0.92), rgba(15, 23, 42, 0.96)),
+            rgba(15, 23, 42, 0.94);
+        box-shadow:
+            0 24px 60px rgba(2, 6, 23, 0.42),
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .dark .history-card::after {
+        background: linear-gradient(140deg, rgba(248, 250, 252, 0.05), transparent 40%);
+    }
+
+    .dark .history-hero {
+        background:
+            radial-gradient(circle at top left, rgba(71, 85, 105, 0.34), transparent 30%),
+            radial-gradient(circle at 85% 18%, rgba(148, 163, 184, 0.16), transparent 28%),
+            linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.96));
+    }
+
+    .dark .history-kicker,
+    .dark .history-hero-note,
+    .dark .history-window-metric,
+    .dark .history-chart-panel,
+    .dark .history-breakdown-card,
+    .dark .history-log-item,
+    .dark .history-day-pill,
+    .dark .history-chip,
+    .dark .history-filter {
+        background: rgba(15, 23, 42, 0.52);
+        border-color: rgba(148, 163, 184, 0.16);
+        box-shadow: none;
+    }
+
+    .dark .history-title,
+    .dark .history-panel-title,
+    .dark .history-stat-value,
+    .dark .history-window-value,
+    .dark .history-breakdown-title,
+    .dark .history-breakdown-name,
+    .dark .history-day-title,
+    .dark .history-log-book {
+        color: #f8fafc;
+    }
+
+    .dark .history-lead,
+    .dark .history-hero-note-text,
+    .dark .history-panel-subtitle,
+    .dark .history-stat-note,
+    .dark .history-log-summary,
+    .dark .history-empty {
+        color: rgba(226, 232, 240, 0.74);
+    }
+
+    .dark .history-kicker,
+    .dark .history-hero-note-label,
+    .dark .history-filter-label,
+    .dark .history-stat-label,
+    .dark .history-window-label,
+    .dark .history-day-subtitle,
+    .dark .history-axis,
+    .dark .history-log-meta,
+    .dark .history-breakdown-count,
+    .dark .history-day-pill,
+    .dark .history-chip {
+        color: rgba(203, 213, 225, 0.66);
+    }
+
+    .dark .history-bar {
+        background: linear-gradient(180deg, rgba(250, 204, 21, 0.32), rgba(251, 191, 36, 0.84));
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.42);
+    }
+
+    .dark .history-bar.is-idle {
+        background: rgba(71, 85, 105, 0.72);
+        box-shadow: none;
+    }
+
+    .dark .history-badge {
+        background: rgba(250, 204, 21, 0.12);
+        color: rgba(254, 240, 138, 0.92);
+    }
+
+    .dark .history-log-action.is-link {
+        background: linear-gradient(135deg, rgba(251, 191, 36, 0.18), rgba(250, 204, 21, 0.26));
+        color: #fde68a;
+    }
+
+    .dark .history-log-action.is-muted {
+        background: rgba(71, 85, 105, 0.55);
+        color: rgba(203, 213, 225, 0.74);
+    }
+
+    .dark .review-button,
+    .dark .review-budget,
+    .dark .review-metric,
+    .dark .review-task-card,
+    .dark .review-detail-shell,
+    .dark .review-question-card,
+    .dark .review-inline-button,
+    .dark .review-answer-input {
+        background: rgba(15, 23, 42, 0.52);
+        border-color: rgba(148, 163, 184, 0.16);
+        color: #f8fafc;
+    }
+
+    .dark .review-title,
+    .dark .review-task-title,
+    .dark .review-question-title,
+    .dark .review-metric-value {
+        color: #f8fafc;
+    }
+
+    .dark .review-subtitle,
+    .dark .review-task-excerpt,
+    .dark .review-source-content,
+    .dark .review-question-support,
+    .dark .review-question-feedback,
+    .dark .review-save-note {
+        color: rgba(226, 232, 240, 0.76);
+    }
+
+    .dark .review-metric-label,
+    .dark .review-source-label,
+    .dark .review-task-meta,
+    .dark .review-detail-meta {
+        color: rgba(203, 213, 225, 0.66);
+    }
+
+    .dark .review-source-card {
+        background: rgba(15, 23, 42, 0.44);
+        border-color: rgba(148, 163, 184, 0.14);
+    }
+
+    @media (max-width: 1100px) {
+        .history-stat-grid,
+        .history-window-metrics,
+        .review-metrics {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .history-analytics-grid,
+        .history-hero-grid,
+        .review-layout {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .review-reference-grid {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
+
+    @media (max-width: 760px) {
+        .history-hero,
+        .history-chart-shell,
+        .history-breakdown-shell,
+        .history-list-shell,
+        .history-panel-copy {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        .history-hero {
+            padding-top: 1.35rem;
+            padding-bottom: 1.35rem;
+        }
+
+        .history-stat-grid,
+        .history-window-metrics,
+        .review-metrics {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .history-log-item {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .history-log-action {
+            width: 100%;
+        }
+
+        .review-board {
+            padding: 1rem;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="mb-6">
-    <div class="flex items-center text-sm text-gray-500 mb-2">
-        <a href="/" class="hover:text-blue-500">仪表盘</a>
-        <span class="mx-2">/</span>
-        <span>学习历史</span>
-    </div>
-    
-    <h1 class="text-2xl font-bold">📚 学习历史</h1>
-    <p class="text-gray-500">查看你的学习轨迹和上传记录</p>
-</div>
+<div class="history-shell">
+    <section class="history-card history-hero">
+        <div class="history-hero-grid">
+            <div>
+                <div class="flex items-center gap-3 text-sm text-gray-500">
+                    <a href="/" class="hover:text-amber-700 transition-colors">仪表盘</a>
+                    <span>/</span>
+                    <span>学习历史</span>
+                </div>
 
-<!-- 统计卡片 -->
-<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8" id="statsSection">
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="text-gray-500 text-sm">总上传次数</div>
-        <div class="text-3xl font-bold text-blue-600" id="totalUploads">-</div>
-    </div>
-    
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="text-gray-500 text-sm">本周学习</div>
-        <div class="text-3xl font-bold text-green-600" id="weeklyUploads">-</div>
-    </div>
-    
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="text-gray-500 text-sm">连续学习</div>
-        <div class="text-3xl font-bold text-purple-600" id="streakDays">-</div>
-        <div class="text-xs text-gray-400">天</div>
-    </div>
-    
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="text-gray-500 text-sm">覆盖科目</div>
-        <div class="text-3xl font-bold text-orange-600" id="bookCount">-</div>
-        <div class="text-xs text-gray-400">个</div>
-    </div>
-</div>
-
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- 左侧：时间线日历 -->
-    <div class="lg:col-span-1">
-        <div class="bg-white rounded-lg shadow p-6">
-            <h3 class="font-semibold mb-4">📅 学习日历</h3>
-            <div id="calendarView" class="space-y-2">
-                <div class="text-center text-gray-400 py-4">加载中...</div>
+                <div class="history-kicker">History Board</div>
+                <h1 class="history-title font-serif">学习历史</h1>
+                <p class="history-lead">
+                    把上传记录、学习会话补全和章节沉淀串成一条时间线。你可以直接看到学习节奏、峰值日期和每一条资料落到了哪里。
+                </p>
             </div>
-        </div>
-    </div>
 
-    <!-- 右侧：上传记录列表 -->
-    <div class="lg:col-span-2">
-        <div class="bg-white rounded-lg shadow">
-            <div class="px-6 py-4 border-b flex justify-between items-center">
-                <h3 class="font-semibold">📝 上传记录</h3>
-                <select id="daysFilter" onchange="loadHistory()" class="text-sm border rounded px-2 py-1">
-                    <option value="7">最近7天</option>
-                    <option value="30" selected>最近30天</option>
-                    <option value="90">最近90天</option>
-                </select>
-            </div>
-            
-            <div id="uploadList" class="divide-y">
-                <div class="px-6 py-8 text-center text-gray-400">
-                    加载中...
+            <div class="history-hero-note">
+                <div>
+                    <div class="history-hero-note-label">当前窗口</div>
+                    <div class="history-hero-note-value" id="heroWindowValue">最近 30 天</div>
+                </div>
+                <p class="history-hero-note-text" id="heroWindowNote">
+                    正在整理这段时间内的学习强度、来源分布和章节落点。
+                </p>
+                <div class="history-filter-shell">
+                    <label class="history-filter-label" for="daysFilter">查看范围</label>
+                    <select id="daysFilter" class="history-filter px-4">
+                        <option value="7">最近 7 天</option>
+                        <option value="30" selected>最近 30 天</option>
+                        <option value="90">最近 90 天</option>
+                    </select>
                 </div>
             </div>
         </div>
-    </div>
+    </section>
+
+    <section class="history-card">
+        <div class="review-board">
+            <div class="review-header">
+                <div>
+                    <h2 class="review-title">今日复习</h2>
+                    <p class="review-subtitle" id="reviewSubtitle">
+                        上传后的章节会自动进入四轮复习节奏，没做完的单元会顺延到第二天继续。
+                    </p>
+                </div>
+                <div class="review-actions">
+                    <select id="reviewBudget" class="review-budget">
+                        <option value="30">30 分钟</option>
+                        <option value="40" selected>40 分钟</option>
+                        <option value="50">50 分钟</option>
+                    </select>
+                    <button type="button" class="review-button" id="reviewRefreshBtn">刷新计划</button>
+                    <button type="button" class="review-button is-primary" id="reviewPdfBtn">导出今日 PDF</button>
+                </div>
+            </div>
+
+            <div class="review-metrics">
+                <div class="review-metric">
+                    <div class="review-metric-label">今日单元</div>
+                    <div class="review-metric-value" id="reviewTaskCount">-</div>
+                </div>
+                <div class="review-metric">
+                    <div class="review-metric-label">预计时长</div>
+                    <div class="review-metric-value" id="reviewEstimatedMinutes">-</div>
+                </div>
+                <div class="review-metric">
+                    <div class="review-metric-label">顺延内容</div>
+                    <div class="review-metric-value" id="reviewCarryOverCount">-</div>
+                </div>
+                <div class="review-metric">
+                    <div class="review-metric-label">今日完成</div>
+                    <div class="review-metric-value" id="reviewCompletedCount">-</div>
+                </div>
+            </div>
+
+            <div class="review-layout">
+                <div id="reviewTaskList" class="review-list" aria-live="polite">
+                    <div class="history-empty">
+                        <strong>正在整理今日复习清单</strong>
+                        页面会结合四轮排期、顺延内容和时间预算生成今天的复习列表。
+                    </div>
+                </div>
+
+                <div id="reviewDetailPanel" class="review-detail">
+                    <div class="review-detail-shell">
+                        <div class="history-empty">
+                            <strong>还没有打开复习单元</strong>
+                            从左侧选择一个章节单元后，这里会显示 10 道简答题，并自动保存你的作答进度。
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="history-stat-grid">
+        <article class="history-card history-stat-card">
+            <div class="history-stat-label">累计记录</div>
+            <div class="history-stat-value" id="totalUploads">-</div>
+            <div class="history-stat-note" id="totalUploadsNote">正在汇总全部学习记录。</div>
+        </article>
+
+        <article class="history-card history-stat-card">
+            <div class="history-stat-label">最近 7 天</div>
+            <div class="history-stat-value" id="weeklyUploads">-</div>
+            <div class="history-stat-note" id="weeklyUploadsNote">观察这一周的活跃变化。</div>
+        </article>
+
+        <article class="history-card history-stat-card">
+            <div class="history-stat-label">连续学习</div>
+            <div class="history-stat-value" id="streakDays">-</div>
+            <div class="history-stat-note" id="streakDaysNote">保持节奏比偶发高峰更重要。</div>
+        </article>
+
+        <article class="history-card history-stat-card">
+            <div class="history-stat-label">活跃天数</div>
+            <div class="history-stat-value" id="activeDays">-</div>
+            <div class="history-stat-note" id="activeDaysNote">统计所有出现过学习记录的日期。</div>
+        </article>
+
+        <article class="history-card history-stat-card">
+            <div class="history-stat-label">最近一次</div>
+            <div class="history-stat-value text-xl leading-tight" id="latestStudyDate">-</div>
+            <div class="history-stat-note" id="latestStudyDateNote">峰值日期会在这里提示。</div>
+        </article>
+    </section>
+
+    <section class="history-analytics-grid">
+        <article class="history-card">
+            <div class="history-panel-copy">
+                <div class="history-toolbar">
+                    <div>
+                        <h2 class="history-panel-title">时间分布</h2>
+                        <p class="history-panel-subtitle">
+                            直接看这段时间的学习密度，判断是持续推进还是集中冲刺。
+                        </p>
+                    </div>
+                    <div class="history-day-pill" id="timelineRangeLabel">最近 30 天</div>
+                </div>
+            </div>
+
+            <div class="history-chart-shell">
+                <div class="history-window-metrics">
+                    <div class="history-window-metric">
+                        <div class="history-window-label">窗口记录数</div>
+                        <div class="history-window-value" id="windowUploads">-</div>
+                    </div>
+                    <div class="history-window-metric">
+                        <div class="history-window-label">窗口活跃日</div>
+                        <div class="history-window-value" id="windowActiveDays">-</div>
+                    </div>
+                    <div class="history-window-metric">
+                        <div class="history-window-label">活跃日均值</div>
+                        <div class="history-window-value" id="windowAverage">-</div>
+                    </div>
+                    <div class="history-window-metric">
+                        <div class="history-window-label">峰值日期</div>
+                        <div class="history-window-value text-xl" id="windowPeak">-</div>
+                    </div>
+                </div>
+
+                <div class="history-chart-panel">
+                    <div id="timelineBars" class="history-bars" aria-live="polite"></div>
+                    <div class="history-axis">
+                        <span id="timelineStartLabel">-</span>
+                        <span id="timelineCenterLabel">-</span>
+                        <span id="timelineEndLabel">-</span>
+                    </div>
+                </div>
+
+                <div id="timelineHighlights" class="history-chip-row" aria-live="polite"></div>
+            </div>
+        </article>
+
+        <article class="history-card">
+            <div class="history-panel-copy">
+                <h2 class="history-panel-title">来源与科目</h2>
+                <p class="history-panel-subtitle">
+                    这部分用来回答两个问题：资料主要从哪里进入系统，以及它们集中在哪些科目。
+                </p>
+            </div>
+
+            <div class="history-breakdown-shell">
+                <section class="history-breakdown-card">
+                    <h3 class="history-breakdown-title">来源分布</h3>
+                    <div id="sourceBreakdown" class="history-breakdown-list"></div>
+                </section>
+
+                <section class="history-breakdown-card">
+                    <h3 class="history-breakdown-title">科目分布</h3>
+                    <div id="bookBreakdown" class="history-breakdown-list"></div>
+                </section>
+            </div>
+        </article>
+    </section>
+
+    <section class="history-card">
+        <div class="history-panel-copy">
+            <div class="history-toolbar">
+                <div>
+                    <h2 class="history-panel-title">记录明细</h2>
+                    <p class="history-panel-subtitle" id="historyCountLabel">
+                        这里会按日期归档每一条学习资料和会话补全记录。
+                    </p>
+                </div>
+                <div class="history-day-pill" id="historySurfaceLabel">按日期归档</div>
+            </div>
+        </div>
+
+        <div id="uploadList" class="history-list-shell" aria-live="polite">
+            <div class="history-empty">
+                <strong>正在载入历史记录</strong>
+                页面会在接口返回后自动补全时间线和明细列表。
+            </div>
+        </div>
+    </section>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    // 页面加载时获取数据
-    document.addEventListener('DOMContentLoaded', function() {
-        loadStats();
-        loadHistory();
-        loadCalendar();
+    const historyState = {
+        stats: null,
+        uploads: null,
+        timeline: null,
+        reviewPlan: null,
+        activeTaskDetail: null,
+        activeTaskId: null,
+        selectedDays: 30,
+        reviewBudgetMinutes: 40,
+        autosaveTimer: null,
+        currentResumePosition: 0,
+    };
+
+    const historyElements = {};
+
+    document.addEventListener('DOMContentLoaded', () => {
+        bindHistoryElements();
+        historyState.selectedDays = Number(historyElements.daysFilter.value || 30);
+        historyState.reviewBudgetMinutes = Number(historyElements.reviewBudget.value || 40);
+        historyElements.daysFilter.addEventListener('change', refreshWindowData);
+        historyElements.reviewBudget.addEventListener('change', refreshReviewPlan);
+        historyElements.reviewRefreshBtn.addEventListener('click', refreshReviewPlan);
+        historyElements.reviewPdfBtn.addEventListener('click', downloadTodayReviewPdf);
+        historyElements.reviewTaskList.addEventListener('click', handleReviewTaskListClick);
+        historyElements.reviewDetailPanel.addEventListener('click', handleReviewDetailClick);
+        historyElements.reviewDetailPanel.addEventListener('input', handleReviewAnswerInput);
+        historyElements.reviewDetailPanel.addEventListener('focusin', handleReviewAnswerFocus);
+        initializeHistoryPage();
     });
 
-    // 加载统计数据
+    function bindHistoryElements() {
+        historyElements.daysFilter = document.getElementById('daysFilter');
+        historyElements.heroWindowValue = document.getElementById('heroWindowValue');
+        historyElements.heroWindowNote = document.getElementById('heroWindowNote');
+        historyElements.totalUploads = document.getElementById('totalUploads');
+        historyElements.totalUploadsNote = document.getElementById('totalUploadsNote');
+        historyElements.weeklyUploads = document.getElementById('weeklyUploads');
+        historyElements.weeklyUploadsNote = document.getElementById('weeklyUploadsNote');
+        historyElements.streakDays = document.getElementById('streakDays');
+        historyElements.streakDaysNote = document.getElementById('streakDaysNote');
+        historyElements.activeDays = document.getElementById('activeDays');
+        historyElements.activeDaysNote = document.getElementById('activeDaysNote');
+        historyElements.latestStudyDate = document.getElementById('latestStudyDate');
+        historyElements.latestStudyDateNote = document.getElementById('latestStudyDateNote');
+        historyElements.timelineRangeLabel = document.getElementById('timelineRangeLabel');
+        historyElements.windowUploads = document.getElementById('windowUploads');
+        historyElements.windowActiveDays = document.getElementById('windowActiveDays');
+        historyElements.windowAverage = document.getElementById('windowAverage');
+        historyElements.windowPeak = document.getElementById('windowPeak');
+        historyElements.timelineBars = document.getElementById('timelineBars');
+        historyElements.timelineHighlights = document.getElementById('timelineHighlights');
+        historyElements.timelineStartLabel = document.getElementById('timelineStartLabel');
+        historyElements.timelineCenterLabel = document.getElementById('timelineCenterLabel');
+        historyElements.timelineEndLabel = document.getElementById('timelineEndLabel');
+        historyElements.sourceBreakdown = document.getElementById('sourceBreakdown');
+        historyElements.bookBreakdown = document.getElementById('bookBreakdown');
+        historyElements.historyCountLabel = document.getElementById('historyCountLabel');
+        historyElements.historySurfaceLabel = document.getElementById('historySurfaceLabel');
+        historyElements.uploadList = document.getElementById('uploadList');
+        historyElements.reviewBudget = document.getElementById('reviewBudget');
+        historyElements.reviewRefreshBtn = document.getElementById('reviewRefreshBtn');
+        historyElements.reviewPdfBtn = document.getElementById('reviewPdfBtn');
+        historyElements.reviewSubtitle = document.getElementById('reviewSubtitle');
+        historyElements.reviewTaskCount = document.getElementById('reviewTaskCount');
+        historyElements.reviewEstimatedMinutes = document.getElementById('reviewEstimatedMinutes');
+        historyElements.reviewCarryOverCount = document.getElementById('reviewCarryOverCount');
+        historyElements.reviewCompletedCount = document.getElementById('reviewCompletedCount');
+        historyElements.reviewTaskList = document.getElementById('reviewTaskList');
+        historyElements.reviewDetailPanel = document.getElementById('reviewDetailPanel');
+    }
+
+    async function initializeHistoryPage() {
+        await Promise.all([loadStats(), loadWindowData(), loadReviewPlan()]);
+        renderStats();
+        renderBreakdowns();
+        renderWindowAnalytics();
+        renderHistoryList();
+        renderReviewPlan();
+    }
+
+    async function refreshWindowData() {
+        historyState.selectedDays = Number(historyElements.daysFilter.value || 30);
+        renderWindowLoading();
+        await loadWindowData();
+        renderWindowAnalytics();
+        renderHistoryList();
+    }
+
     async function loadStats() {
         try {
             const response = await fetch('/api/history/stats');
-            const data = await response.json();
-            
-            document.getElementById('totalUploads').textContent = data.total_uploads;
-            document.getElementById('weeklyUploads').textContent = data.weekly_uploads;
-            document.getElementById('bookCount').textContent = Object.keys(data.book_distribution).length;
-            
-            document.getElementById('streakDays').textContent = data.streak_days ?? 0;
-            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            historyState.stats = await response.json();
         } catch (error) {
-            console.error('加载统计失败:', error);
+            console.error('加载学习历史统计失败:', error);
+            historyState.stats = null;
         }
     }
 
-    // 加载历史记录
-    async function loadHistory() {
-        const days = document.getElementById('daysFilter').value;
-        const listContainer = document.getElementById('uploadList');
-        
-        listContainer.innerHTML = '<div class="px-6 py-8 text-center text-gray-400">加载中...</div>';
-        
+    async function loadWindowData() {
+        const days = historyState.selectedDays;
+
         try {
-            const response = await fetch(`/api/history/uploads?days=${days}`);
-            const data = await response.json();
-            
-            if (data.uploads.length === 0) {
-                listContainer.innerHTML = `
-                    <div class="px-6 py-8 text-center text-gray-400">
-                        <div class="text-4xl mb-2">📝</div>
-                        <p>暂无上传记录</p>
-                        <a href="/upload" class="text-blue-500 hover:underline mt-2 inline-block">去上传内容</a>
-                    </div>
-                `;
-                return;
+            const [uploadsResponse, timelineResponse] = await Promise.all([
+                fetch(`/api/history/uploads?days=${days}`),
+                fetch(`/api/history/timeline?days=${days}`),
+            ]);
+
+            if (!uploadsResponse.ok) {
+                throw new Error(`uploads HTTP ${uploadsResponse.status}`);
             }
-            
-            listContainer.innerHTML = '';
-            
-            // 按日期分组
-            const grouped = groupByDate(data.uploads);
-            
-            for (const [date, uploads] of Object.entries(grouped)) {
-                const dateSection = document.createElement('div');
-                dateSection.className = 'px-6 py-3 bg-gray-50 text-sm font-medium text-gray-600';
-                dateSection.textContent = formatDate(date);
-                listContainer.appendChild(dateSection);
-                
-                uploads.forEach(upload => {
-                    const hasChapterLink = isSelectableChapter(upload.chapter_id);
-                    const item = document.createElement('div');
-                    item.className = 'px-6 py-4 hover:bg-gray-50 transition';
-                    item.innerHTML = `
-                        <div class="flex justify-between items-start">
-                            <div class="flex-1">
-                                <div class="flex items-center">
-                                    <span class="font-medium">${upload.book}</span>
-                                    <span class="mx-2 text-gray-300">|</span>
-                                    <span class="text-gray-600">${upload.chapter_title}</span>
-                                </div>
-                                <div class="text-sm text-gray-500 mt-1">
-                                    ${upload.main_topic || upload.summary || ''}
-                                </div>
-                                <div class="flex items-center mt-2 space-x-4 text-xs text-gray-400">
-                                    <span>📚 ${upload.concept_count} 个知识点</span>
-                                    <span>🕐 ${formatTime(upload.date)}</span>
-                                </div>
-                            </div>
-                            ${hasChapterLink
-                                ? `<a href="/chapter/${upload.chapter_id}" class="ml-4 px-3 py-1 bg-blue-100 text-blue-600 rounded text-sm hover:bg-blue-200 transition">查看</a>`
-                                : `<span class="ml-4 px-3 py-1 bg-gray-100 text-gray-400 rounded text-sm">待识别</span>`
-                            }
-                        </div>
-                    `;
-                    listContainer.appendChild(item);
-                });
+            if (!timelineResponse.ok) {
+                throw new Error(`timeline HTTP ${timelineResponse.status}`);
             }
-            
+
+            historyState.uploads = await uploadsResponse.json();
+            historyState.timeline = await timelineResponse.json();
         } catch (error) {
-            console.error('加载历史失败:', error);
-            listContainer.innerHTML = '<div class="px-6 py-8 text-center text-red-400">加载失败，请重试</div>';
+            console.error('加载学习历史窗口数据失败:', error);
+            historyState.uploads = null;
+            historyState.timeline = null;
         }
     }
 
-    // 加载日历视图
-    async function loadCalendar() {
+    async function loadReviewPlan() {
         try {
-            const response = await fetch('/api/history/timeline?days=30');
-            const data = await response.json();
-            
-            const container = document.getElementById('calendarView');
-            container.innerHTML = '';
-            
-            // 最近14天
-            const recentDays = data.timeline.slice(-14).reverse();
-            
-            recentDays.forEach(day => {
-                const div = document.createElement('div');
-                div.className = 'flex items-center p-2 rounded ' + (day.has_study ? 'bg-green-50' : 'bg-gray-50');
-                
-                const date = new Date(day.date);
-                const weekday = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()];
-                
-                div.innerHTML = `
-                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm ${day.has_study ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'}">
-                        ${day.has_study ? '✓' : weekday}
+            const response = await fetch(`/api/history/review-plan?time_budget_minutes=${encodeURIComponent(historyState.reviewBudgetMinutes)}`);
+            if (!response.ok) {
+                throw new Error(`review plan HTTP ${response.status}`);
+            }
+            historyState.reviewPlan = await response.json();
+        } catch (error) {
+            console.error('加载今日复习计划失败:', error);
+            historyState.reviewPlan = null;
+        }
+    }
+
+    async function refreshReviewPlan() {
+        historyState.reviewBudgetMinutes = Number(historyElements.reviewBudget.value || 40);
+        historyElements.reviewSubtitle.textContent = '正在刷新今日复习计划与顺延内容。';
+        historyElements.reviewTaskList.innerHTML = buildEmptyBlock('正在整理今日复习清单');
+        await loadReviewPlan();
+        renderReviewPlan();
+    }
+
+    function renderStats() {
+        const stats = historyState.stats;
+        if (!stats) {
+            historyElements.totalUploads.textContent = '—';
+            historyElements.weeklyUploads.textContent = '—';
+            historyElements.streakDays.textContent = '—';
+            historyElements.activeDays.textContent = '—';
+            historyElements.latestStudyDate.textContent = '加载失败';
+            historyElements.latestStudyDateNote.textContent = '请稍后刷新重试。';
+            return;
+        }
+
+        const bookCount = Object.keys(stats.book_distribution || {}).length;
+        const sourceCount = Object.keys(stats.source_distribution || {}).length;
+
+        historyElements.totalUploads.textContent = formatCount(stats.total_uploads);
+        historyElements.totalUploadsNote.textContent = `${bookCount} 个科目 · ${sourceCount} 类来源`;
+
+        historyElements.weeklyUploads.textContent = formatCount(stats.weekly_uploads);
+        historyElements.weeklyUploadsNote.textContent = `${stats.weekly_uploads || 0} 条记录落在最近 7 天`;
+
+        historyElements.streakDays.textContent = formatCount(stats.streak_days || 0);
+        historyElements.streakDaysNote.textContent = stats.streak_days
+            ? `连续 ${stats.streak_days} 天都有学习痕迹`
+            : '当前还没有形成连续学习链条';
+
+        historyElements.activeDays.textContent = formatCount(stats.active_days || 0);
+        historyElements.activeDaysNote.textContent = `${formatDecimal(stats.average_uploads_per_active_day || 0)} 条 / 活跃日`;
+
+        historyElements.latestStudyDate.textContent = stats.latest_study_date
+            ? formatDateLabel(stats.latest_study_date, { includeYear: false })
+            : '暂无';
+
+        if (stats.busiest_day) {
+            historyElements.latestStudyDateNote.textContent = `峰值在 ${formatDateLabel(stats.busiest_day, { includeYear: false })}，共 ${stats.busiest_day_count || 0} 条`;
+        } else {
+            historyElements.latestStudyDateNote.textContent = '还没有足够的学习记录来计算峰值日期';
+        }
+    }
+
+    function renderBreakdowns() {
+        const stats = historyState.stats;
+        if (!stats) {
+            historyElements.sourceBreakdown.innerHTML = buildEmptyBlock('来源统计暂时不可用');
+            historyElements.bookBreakdown.innerHTML = buildEmptyBlock('科目统计暂时不可用');
+            return;
+        }
+
+        renderBreakdownList(historyElements.sourceBreakdown, stats.source_distribution, '暂无来源记录');
+        renderBreakdownList(historyElements.bookBreakdown, stats.book_distribution, '暂无科目记录');
+    }
+
+    function renderReviewPlan() {
+        const plan = historyState.reviewPlan;
+        if (!plan) {
+            historyElements.reviewTaskCount.textContent = '—';
+            historyElements.reviewEstimatedMinutes.textContent = '—';
+            historyElements.reviewCarryOverCount.textContent = '—';
+            historyElements.reviewCompletedCount.textContent = '—';
+            historyElements.reviewTaskList.innerHTML = `
+                <div class="history-empty">
+                    <strong>今日复习计划暂时不可用</strong>
+                    请稍后刷新页面重试。
+                </div>
+            `;
+            return;
+        }
+
+        historyElements.reviewTaskCount.textContent = formatCount(plan.task_count || 0);
+        historyElements.reviewEstimatedMinutes.textContent = `${formatCount(plan.estimated_total_minutes || 0)} 分钟`;
+        historyElements.reviewCarryOverCount.textContent = formatCount(plan.carry_over_count || 0);
+        historyElements.reviewCompletedCount.textContent = formatCount(plan.completed_today_count || 0);
+        historyElements.reviewSubtitle.textContent = plan.task_count
+            ? `今天共安排 ${formatCount(plan.task_count)} 个复习单元，超出时间预算的内容会自动顺延。`
+            : '今天暂时没有需要处理的复习单元。上传新章节后，这里会自动生成计划。';
+
+        if (!(plan.tasks || []).length) {
+            historyElements.reviewTaskList.innerHTML = `
+                <div class="history-empty">
+                    <strong>今天没有待处理的复习单元</strong>
+                    你可以先上传新章节，系统会按 1 / 3 / 7 / 14 天节奏把它们推到这里。
+                </div>
+            `;
+            historyElements.reviewDetailPanel.innerHTML = `
+                <div class="review-detail-shell">
+                    <div class="history-empty">
+                        <strong>还没有打开复习单元</strong>
+                        从左侧选择一个章节单元后，这里会显示 10 道简答题，并自动保存你的作答进度。
                     </div>
-                    <div class="ml-3">
-                        <div class="text-sm ${day.has_study ? 'text-gray-800' : 'text-gray-400'}">${formatDateShort(day.date)}</div>
-                        <div class="text-xs ${day.has_study ? 'text-green-600' : 'text-gray-400'}">
-                            ${day.has_study ? '已学习' : '未学习'}
+                </div>
+            `;
+            historyState.activeTaskDetail = null;
+            historyState.activeTaskId = null;
+            return;
+        }
+
+        historyElements.reviewTaskList.innerHTML = plan.tasks.map((task) => `
+            <article class="review-task-card ${historyState.activeTaskId === task.task_id ? 'is-active' : ''}">
+                <div class="review-task-head">
+                    <div>
+                        <div class="review-task-title">${escapeHtml(task.chapter_title)} / ${escapeHtml(task.unit_title)}</div>
+                        <div class="review-task-meta">
+                            <span>${escapeHtml(task.book)}</span>
+                            <span>到期原因：${escapeHtml(task.due_reason)}</span>
+                            <span>掌握状态：${escapeHtml(reviewStatusLabel(task.mastery_status))}</span>
+                            <span>${escapeHtml(String(task.estimated_minutes || 0))} 分钟</span>
                         </div>
                     </div>
-                `;
-                
-                container.appendChild(div);
+                    <span class="review-pill ${reviewStatusClass(task.mastery_status)}">${escapeHtml(reviewStatusLabel(task.mastery_status))}</span>
+                </div>
+                <div class="review-task-excerpt">${escapeHtml(task.summary || task.excerpt || '暂无摘要')}</div>
+                <div class="review-task-meta">
+                    <span>进度 ${escapeHtml(String(task.answered_count || 0))}/${escapeHtml(String(task.question_count || 0))}</span>
+                    <span>${escapeHtml(task.carry_over_days > 0 ? `顺延 ${task.carry_over_days} 天` : '按计划进行')}</span>
+                    <span>${escapeHtml(task.ai_recommended_status ? `AI 建议 ${reviewStatusLabel(task.ai_recommended_status)}` : '待批改后给出建议')}</span>
+                </div>
+                <div class="review-task-actions">
+                    <button type="button" class="review-inline-button is-primary" data-review-open="${task.task_id}">
+                        ${task.answered_count > 0 ? '继续复习' : '开始复习'}
+                    </button>
+                </div>
+            </article>
+        `).join('');
+    }
+
+    async function openReviewTask(taskId) {
+        if (!taskId) {
+            return;
+        }
+
+        historyState.activeTaskId = Number(taskId);
+        historyElements.reviewDetailPanel.innerHTML = `
+            <div class="review-detail-shell">
+                <div class="history-empty">
+                    <strong>正在载入题目</strong>
+                    系统会为这个复习单元准备 10 道简答题，并恢复你之前保存的作答进度。
+                </div>
+            </div>
+        `;
+        renderReviewPlan();
+
+        try {
+            const response = await fetch(`/api/history/review-task/${encodeURIComponent(taskId)}`);
+            if (!response.ok) {
+                throw new Error(`review task HTTP ${response.status}`);
+            }
+            historyState.activeTaskDetail = await response.json();
+            historyState.currentResumePosition = Number(historyState.activeTaskDetail.resume_position || 0);
+            renderActiveReviewTask();
+        } catch (error) {
+            console.error('加载复习单元失败:', error);
+            historyElements.reviewDetailPanel.innerHTML = `
+                <div class="review-detail-shell">
+                    <div class="history-empty">
+                        <strong>复习单元加载失败</strong>
+                        请返回列表重新尝试。
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    function renderActiveReviewTask() {
+        const detail = historyState.activeTaskDetail;
+        if (!detail) {
+            return;
+        }
+
+        const recommendationText = detail.ai_recommended_status
+            ? `AI 建议：${reviewStatusLabel(detail.ai_recommended_status)}`
+            : '完成全部题目后会生成 AI 建议状态';
+
+        historyElements.reviewDetailPanel.innerHTML = `
+            <div class="review-detail-shell">
+                <div class="review-task-head">
+                    <div>
+                        <div class="review-task-title">${escapeHtml(detail.chapter_title)} / ${escapeHtml(detail.unit_title)}</div>
+                        <div class="review-detail-meta">
+                            <span>${escapeHtml(detail.book)}</span>
+                            <span>到期原因：${escapeHtml(detail.due_reason)}</span>
+                            <span>掌握状态：${escapeHtml(reviewStatusLabel(detail.mastery_status))}</span>
+                            <span>${escapeHtml(String(detail.estimated_minutes || 0))} 分钟</span>
+                        </div>
+                    </div>
+                    <span class="review-pill ${reviewStatusClass(detail.mastery_status)}">${escapeHtml(reviewStatusLabel(detail.mastery_status))}</span>
+                </div>
+                <p class="review-task-excerpt">${escapeHtml(detail.summary || detail.excerpt || '暂无摘要')}</p>
+                <div class="review-detail-meta">
+                    <span>已答 ${escapeHtml(String(detail.answered_count || 0))}/${escapeHtml(String(detail.question_count || 0))}</span>
+                    <span>${escapeHtml(recommendationText)}</span>
+                    <span class="review-save-note" id="reviewSaveNote">输入时会自动保存，下次可继续。</span>
+                </div>
+                <div class="review-detail-actions">
+                    <button type="button" class="review-inline-button" data-review-save>立即保存</button>
+                    <button type="button" class="review-inline-button is-primary" data-review-grade>提交批改</button>
+                </div>
+                ${detail.ai_recommended_status
+                    ? `<div class="review-status-actions">
+                        <button type="button" class="review-inline-button is-danger" data-review-complete="weak">标记薄弱</button>
+                        <button type="button" class="review-inline-button" data-review-complete="normal">标记正常</button>
+                        <button type="button" class="review-inline-button is-success" data-review-complete="mastered">标记掌握</button>
+                    </div>`
+                    : ''
+                }
+                <div class="review-reference-grid">
+                    <section class="review-source-card">
+                        <div class="review-source-label">AI 摘要</div>
+                        <div class="review-source-content">${escapeHtml(detail.summary || '暂无摘要')}</div>
+                    </section>
+                    <section class="review-source-card">
+                        <div class="review-source-head">
+                            <div class="review-source-label">本次复习原文</div>
+                            <span class="review-pill">内容版本 ${escapeHtml(String(detail.content_version || 1))}</span>
+                        </div>
+                        <div class="review-source-content">${escapeHtml(detail.source_content || detail.excerpt || '暂无原文')}</div>
+                    </section>
+                </div>
+                <div class="review-question-list">
+                    ${detail.questions.map(renderReviewQuestionCard).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    function renderReviewQuestionCard(question) {
+        return `
+            <article class="review-question-card" data-review-position="${question.position}">
+                <div class="review-question-title">${escapeHtml(String(question.position))}. ${escapeHtml(question.prompt)}</div>
+                <div class="review-question-support">原文定位：${escapeHtml(question.source_excerpt || '暂无')}</div>
+                <textarea
+                    class="review-answer-input"
+                    data-review-question-id="${question.id}"
+                    data-review-position="${question.position}"
+                    placeholder="在这里写你的简答。内容会自动保存，下次打开会继续显示。"
+                >${escapeHtml(question.user_answer || '')}</textarea>
+                ${question.ai_score !== null && question.ai_score !== undefined
+                    ? `<div class="review-score">得分 ${escapeHtml(String(question.ai_score))} / 100</div>`
+                    : ''
+                }
+                ${question.ai_feedback
+                    ? `<div class="review-question-feedback">
+                        <div>反馈：${escapeHtml(question.ai_feedback)}</div>
+                        <div>遗漏：${escapeHtml((question.missing_points || []).join('、') || '无')}</div>
+                        <div>建议：${escapeHtml(question.improvement_suggestion || '无')}</div>
+                    </div>`
+                    : ''
+                }
+            </article>
+        `;
+    }
+
+    function renderWindowLoading() {
+        const label = getWindowLabel(historyState.selectedDays);
+        historyElements.heroWindowValue.textContent = label;
+        historyElements.heroWindowNote.textContent = '正在刷新这一时间窗口内的节奏、峰值和明细列表。';
+        historyElements.timelineRangeLabel.textContent = label;
+        historyElements.windowUploads.textContent = '—';
+        historyElements.windowActiveDays.textContent = '—';
+        historyElements.windowAverage.textContent = '—';
+        historyElements.windowPeak.textContent = '—';
+        historyElements.timelineBars.innerHTML = buildEmptyBlock('正在载入时间分布');
+        historyElements.timelineHighlights.innerHTML = '';
+        historyElements.uploadList.innerHTML = `
+            <div class="history-empty">
+                <strong>正在刷新记录明细</strong>
+                当前窗口切换后，页面会重新整理对应的学习记录。
+            </div>
+        `;
+    }
+
+    function renderWindowAnalytics() {
+        const uploadsPayload = historyState.uploads;
+        const timelinePayload = historyState.timeline;
+        const label = getWindowLabel(historyState.selectedDays);
+
+        historyElements.heroWindowValue.textContent = label;
+        historyElements.timelineRangeLabel.textContent = label;
+        historyElements.historySurfaceLabel.textContent = `${label} / 按日期归档`;
+
+        if (!uploadsPayload || !timelinePayload) {
+            historyElements.heroWindowNote.textContent = '这一时间窗口的数据暂时不可用。';
+            historyElements.historyCountLabel.textContent = '加载失败，请刷新页面后重试。';
+            historyElements.timelineBars.innerHTML = buildEmptyBlock('时间分布加载失败');
+            historyElements.timelineHighlights.innerHTML = '';
+            return;
+        }
+
+        const total = uploadsPayload.total || 0;
+        const activeDays = uploadsPayload.active_days || 0;
+        const average = uploadsPayload.average_uploads_per_active_day || 0;
+        const peakLabel = uploadsPayload.peak_date
+            ? `${formatDateLabel(uploadsPayload.peak_date, { includeYear: false })} · ${uploadsPayload.peak_count} 条`
+            : '暂无峰值';
+
+        historyElements.heroWindowNote.textContent = total
+            ? `${label}内共有 ${formatCount(total)} 条记录，分布在 ${formatCount(activeDays)} 个活跃日。`
+            : `${label}内还没有学习记录。`;
+
+        historyElements.windowUploads.textContent = formatCount(total);
+        historyElements.windowActiveDays.textContent = formatCount(activeDays);
+        historyElements.windowAverage.textContent = `${formatDecimal(average)}/日`;
+        historyElements.windowPeak.textContent = peakLabel;
+
+        historyElements.historyCountLabel.textContent = total
+            ? `${label}内共整理出 ${formatCount(total)} 条记录，支持按日期回看每次输入内容的落点。`
+            : `${label}内还没有可展示的记录。`;
+
+        renderTimelineChart(timelinePayload.timeline || []);
+    }
+
+    function renderTimelineChart(timeline) {
+        if (!timeline.length) {
+            historyElements.timelineBars.innerHTML = buildEmptyBlock('这段时间内没有时间线数据');
+            historyElements.timelineHighlights.innerHTML = '';
+            historyElements.timelineStartLabel.textContent = '—';
+            historyElements.timelineCenterLabel.textContent = '—';
+            historyElements.timelineEndLabel.textContent = '—';
+            return;
+        }
+
+        const maxCount = Math.max(...timeline.map((item) => item.upload_count || 0), 1);
+        const peakDate = historyState.uploads?.peak_date || null;
+        const activeDays = timeline.filter((item) => item.has_study);
+        const latestActiveDays = activeDays.slice(-6).reverse();
+
+        historyElements.timelineBars.innerHTML = timeline.map((item) => {
+            const count = Number(item.upload_count || 0);
+            const ratio = count > 0 ? count / maxCount : 0;
+            const height = count > 0 ? Math.max(16, Math.round(ratio * 100)) : 9;
+            const classNames = [
+                'history-bar',
+                item.has_study ? 'is-active' : 'is-idle',
+                peakDate && item.date === peakDate ? 'is-peak' : '',
+            ].filter(Boolean).join(' ');
+
+            return `
+                <div
+                    class="${classNames}"
+                    style="height: ${height}%;"
+                    title="${escapeHtml(formatDateLabel(item.date))} · ${count} 条记录"
+                    aria-label="${escapeHtml(formatDateLabel(item.date))}，${count} 条记录">
+                </div>
+            `;
+        }).join('');
+
+        historyElements.timelineStartLabel.textContent = formatDateLabel(timeline[0].date, { includeYear: false });
+        historyElements.timelineCenterLabel.textContent = formatDateLabel(timeline[Math.floor(timeline.length / 2)].date, { includeYear: false });
+        historyElements.timelineEndLabel.textContent = formatDateLabel(timeline[timeline.length - 1].date, { includeYear: false });
+
+        if (!latestActiveDays.length) {
+            historyElements.timelineHighlights.innerHTML = `<span class="history-chip">这段时间里还没有产生学习记录</span>`;
+            return;
+        }
+
+        historyElements.timelineHighlights.innerHTML = latestActiveDays.map((item) => `
+            <span class="history-chip">
+                <strong>${escapeHtml(formatDateLabel(item.date, { includeYear: false }))}</strong>
+                <span>${escapeHtml(String(item.upload_count || 0))} 条</span>
+            </span>
+        `).join('');
+    }
+
+    function renderHistoryList() {
+        const uploadsPayload = historyState.uploads;
+        if (!uploadsPayload) {
+            historyElements.uploadList.innerHTML = `
+                <div class="history-empty">
+                    <strong>历史记录暂时不可用</strong>
+                    页面没能拿到这一时间窗口内的记录，请稍后再试。
+                </div>
+            `;
+            return;
+        }
+
+        const uploads = uploadsPayload.uploads || [];
+        if (!uploads.length) {
+            historyElements.uploadList.innerHTML = `
+                <div class="history-empty">
+                    <strong>这段时间内还没有学习记录</strong>
+                    你可以回到上传页或学习页继续输入内容，新的记录会自动出现在这里。
+                </div>
+            `;
+            return;
+        }
+
+        const grouped = groupUploadsByDate(uploads);
+        historyElements.uploadList.innerHTML = Object.entries(grouped).map(([date, items]) => `
+            <section class="history-day-group">
+                <div class="history-day-head">
+                    <div>
+                        <div class="history-day-title">${escapeHtml(formatDateLabel(date))}</div>
+                        <div class="history-day-subtitle">${escapeHtml(String(items.length))} 条记录</div>
+                    </div>
+                    <div class="history-day-pill">${escapeHtml(getRelativeDayLabel(date))}</div>
+                </div>
+                <div class="history-log-list">
+                    ${items.map(renderUploadItem).join('')}
+                </div>
+            </section>
+        `).join('');
+    }
+
+    function handleReviewTaskListClick(event) {
+        const trigger = event.target.closest('[data-review-open]');
+        if (!trigger) {
+            return;
+        }
+        openReviewTask(Number(trigger.getAttribute('data-review-open')));
+    }
+
+    function handleReviewDetailClick(event) {
+        const saveTrigger = event.target.closest('[data-review-save]');
+        if (saveTrigger) {
+            persistActiveReviewAnswers();
+            return;
+        }
+
+        const gradeTrigger = event.target.closest('[data-review-grade]');
+        if (gradeTrigger) {
+            gradeActiveReviewTask();
+            return;
+        }
+
+        const completeTrigger = event.target.closest('[data-review-complete]');
+        if (completeTrigger) {
+            completeActiveReviewTask(completeTrigger.getAttribute('data-review-complete'));
+        }
+    }
+
+    function handleReviewAnswerFocus(event) {
+        const input = event.target.closest('[data-review-position]');
+        if (!input) {
+            return;
+        }
+        historyState.currentResumePosition = Number(input.getAttribute('data-review-position') || 0);
+    }
+
+    function handleReviewAnswerInput(event) {
+        const textarea = event.target.closest('[data-review-question-id]');
+        if (!textarea) {
+            return;
+        }
+        historyState.currentResumePosition = Number(textarea.getAttribute('data-review-position') || 0);
+        if (historyState.autosaveTimer) {
+            window.clearTimeout(historyState.autosaveTimer);
+        }
+        historyState.autosaveTimer = window.setTimeout(() => {
+            persistActiveReviewAnswers({ silent: true });
+        }, 700);
+    }
+
+    function collectCurrentReviewAnswers() {
+        return Array.from(historyElements.reviewDetailPanel.querySelectorAll('[data-review-question-id]')).map((textarea) => ({
+            question_id: Number(textarea.getAttribute('data-review-question-id')),
+            position: Number(textarea.getAttribute('data-review-position') || 0),
+            user_answer: textarea.value || '',
+        }));
+    }
+
+    async function persistActiveReviewAnswers(options = {}) {
+        const detail = historyState.activeTaskDetail;
+        if (!detail) {
+            return;
+        }
+
+        const payload = {
+            resume_position: historyState.currentResumePosition || countAnsweredAnswers(),
+            answers: collectCurrentReviewAnswers(),
+        };
+
+        try {
+            const response = await fetch(`/api/history/review-task/${encodeURIComponent(detail.task_id)}/autosave`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
             });
-            
+            if (!response.ok) {
+                throw new Error(`autosave HTTP ${response.status}`);
+            }
+            historyState.activeTaskDetail = await response.json();
+            updateSaveNote(options.silent ? '已自动保存' : '已保存当前进度');
+            if (!options.silent) {
+                renderReviewPlan();
+                renderActiveReviewTask();
+            }
         } catch (error) {
-            console.error('加载日历失败:', error);
+            console.error('保存复习进度失败:', error);
+            updateSaveNote('保存失败，请重试');
         }
     }
 
-    // 辅助函数
-    function groupByDate(uploads) {
-        const grouped = {};
-        uploads.forEach(upload => {
-            const date = upload.date.split('T')[0];
-            if (!grouped[date]) grouped[date] = [];
-            grouped[date].push(upload);
-        });
-        return grouped;
+    async function gradeActiveReviewTask() {
+        const detail = historyState.activeTaskDetail;
+        if (!detail) {
+            return;
+        }
+
+        await persistActiveReviewAnswers({ silent: true });
+        updateSaveNote('正在提交批改...');
+        try {
+            const response = await fetch(`/api/history/review-task/${encodeURIComponent(detail.task_id)}/grade`, {
+                method: 'POST',
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.detail || `grade HTTP ${response.status}`);
+            }
+            historyState.activeTaskDetail = payload;
+            renderReviewPlan();
+            renderActiveReviewTask();
+            updateSaveNote(payload.overall_feedback || '批改完成，请选择本轮状态。');
+        } catch (error) {
+            console.error('批改失败:', error);
+            updateSaveNote(error && error.message ? error.message : '批改失败，请重试');
+        }
+    }
+
+    async function completeActiveReviewTask(selectedStatus) {
+        const detail = historyState.activeTaskDetail;
+        if (!detail) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/history/review-task/${encodeURIComponent(detail.task_id)}/complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected_status: selectedStatus }),
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.detail || `complete HTTP ${response.status}`);
+            }
+            historyState.activeTaskDetail = payload;
+            updateSaveNote(`已完成本轮复习，并标记为${reviewStatusLabel(selectedStatus)}。`);
+            await loadReviewPlan();
+            renderReviewPlan();
+            renderActiveReviewTask();
+        } catch (error) {
+            console.error('完成复习失败:', error);
+            updateSaveNote(error && error.message ? error.message : '完成复习失败');
+        }
+    }
+
+    async function downloadTodayReviewPdf() {
+        const budget = Number(historyElements.reviewBudget.value || 40);
+        historyElements.reviewPdfBtn.disabled = true;
+        historyElements.reviewPdfBtn.textContent = '导出中...';
+        try {
+            const response = await fetch(`/api/history/review-pdf?time_budget_minutes=${encodeURIComponent(budget)}`);
+            if (!response.ok) {
+                let message = 'PDF 导出失败';
+                try {
+                    const errorPayload = await response.json();
+                    message = errorPayload.detail || message;
+                } catch (_) {}
+                throw new Error(message);
+            }
+
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = 'today-review.pdf';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(objectUrl), 800);
+        } catch (error) {
+            console.error('导出 PDF 失败:', error);
+            alert(error && error.message ? error.message : 'PDF 导出失败');
+        } finally {
+            historyElements.reviewPdfBtn.disabled = false;
+            historyElements.reviewPdfBtn.textContent = '导出今日 PDF';
+        }
+    }
+
+    function countAnsweredAnswers() {
+        return collectCurrentReviewAnswers().filter((item) => String(item.user_answer || '').trim()).length;
+    }
+
+    function updateSaveNote(message) {
+        const note = document.getElementById('reviewSaveNote');
+        if (note) {
+            note.textContent = message;
+        }
+    }
+
+    function renderUploadItem(upload) {
+        const summary = upload.main_topic || upload.summary || '没有额外摘要';
+        const recordedAt = upload.recorded_at || '';
+        const hasChapterLink = isSelectableChapter(upload.chapter_id);
+        const timeLabel = recordedAt ? formatRecordedAt(recordedAt) : '未记录具体时间';
+        const chapterLabel = upload.chapter_title || '未识别章节';
+        const sourceLabel = upload.source_label || '学习记录';
+        const conceptCount = Number(upload.concept_count || 0);
+
+        return `
+            <article class="history-log-item">
+                <div>
+                    <div class="history-log-header">
+                        <span class="history-log-book">${escapeHtml(upload.book || '未知')}</span>
+                        <span class="history-log-separator">/</span>
+                        <span class="history-log-chapter">${escapeHtml(chapterLabel)}</span>
+                        <span class="history-badge">${escapeHtml(sourceLabel)}</span>
+                    </div>
+                    <div class="history-log-summary">${escapeHtml(summary)}</div>
+                    <div class="history-log-meta">
+                        <span>🕐 ${escapeHtml(timeLabel)}</span>
+                        <span>📚 ${escapeHtml(String(conceptCount))} 个知识点</span>
+                        <span>🗂️ ${escapeHtml(upload.id > 0 ? '原始上传' : '会话补全')}</span>
+                    </div>
+                </div>
+                ${hasChapterLink
+                    ? `<a href="/chapter/${encodeURIComponent(upload.chapter_id)}" class="history-log-action is-link">查看章节</a>`
+                    : `<span class="history-log-action is-muted">无章节定位</span>`
+                }
+            </article>
+        `;
+    }
+
+    function renderBreakdownList(container, distribution, emptyText) {
+        const entries = Object.entries(distribution || {}).sort((left, right) => right[1] - left[1]);
+        if (!entries.length) {
+            container.innerHTML = buildEmptyBlock(emptyText);
+            return;
+        }
+
+        const topEntries = entries.slice(0, 6);
+        const max = Math.max(...topEntries.map(([, count]) => count), 1);
+        container.innerHTML = topEntries.map(([name, count]) => `
+            <div class="history-breakdown-row">
+                <div class="history-breakdown-copy">
+                    <div class="history-breakdown-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                    <div class="history-breakdown-bar"><span style="width: ${(count / max) * 100}%"></span></div>
+                </div>
+                <div class="history-breakdown-count">${escapeHtml(String(count))}</div>
+            </div>
+        `).join('');
+    }
+
+    function groupUploadsByDate(uploads) {
+        return uploads.reduce((groups, upload) => {
+            const key = String(upload.date || '').split('T')[0];
+            if (!groups[key]) {
+                groups[key] = [];
+            }
+            groups[key].push(upload);
+            return groups;
+        }, {});
     }
 
     function isSelectableChapter(chapterId) {
@@ -222,37 +2087,101 @@
         return !!value && !['0', 'unknown_ch0', '未分类_ch0', '无法识别_ch0', 'uncategorized_ch0'].includes(value) && !value.endsWith('_ch0');
     }
 
-    function formatDate(dateStr) {
-        const date = new Date(dateStr);
+    function getWindowLabel(days) {
+        return `最近 ${days} 天`;
+    }
+
+    function getRelativeDayLabel(dateStr) {
+        const target = new Date(dateStr);
         const today = new Date();
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        
-        if (date.toDateString() === today.toDateString()) return '今天';
-        if (date.toDateString() === yesterday.toDateString()) return '昨天';
-        
-        return `${date.getMonth() + 1}月${date.getDate()}日`;
-    }
+        const yesterday = new Date();
+        yesterday.setDate(today.getDate() - 1);
 
-    function formatDateShort(dateStr) {
-        const date = new Date(dateStr);
-        return `${date.getMonth() + 1}/${date.getDate()}`;
-    }
-
-    function formatTime(dateStr) {
-        return dateStr.split('T')[1]?.substring(0, 5) || '';
-    }
-
-    function calculateStreak(timeline) {
-        let streak = 0;
-        for (let i = timeline.length - 1; i >= 0; i--) {
-            if (timeline[i].has_study) {
-                streak++;
-            } else if (streak > 0) {
-                break;
-            }
+        if (target.toDateString() === today.toDateString()) {
+            return '今天';
         }
-        return streak;
+        if (target.toDateString() === yesterday.toDateString()) {
+            return '昨天';
+        }
+        return `${Math.max(0, Math.round((today - target) / 86400000))} 天前`;
+    }
+
+    function formatDateLabel(dateStr, options = {}) {
+        if (!dateStr) {
+            return '暂无';
+        }
+
+        const date = new Date(dateStr);
+        if (Number.isNaN(date.getTime())) {
+            return String(dateStr);
+        }
+
+        const formatter = new Intl.DateTimeFormat('zh-CN', options.includeYear
+            ? { year: 'numeric', month: 'long', day: 'numeric' }
+            : { month: 'long', day: 'numeric' }
+        );
+        return formatter.format(date);
+    }
+
+    function formatRecordedAt(dateTimeStr) {
+        const date = new Date(dateTimeStr);
+        if (Number.isNaN(date.getTime())) {
+            return '未记录具体时间';
+        }
+
+        return new Intl.DateTimeFormat('zh-CN', {
+            month: 'numeric',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        }).format(date);
+    }
+
+    function reviewStatusLabel(status) {
+        const mapping = {
+            pending: '待复习',
+            due: '待复习',
+            weak: '薄弱',
+            normal: '正常',
+            mastered: '掌握',
+            in_progress: '复习中',
+            awaiting_choice: '待选择',
+            completed: '已完成本轮',
+        };
+        return mapping[String(status || '').trim()] || '待复习';
+    }
+
+    function reviewStatusClass(status) {
+        const value = String(status || '').trim();
+        if (value === 'weak') return 'is-weak';
+        if (value === 'mastered') return 'is-mastered';
+        if (value === 'normal') return 'is-normal';
+        if (value === 'in_progress' || value === 'awaiting_choice') return 'is-progress';
+        return '';
+    }
+
+    function formatCount(value) {
+        return Number(value || 0).toLocaleString('zh-CN');
+    }
+
+    function formatDecimal(value) {
+        return Number(value || 0).toLocaleString('zh-CN', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 1,
+        });
+    }
+
+    function buildEmptyBlock(message) {
+        return `<div class="history-empty">${escapeHtml(message)}</div>`;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 </script>
 {% endblock %}

@@ -17,7 +17,6 @@ from routers.learning_tracking import get_progress_board
 from services.agent_actions import list_action_tool_definitions
 from services.data_identity import (
     build_device_scope_aliases,
-    ensure_learning_identity_schema,
     resolve_query_identity,
 )
 from services.openmanus_bridge import run_openmanus_consult
@@ -1033,9 +1032,6 @@ async def execute_agent_tool(
 ) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
     started = perf_counter()
     overrides = overrides or {}
-    if tool_name not in {"search_openviking_context", "consult_openmanus"}:
-        ensure_learning_identity_schema()
-
     if tool_name == "get_wrong_answers":
         tool_args, result = await _run_wrong_answers(db, overrides, user_id=user_id, device_id=device_id)
     elif tool_name == "get_learning_sessions":

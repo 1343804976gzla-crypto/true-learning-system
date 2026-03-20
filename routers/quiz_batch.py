@@ -13,6 +13,7 @@ import hashlib
 from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel
 from sqlalchemy import desc, func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from api_contracts import (
@@ -48,6 +49,32 @@ _exam_cache = {}
 
 # 单独存储用于细节练习的数据（不删除）
 _detail_cache = {}
+
+
+def _build_question_concepts_safely(
+    db: Session,
+    questions: List[Dict[str, Any]],
+    ensure_callback,
+) -> Dict[int, Optional[ConceptMastery]]:
+    concepts: Dict[int, Optional[ConceptMastery]] = {}
+    for index, question in enumerate(questions):
+        try:
+            concepts[index] = ensure_callback(question, index)
+        except SQLAlchemyError as exc:
+            db.rollback()
+            concepts[index] = None
+            print(f"[Exam] 跳过第{index + 1}题的概念持久化: {exc}")
+    return concepts
+
+
+def _commit_batch_submit_safely(db: Session, label: str) -> bool:
+    try:
+        db.commit()
+        return True
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(f"[Exam] {label} failed, returning grading result anyway: {exc}")
+        return False
 
 
 def _can_use_legacy_cache_fallback() -> bool:
@@ -575,7 +602,7 @@ async def confirm_chapter(exam_id: str, request: ConfirmChapterRequest, db: Sess
     confirmed_chapter_id = _normalize_confirmed_chapter_id(request.chapter_id)
     exam["chapter_id"] = confirmed_chapter_id
     _upsert_batch_exam_state(db, exam_id=exam_id, exam=exam, mark_submitted=False)
-    db.commit()
+    _commit_batch_submit_safely(db, "confirm chapter state")
     _exam_cache[exam_id] = exam
     print(f"[Exam] 章节确认: exam={exam_id}, chapter={confirmed_chapter_id or '未确认'}")
     return {"success": True, "chapter_id": confirmed_chapter_id}
@@ -776,8 +803,11 @@ async def submit_exam(
     )
     db.add(quiz_session)
 
-    def ensure_concept_for_question(q: dict, q_index: int) -> ConceptMastery:
-        target_chapter_id = session_chapter_id or "uncategorized_ch0"
+    def ensure_concept_for_question(q: dict, q_index: int) -> Optional[ConceptMastery]:
+        if not session_chapter_id:
+            return None
+
+        target_chapter_id = session_chapter_id
 
         chapter = db.query(Chapter).filter(Chapter.id == target_chapter_id).first()
         if not chapter:
@@ -843,10 +873,7 @@ async def submit_exam(
 
     severity_order = {"normal": 0, "landmine": 1, "stubborn": 2, "critical": 3}
 
-    question_concepts = {
-        i: ensure_concept_for_question(question, i)
-        for i, question in enumerate(questions)
-    }
+    question_concepts = _build_question_concepts_safely(db, questions, ensure_concept_for_question)
 
     # 错题录入：使用 WrongAnswerV2 系统（带指纹去重）
     for i, detail in enumerate(result["details"]):
@@ -878,7 +905,7 @@ async def submit_exam(
 
         question_text = question.get("question", "")
         fingerprint = make_fingerprint(question_text)
-        wrong_chapter_id = session_chapter_id or "uncategorized_ch0"
+        wrong_chapter_id = session_chapter_id or None
         now = datetime.now()
 
         existing = db.query(WrongAnswerV2).filter(
@@ -991,7 +1018,7 @@ async def submit_exam(
             else:
                 # 不存在：创建新错题
                 concept_id = question_concepts[i].concept_id
-                wrong_chapter_id = session_chapter_id or "uncategorized_ch0"
+                wrong_chapter_id = session_chapter_id or None
 
                 # 判断初始严重度
                 if detail.get("confidence") == "sure":
@@ -1023,21 +1050,29 @@ async def submit_exam(
                 db.add(wrong)
                 print(f"[WrongAnswer] 新增错题: {fingerprint[:8]}... (严重度: {severity})")
 
-    db.commit()
     exam["chapter_id"] = session_chapter_id or exam.get("chapter_id", "")
     exam["exam_wrong_questions"] = exam_wrong_questions
     exam["fuzzy_options"] = exam_fuzzy_options
     exam["score"] = result.get("score")
     exam["wrong_count"] = result.get("wrong_count")
-    _upsert_batch_exam_state(db, exam_id=exam_id, exam=exam, mark_submitted=True)
-
     _detail_cache[exam_id] = exam
 
     if exam_id in _exam_cache:
         del _exam_cache[exam_id]
-    db.commit()
-    
+
+    detail_persisted = _commit_batch_submit_safely(db, "batch submit detail persistence")
+    state_persisted = False
+    if detail_persisted:
+        try:
+            _upsert_batch_exam_state(db, exam_id=exam_id, exam=exam, mark_submitted=True)
+            state_persisted = _commit_batch_submit_safely(db, "batch submit state persistence")
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print(f"[Exam] batch submit state preparation failed: {exc}")
+
     print(f"[Exam] 批改完成: {result['score']}分")
+    if not (detail_persisted and state_persisted):
+        print(f"[Exam] batch submit completed with partial persistence: {result['score']}")
     return result
 
 @router.get("/session/{exam_id}", response_model=BatchExamSessionResponse)
