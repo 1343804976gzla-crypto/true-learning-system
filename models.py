@@ -22,22 +22,27 @@ from sqlalchemy.orm import relationship
 from database.domains import (
     CONTENT_DATABASE_URL,
     CORE_DATABASE_URL,
+    LEGACY_DATABASE_URL,
     RUNTIME_DATABASE_URL,
     AppSessionLocal,
     ContentBase,
     CoreBase,
+    LegacyBase,
     RuntimeBase,
     content_engine,
     core_engine,
     get_db,
+    legacy_engine,
     runtime_engine,
 )
 
 DATABASE_URL = CORE_DATABASE_URL
 CONTENT_DB_URL = CONTENT_DATABASE_URL
+LEGACY_DB_URL = LEGACY_DATABASE_URL
 RUNTIME_DB_URL = RUNTIME_DATABASE_URL
 engine = core_engine
 content_db_engine = content_engine
+legacy_db_engine = legacy_engine
 runtime_db_engine = runtime_engine
 SessionLocal = AppSessionLocal
 Base = CoreBase
@@ -153,7 +158,7 @@ class Variation(RuntimeBase):
     created_at = Column(DateTime, default=datetime.now)
 
 
-class WrongAnswer(CoreBase):
+class WrongAnswer(LegacyBase):
     __tablename__ = "wrong_answers"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -194,6 +199,7 @@ class QuizSession(RuntimeBase):
 def init_db() -> None:
     CoreBase.metadata.create_all(bind=engine)
     ContentBase.metadata.create_all(bind=content_db_engine)
+    LegacyBase.metadata.create_all(bind=legacy_db_engine)
     RuntimeBase.metadata.create_all(bind=runtime_db_engine)
     print("Database initialized")
 

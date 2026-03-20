@@ -20,6 +20,7 @@
 
 - `C:\Users\35456\true-learning-system\data\learning.db`
 - `C:\Users\35456\true-learning-system\data\content_knowledge.db`
+- `C:\Users\35456\true-learning-system\data\legacy_compat.db`
 - `C:\Users\35456\true-learning-system\data\agent.db`
 - `C:\Users\35456\true-learning-system\data\learning_runtime.db`
 - `C:\Users\35456\true-learning-system\data\wrong_answer_review.db`
@@ -27,7 +28,7 @@
 当前实际分布：
 
 - `learning.db`
-  - legacy 兼容表
+  - shadow 历史库
 - `content_knowledge.db`
   - `daily_uploads`
   - `chapters`
@@ -45,6 +46,8 @@
   - `test_records`
   - `feynman_sessions`
   - `variations`
+- `legacy_compat.db`
+  - `wrong_answers`
 - `agent.db`
   - `agent_*`
 - `wrong_answer_review.db`
@@ -54,16 +57,17 @@
   - `daily_review_paper_items`
   - `chapter_review_*`
 
-也就是说，当前四个主业务域都已完成物理拆分：
+也就是说，当前四个主业务域都已完成物理拆分，并补了一个 legacy 兼容库：
 
 1. Content 域已拆出
 2. Agent 域已拆出
 3. Modern Review 域已拆出
 4. Runtime 域已拆出
+5. Legacy 兼容表已隔离到 `legacy_compat.db`
 
 尚未拆出的仍主要是：
 
-- 旧兼容错题表 `wrong_answers`
+- `learning.db` 中的 shadow 历史副本
 
 ## 3. 功能总览与建议拆库总表
 

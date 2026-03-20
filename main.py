@@ -30,6 +30,7 @@ class UTF8JSONResponse(JSONResponse):
     media_type = "application/json; charset=utf-8"
 
 # 导入模型
+from database.audit import ensure_audit_tables
 from models import (
     init_db, get_db, DailyUpload, Chapter, ConceptMastery,
     TestRecord, FeynmanSession, ConceptLink, Variation, DATABASE_URL
@@ -133,6 +134,7 @@ async def startup():
             return
 
         init_db()
+        ensure_audit_tables()
         ensure_agent_schema()
         create_learning_tracking_tables()
         create_knowledge_upload_tables()
