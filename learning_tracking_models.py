@@ -13,9 +13,9 @@ import enum
 import hashlib
 
 # 复用现有数据库域
-from database.domains import CoreBase, ReviewBase, core_engine, review_engine
+from database.domains import ReviewBase, RuntimeBase, review_engine, runtime_engine
 
-Base = CoreBase
+Base = RuntimeBase
 
 
 INVALID_CHAPTER_IDS = {
@@ -56,7 +56,7 @@ class ActivityType(str, enum.Enum):
     NAVIGATE = "navigate"               # 页面导航
 
 
-class LearningSession(Base):
+class LearningSession(RuntimeBase):
     """
     学习会话 - 记录一次完整的学习过程
     包含整卷测试或细节练习的完整轨迹
@@ -113,7 +113,7 @@ class LearningSession(Base):
     question_records = relationship("QuestionRecord", back_populates="session", cascade="all, delete-orphan")
 
 
-class LearningActivity(Base):
+class LearningActivity(RuntimeBase):
     """
     学习活动 - 记录学习过程中的每个动作
     高粒度的时间轴记录
@@ -144,7 +144,7 @@ class LearningActivity(Base):
     session = relationship("LearningSession", back_populates="activities")
 
 
-class QuestionRecord(Base):
+class QuestionRecord(RuntimeBase):
     """
     题目记录 - 记录每道题的详细答题过程
     """
@@ -184,7 +184,7 @@ class QuestionRecord(Base):
     session = relationship("LearningSession", back_populates="question_records")
 
 
-class DailyLearningLog(Base):
+class DailyLearningLog(RuntimeBase):
     """
     每日学习日志 - 汇总每天的学习情况
     """
@@ -222,7 +222,7 @@ class DailyLearningLog(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
-class LearningInsight(Base):
+class LearningInsight(RuntimeBase):
     """
     学习洞察 - AI分析的学习建议
     """
@@ -564,7 +564,7 @@ class ChapterReviewTaskQuestion(ReviewBase):
     task = relationship("ChapterReviewTask", back_populates="questions")
 
 
-class BatchExamState(Base):
+class BatchExamState(RuntimeBase):
     """
     鎵归噺璇曞嵎鐢熸垚鐘舵€佸揩鐓э紝鐢ㄤ簬鐢熸垚鍚庡埌鎻愪氦鍓嶇殑鎸佷箙鍖栦笌 actor 闅旂
     """
@@ -591,7 +591,7 @@ class BatchExamState(Base):
 # 创建表的函数
 def create_learning_tracking_tables():
     """创建学习轨迹记录相关的表"""
-    CoreBase.metadata.create_all(bind=core_engine, tables=[
+    RuntimeBase.metadata.create_all(bind=runtime_engine, tables=[
         LearningSession.__table__,
         LearningActivity.__table__,
         QuestionRecord.__table__,

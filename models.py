@@ -1,5 +1,5 @@
 """
-True Learning System core SQLAlchemy models.
+True Learning System SQLAlchemy models.
 """
 
 from datetime import date, datetime
@@ -19,10 +19,21 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
-from database.domains import CORE_DATABASE_URL, AppSessionLocal, CoreBase, core_engine, get_db
+from database.domains import (
+    CORE_DATABASE_URL,
+    RUNTIME_DATABASE_URL,
+    AppSessionLocal,
+    CoreBase,
+    RuntimeBase,
+    core_engine,
+    get_db,
+    runtime_engine,
+)
 
 DATABASE_URL = CORE_DATABASE_URL
+RUNTIME_DB_URL = RUNTIME_DATABASE_URL
 engine = core_engine
+runtime_db_engine = runtime_engine
 SessionLocal = AppSessionLocal
 Base = CoreBase
 
@@ -70,17 +81,16 @@ class ConceptMastery(Base):
     next_review = Column(Date, index=True)
 
     chapter = relationship("Chapter", back_populates="concept_mastery_records")
-    test_records = relationship("TestRecord", back_populates="concept")
     wrong_answers = relationship("WrongAnswer", back_populates="concept")
 
 
-class TestRecord(Base):
+class TestRecord(RuntimeBase):
     __tablename__ = "test_records"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, nullable=True, index=True)
     device_id = Column(String, nullable=True, index=True)
-    concept_id = Column(String, ForeignKey("concept_mastery.concept_id"))
+    concept_id = Column(String, nullable=True, index=True)
     test_type = Column(String)
 
     ai_question = Column(Text)
@@ -98,14 +108,12 @@ class TestRecord(Base):
     score = Column(Integer)
     tested_at = Column(DateTime, default=datetime.now)
 
-    concept = relationship("ConceptMastery", back_populates="test_records")
 
-
-class FeynmanSession(Base):
+class FeynmanSession(RuntimeBase):
     __tablename__ = "feynman_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    concept_id = Column(String, nullable=False)
+    concept_id = Column(String, nullable=False, index=True)
     concept_name = Column(String)
     dialogue = Column(JSON)
     passed = Column(Boolean, default=False)
@@ -129,7 +137,7 @@ class ConceptLink(Base):
     )
 
 
-class Variation(Base):
+class Variation(RuntimeBase):
     __tablename__ = "variations"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -166,12 +174,12 @@ class WrongAnswer(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
-class QuizSession(Base):
+class QuizSession(RuntimeBase):
     __tablename__ = "quiz_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
     session_type = Column(String, default="practice")
-    chapter_id = Column(String, ForeignKey("chapters.id"))
+    chapter_id = Column(String, nullable=True, index=True)
     questions = Column(JSON)
     answers = Column(JSON)
     total_questions = Column(Integer, default=10)
@@ -180,11 +188,10 @@ class QuizSession(Base):
     started_at = Column(DateTime, default=datetime.now)
     completed_at = Column(DateTime)
 
-    chapter = relationship("Chapter")
-
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    RuntimeBase.metadata.create_all(bind=runtime_db_engine)
     print("Database initialized")
 
 

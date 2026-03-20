@@ -457,16 +457,18 @@ async def _run_learning_sessions(
         query = query.filter(LearningSession.chapter_id.in_(chapter_ids))
     if query_text:
         like = f"%{query_text}%"
-        query = (
-            query.outerjoin(Chapter, LearningSession.chapter_id == Chapter.id)
-            .filter(
-                or_(
-                    LearningSession.title.ilike(like),
-                    LearningSession.knowledge_point.ilike(like),
-                    LearningSession.uploaded_content.ilike(like),
-                    Chapter.chapter_title.ilike(like),
-                    Chapter.book.ilike(like),
-                )
+        chapter_match_ids = [
+            chapter.id
+            for chapter in db.query(Chapter.id)
+            .filter(or_(Chapter.chapter_title.ilike(like), Chapter.book.ilike(like)))
+            .all()
+        ]
+        query = query.filter(
+            or_(
+                LearningSession.title.ilike(like),
+                LearningSession.knowledge_point.ilike(like),
+                LearningSession.uploaded_content.ilike(like),
+                LearningSession.chapter_id.in_(chapter_match_ids) if chapter_match_ids else false(),
             )
         )
 

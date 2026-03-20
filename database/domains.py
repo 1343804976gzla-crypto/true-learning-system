@@ -76,20 +76,26 @@ CORE_DATABASE_URL = _resolve_database_url(
 AGENT_DATABASE_URL = _normalize_database_url(
     os.getenv("AGENT_DATABASE_PATH") or os.getenv("AGENT_DATABASE_URL") or CORE_DATABASE_URL
 )
+RUNTIME_DATABASE_URL = _normalize_database_url(
+    os.getenv("RUNTIME_DATABASE_PATH") or os.getenv("RUNTIME_DATABASE_URL") or CORE_DATABASE_URL
+)
 REVIEW_DATABASE_URL = _normalize_database_url(
     os.getenv("REVIEW_DATABASE_PATH") or os.getenv("REVIEW_DATABASE_URL") or CORE_DATABASE_URL
 )
 
 CoreBase = declarative_base()
 AgentBase = declarative_base()
+RuntimeBase = declarative_base()
 ReviewBase = declarative_base()
 
 core_engine = _create_sqlite_engine(CORE_DATABASE_URL)
 agent_engine = _create_sqlite_engine(AGENT_DATABASE_URL)
+runtime_engine = _create_sqlite_engine(RUNTIME_DATABASE_URL)
 review_engine = _create_sqlite_engine(REVIEW_DATABASE_URL)
 
 CoreSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=core_engine)
 AgentSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=agent_engine)
+RuntimeSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=runtime_engine)
 ReviewSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=review_engine)
 
 
@@ -102,6 +108,8 @@ class RoutedDomainSession(Session):
             metadata = getattr(table, "metadata", None)
             if metadata is AgentBase.metadata:
                 return agent_engine
+            if metadata is RuntimeBase.metadata:
+                return runtime_engine
             if metadata is ReviewBase.metadata:
                 return review_engine
             if metadata is CoreBase.metadata:
@@ -112,6 +120,8 @@ class RoutedDomainSession(Session):
             metadata = getattr(from_clause, "metadata", None)
             if metadata is AgentBase.metadata:
                 return agent_engine
+            if metadata is RuntimeBase.metadata:
+                return runtime_engine
             if metadata is ReviewBase.metadata:
                 return review_engine
             if metadata is CoreBase.metadata:
@@ -148,4 +158,8 @@ def get_agent_db() -> Iterator[Session]:
 
 
 def get_review_db() -> Iterator[Session]:
+    yield from _session_dependency(AppSessionLocal)
+
+
+def get_runtime_db() -> Iterator[Session]:
     yield from _session_dependency(AppSessionLocal)

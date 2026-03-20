@@ -11,7 +11,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as OrmSession
 
-from database.domains import agent_engine, core_engine, review_engine
+from database.domains import agent_engine, core_engine, review_engine, runtime_engine
 
 DEVICE_ID_HEADER = "x-tls-device-id"
 USER_ID_HEADER = "x-tls-user-id"
@@ -28,20 +28,22 @@ _SINGLE_USER_DEVICE_CACHE_LOCK = Lock()
 _CORE_IDENTITY_TABLES = (
     "daily_uploads",
     "concept_mastery",
+)
+_RUNTIME_IDENTITY_TABLES = (
     "test_records",
     "learning_sessions",
     "learning_activities",
     "question_records",
+    "daily_learning_logs",
+    "batch_exam_states",
 )
 _REVIEW_IDENTITY_TABLES = (
     "wrong_answers_v2",
     "wrong_answer_retries",
 )
 _SINGLE_USER_DEVICE_TABLES = {
-    core_engine: _CORE_IDENTITY_TABLES + (
-        "daily_learning_logs",
-        "batch_exam_states",
-    ),
+    core_engine: _CORE_IDENTITY_TABLES,
+    runtime_engine: _RUNTIME_IDENTITY_TABLES,
     review_engine: _REVIEW_IDENTITY_TABLES + (
         "daily_review_papers",
     ),
@@ -51,6 +53,7 @@ _SINGLE_USER_DEVICE_TABLES = {
 }
 _IDENTITY_TABLES = {
     core_engine: _CORE_IDENTITY_TABLES,
+    runtime_engine: _RUNTIME_IDENTITY_TABLES,
     review_engine: _REVIEW_IDENTITY_TABLES + (
         "daily_review_papers",
     ),
@@ -565,7 +568,7 @@ def ensure_learning_identity_schema() -> None:
 
                         if current_engine is review_engine:
                             _ensure_daily_review_paper_schema(connection)
-                        if current_engine is core_engine:
+                        if current_engine is runtime_engine:
                             _ensure_daily_learning_log_schema(connection)
 
                     _IDENTITY_SCHEMA_READY = True
