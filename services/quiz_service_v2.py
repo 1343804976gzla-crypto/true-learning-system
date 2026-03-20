@@ -17,14 +17,10 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Set
 from services.ai_client import get_ai_client
+from services.llm_audit import create_llm_call_context
+from services.llmlingua_compactor import get_quiz_llmlingua_compactor
 from utils.chapter_catalog import clean_batch_chapter_rows, chapter_number_sort_key
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
 logger = logging.getLogger(__name__)
 
 INVALID_CHAPTER_IDS = {"", "0", "unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0", "uncategorized_ch0"}
@@ -35,6 +31,7 @@ class QuizService:
 
     def __init__(self):
         self.ai = get_ai_client()
+        self.prompt_compactor = get_quiz_llmlingua_compactor()
         max_concurrency_raw = (os.getenv("QUIZ_SEGMENT_MAX_CONCURRENCY") or "2").strip()
         try:
             self.segment_max_concurrency = max(1, int(max_concurrency_raw))
@@ -100,6 +97,38 @@ class QuizService:
         print(f"[QuizService] 缓存系统: {'启用' if self.cache_enabled else '禁用'} (TTL={self.cache_ttl_seconds}秒)")
         print(f"[QuizService] 分段缓存: {'启用' if self.segment_cache_enabled else '禁用'}")
         print(f"[QuizService] 主题校验: {'启用' if self.topic_check_enabled else '禁用'} (阈值={self.topic_overlap_threshold})")
+
+    def _prepare_prompt_source_content(self, content: str) -> Tuple[str, Dict[str, Any]]:
+        compaction = self.prompt_compactor.compact_for_quiz(content)
+        metadata = compaction.as_metadata()
+        logger.info(
+            "[QuizService] prompt compaction strategy=%s applied=%s raw_chars=%s final_chars=%s saved_tokens=%s",
+            compaction.strategy,
+            compaction.applied,
+            compaction.raw_chars,
+            compaction.final_chars,
+            compaction.saved_tokens,
+        )
+        return compaction.final_text if compaction.applied else content, metadata
+
+    def _merge_compaction_summaries(self, items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not items:
+            return None
+
+        applied = [item for item in items if item.get("enabled")]
+        total_raw = sum(int(item.get("raw_chars") or 0) for item in items)
+        total_final = sum(int(item.get("final_chars") or 0) for item in items)
+        total_saved = sum(int(item.get("saved_tokens") or 0) for item in items)
+        return {
+            "enabled": bool(applied),
+            "applied_segments": len(applied),
+            "total_segments": len(items),
+            "raw_chars": total_raw,
+            "final_chars": total_final,
+            "saved_tokens": total_saved,
+            "strategies": sorted({str(item.get("strategy") or "") for item in items if item.get("strategy")}),
+            "models": sorted({str(item.get("model") or "") for item in items if item.get("model")}),
+        }
 
     def _extract_keywords(self, text: str) -> Set[str]:
         """
@@ -1057,6 +1086,7 @@ class QuizService:
         all_questions = []
         chapter_prediction = None
         seen_key_points = set()  # 跨段知识点去重
+        compaction_summaries: List[Dict[str, Any]] = []
 
         for i, result in enumerate(results):
             segment_idx = i + 1
@@ -1070,6 +1100,8 @@ class QuizService:
             if not result or not isinstance(result, dict):
                 print(f"[QuizService] ⚠️ 第 {segment_idx} 段返回无效结果")
                 continue
+            if isinstance(result.get("_compaction"), dict):
+                compaction_summaries.append(dict(result["_compaction"]))
 
             # 收集题目（跨段 key_point 去重）
             segment_questions = result.get("questions", [])
@@ -1121,6 +1153,8 @@ class QuizService:
                     q for q in refill_result.get("questions", [])
                     if self._is_valid_question(q, 0) and not self._is_placeholder_question(q)
                 ]
+                if isinstance(refill_result.get("_compaction"), dict):
+                    compaction_summaries.append(dict(refill_result["_compaction"]))
                 # 补生题也要跨段 key_point 去重
                 added = 0
                 for q in refill_questions:
@@ -1166,6 +1200,15 @@ class QuizService:
         if not chapter_prediction:
             chapter_prediction = self._infer_chapter_prediction(uploaded_content)
 
+        merged_compaction = self._merge_compaction_summaries(compaction_summaries)
+        summary = {
+            "coverage": f"覆盖 {len(knowledge_points)} 个知识点",
+            "focus": "基础知识和临床应用",
+            "advice": "注意辨析易混淆概念"
+        }
+        if merged_compaction is not None:
+            summary["context_compaction"] = merged_compaction
+
         return {
             "paper_title": "医学考研模拟试卷（分段生成）",
             "total_questions": num_questions,
@@ -1173,11 +1216,7 @@ class QuizService:
             "difficulty_distribution": actual_distribution,
             "questions": all_questions[:num_questions],
             "knowledge_points": knowledge_points,
-            "summary": {
-                "coverage": f"覆盖 {len(knowledge_points)} 个知识点",
-                "focus": "基础知识和临床应用",
-                "advice": "注意辨析易混淆概念"
-            }
+            "summary": summary,
         }
 
     async def _generate_single_paper(
@@ -1198,6 +1237,13 @@ class QuizService:
 
         # 获取章节目录（优先匹配当前内容的科目）
         chapter_catalog = self._get_chapter_catalog(content)
+        prompt_content, compaction_meta = self._prepare_prompt_source_content(content)
+        content_block_title = "知识导向摘要" if compaction_meta.get("quiz_compaction_applied") else "讲课内容"
+        content_block_note = (
+            "以下材料由原始讲课内容整理而来，目标是尽量保留全部知识点与考点关系。你必须只依据该材料命题，不得补充材料外的新知识点。"
+            if compaction_meta.get("quiz_compaction_applied")
+            else ""
+        )
 
         # 计算各难度题数
         basic = int(num_questions * difficulty_distribution["基础"])
@@ -1235,8 +1281,8 @@ class QuizService:
 - A3型：{max(2, num_questions//5)}道（病例组）
 - X型：{max(1, num_questions//10)}道（多选）
 
-【讲课内容】
-{content}
+【{content_block_title}】{content_block_note}
+{prompt_content}
 
 【输出格式示例】
 {{
@@ -1309,12 +1355,49 @@ class QuizService:
             logger.info(f"max_tokens: {max_output_tokens}")
             logger.info(f"预计每个模型分配: {ai_timeout // 4}s (Heavy池4个模型)")
 
-            result = await self.ai.generate_json(prompt, schema, max_tokens=max_output_tokens, temperature=0.3, use_heavy=True, timeout=ai_timeout)
+            audit_context = create_llm_call_context(
+                call_kind="json",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_output_tokens,
+                temperature=0.3,
+                timeout=ai_timeout,
+                use_heavy=True,
+                preferred_provider=None,
+                preferred_model=None,
+                operation="services.quiz_service_v2:_generate_single_paper",
+                metadata=compaction_meta,
+            )
+            result = await self.ai.generate_json(
+                prompt,
+                schema,
+                max_tokens=max_output_tokens,
+                temperature=0.3,
+                use_heavy=True,
+                timeout=ai_timeout,
+                audit_context=audit_context,
+            )
 
             elapsed = time.time() - start_time
             logger.info(f"AI 调用完成，耗时: {elapsed:.1f}s")
             logger.info(f"AI 返回结果类型: {type(result)}")
             logger.info(f"AI 返回题目数: {len(result.get('questions', []))}")
+            if not isinstance(result.get("summary"), dict):
+                result["summary"] = {}
+            result["summary"]["context_compaction"] = {
+                "enabled": bool(compaction_meta.get("quiz_compaction_applied")),
+                "strategy": compaction_meta.get("quiz_compaction_strategy"),
+                "raw_chars": compaction_meta.get("quiz_compaction_raw_chars"),
+                "final_chars": compaction_meta.get("quiz_compaction_final_chars"),
+                "saved_tokens": compaction_meta.get("quiz_compaction_saved_tokens"),
+            }
+            result["_compaction"] = {
+                "enabled": bool(compaction_meta.get("quiz_compaction_applied")),
+                "strategy": compaction_meta.get("quiz_compaction_strategy"),
+                "raw_chars": compaction_meta.get("quiz_compaction_raw_chars"),
+                "final_chars": compaction_meta.get("quiz_compaction_final_chars"),
+                "saved_tokens": compaction_meta.get("quiz_compaction_saved_tokens"),
+                "model": compaction_meta.get("quiz_compaction_model"),
+            }
 
             # 检查第一题选项内容（调试用）
             if result.get("questions") and len(result.get("questions", [])) > 0:
