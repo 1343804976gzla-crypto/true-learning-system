@@ -31,6 +31,7 @@ from api_contracts import (
     TrackingSessionListResponse,
     TrackingStatsResponse,
 )
+from database.audit import log_audit_change, model_to_audit_dict
 from models import get_db, Chapter, DailyUpload
 from learning_tracking_models import (
     LearningSession, LearningActivity, QuestionRecord,
@@ -558,7 +559,19 @@ def _ensure_daily_upload_snapshot(
     )
     if existing is not None:
         if not existing.ai_extracted:
+            before_snapshot = model_to_audit_dict(existing)
             existing.ai_extracted = ai_extracted
+            db.flush([existing])
+            log_audit_change(
+                db=db,
+                target=existing,
+                action="update",
+                before=before_snapshot,
+                after=existing,
+                actor=actor,
+                origin_event_type="tracking.daily_upload_snapshot",
+                origin_public_id=str(existing.id),
+            )
         return existing
 
     upload_record = DailyUpload(
@@ -567,6 +580,16 @@ def _ensure_daily_upload_snapshot(
         ai_extracted=ai_extracted,
     )
     db.add(upload_record)
+    db.flush([upload_record])
+    log_audit_change(
+        db=db,
+        target=upload_record,
+        action="create",
+        after=upload_record,
+        actor=actor,
+        origin_event_type="tracking.daily_upload_snapshot",
+        origin_public_id=str(upload_record.id),
+    )
     return upload_record
 
 
@@ -935,7 +958,26 @@ async def start_learning_session(
         relative_time_ms=0
     )
     db.add(activity)
-    
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=learning_session,
+        action="create",
+        after=learning_session,
+        actor=actor,
+        public_id=session_id,
+        origin_event_type="tracking.session.start",
+        origin_public_id=session_id,
+    )
+    log_audit_change(
+        db=db,
+        target=activity,
+        action="create",
+        after=activity,
+        actor=actor,
+        origin_event_type="tracking.session.start",
+        origin_public_id=session_id,
+    )
     db.commit()
     
     logger.info("[LEARNING_SESSION] started session_id=%s type=%s", session_id, body.session_type)
@@ -974,6 +1016,17 @@ async def record_activity(
         relative_time_ms=relative_ms
     )
     db.add(activity)
+    actor = resolve_request_actor_scope(user_id=session.user_id, device_id=session.device_id)
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=activity,
+        action="create",
+        after=activity,
+        actor=actor,
+        origin_event_type="tracking.activity.record",
+        origin_public_id=session_id,
+    )
     db.commit()
     
     return {"success": True, "activity_id": activity.id}
@@ -1011,11 +1064,18 @@ async def record_question_answer(
     ).all()
 
     updated = bool(existing_records)
+    actor = resolve_request_actor_scope(user_id=session.user_id, device_id=session.device_id)
+    before_session_snapshot = model_to_audit_dict(session)
     question_record = existing_records[0] if existing_records else QuestionRecord(
         session_id=session_id,
         question_index=body.question_index,
         first_viewed_at=now,
     )
+    before_record_snapshot = model_to_audit_dict(question_record) if updated else None
+    stale_record_snapshots = [
+        (stale_record, model_to_audit_dict(stale_record))
+        for stale_record in existing_records[1:]
+    ]
     if not existing_records:
         db.add(question_record)
 
@@ -1040,6 +1100,38 @@ async def record_question_answer(
 
     db.flush()
     _sync_session_question_stats(session, db)
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=question_record,
+        action="update" if updated else "create",
+        before=before_record_snapshot,
+        after=question_record,
+        actor=actor,
+        origin_event_type="tracking.question.record",
+        origin_public_id=session_id,
+    )
+    log_audit_change(
+        db=db,
+        target=session,
+        action="update",
+        before=before_session_snapshot,
+        after=session,
+        actor=actor,
+        public_id=session_id,
+        origin_event_type="tracking.question.record",
+        origin_public_id=session_id,
+    )
+    for stale_record, stale_snapshot in stale_record_snapshots:
+        log_audit_change(
+            db=db,
+            target=stale_record,
+            action="delete",
+            before=stale_snapshot,
+            actor=actor,
+            origin_event_type="tracking.question.deduplicate",
+            origin_public_id=session_id,
+        )
     db.commit()
     
     return {"success": True, "record_id": question_record.id, "updated": updated}
@@ -1058,6 +1150,8 @@ async def complete_learning_session(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     
+    actor = resolve_request_actor_scope(user_id=session.user_id, device_id=session.device_id)
+    before_session_snapshot = model_to_audit_dict(session)
     _, stats = _sync_session_question_stats(session, db)
 
     # 更新会话信息；重复提交时保留首次完成时间，避免每日统计跨天漂移
@@ -1084,7 +1178,29 @@ async def complete_learning_session(
             relative_time_ms=session.duration_seconds * 1000 if session.duration_seconds else 0
         )
         db.add(activity)
-    
+        db.flush()
+        log_audit_change(
+            db=db,
+            target=activity,
+            action="create",
+            after=activity,
+            actor=actor,
+            origin_event_type="tracking.session.complete",
+            origin_public_id=session_id,
+        )
+
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=session,
+        action="update",
+        before=before_session_snapshot,
+        after=session,
+        actor=actor,
+        public_id=session_id,
+        origin_event_type="tracking.session.complete",
+        origin_public_id=session_id,
+    )
     db.commit()
 
     # 更新每日日志（不影响主流程）
@@ -1129,6 +1245,8 @@ def _refresh_daily_log(
         )
         .first()
     )
+    created_log = log is None
+    before_snapshot = model_to_audit_dict(log) if log is not None else None
     if not log:
         log = DailyLearningLog(
             user_id=actor["paper_user_id"],
@@ -1178,6 +1296,17 @@ def _refresh_daily_log(
     log.session_ids = [item.id for item in day_sessions]
     log.knowledge_points_covered = knowledge_points
     log.weak_knowledge_points = weak_points
+    db.flush([log])
+    log_audit_change(
+        db=db,
+        target=log,
+        action="create" if created_log else "update",
+        before=before_snapshot,
+        after=log,
+        actor=actor,
+        origin_event_type="tracking.daily_log.refresh",
+        origin_public_id=f"{actor['actor_key']}:{log_date.isoformat()}",
+    )
 
     if auto_commit:
         db.commit()

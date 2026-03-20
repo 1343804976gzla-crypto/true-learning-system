@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from database.audit import log_audit_change, model_to_audit_dict
 from knowledge_upload_models import (
     KnowledgeDailyReport,
     KnowledgePendingClassification,
@@ -142,6 +143,15 @@ class KnowledgeUploadService:
         )
         db.add(upload_record)
         db.flush()
+        log_audit_change(
+            db=db,
+            target=upload_record,
+            action="create",
+            after=upload_record,
+            actor=actor,
+            origin_event_type="knowledge.upload.save_preview",
+            origin_public_id=str(upload_record.id),
+        )
 
         created_notes = 0
         updated_notes = 0
@@ -169,6 +179,16 @@ class KnowledgeUploadService:
                     source_excerpt=_safe_excerpt(item.get("source_excerpt") or item.get("chapter_summary") or ""),
                 )
                 db.add(pending)
+                db.flush([pending])
+                log_audit_change(
+                    db=db,
+                    target=pending,
+                    action="create",
+                    after=pending,
+                    actor=actor,
+                    origin_event_type="knowledge.pending.create",
+                    origin_public_id=str(upload_record.id),
+                )
                 pending_items += 1
                 continue
 
@@ -188,8 +208,20 @@ class KnowledgeUploadService:
                 else:
                     updated_notes += 1
 
+        before_upload_snapshot = model_to_audit_dict(upload_record)
         upload_record.saved_note_count = created_notes + updated_notes
         upload_record.pending_item_count = pending_items
+        db.flush([upload_record])
+        log_audit_change(
+            db=db,
+            target=upload_record,
+            action="update",
+            before=before_upload_snapshot,
+            after=upload_record,
+            actor=actor,
+            origin_event_type="knowledge.upload.finalize",
+            origin_public_id=str(upload_record.id),
+        )
         db.commit()
         self.preview_cache.pop(preview_id, None)
 
@@ -228,6 +260,7 @@ class KnowledgeUploadService:
         upload_record = db.query(KnowledgeUploadRecord).filter(KnowledgeUploadRecord.id == pending.upload_id).first()
         created_notes = 0
         updated_notes = 0
+        before_pending_snapshot = model_to_audit_dict(pending)
 
         for kp in self._sanitize_knowledge_points(pending.knowledge_points or []):
             _note, was_created = await self._upsert_note(
@@ -249,6 +282,17 @@ class KnowledgeUploadService:
         pending.resolved_chapter_id = chapter_id
         pending.resolved_at = datetime.now()
         pending.updated_at = datetime.now()
+        db.flush([pending])
+        log_audit_change(
+            db=db,
+            target=pending,
+            action="update",
+            before=before_pending_snapshot,
+            after=pending,
+            actor=actor,
+            origin_event_type="knowledge.pending.resolve",
+            origin_public_id=str(pending.id),
+        )
         db.commit()
 
         return {
@@ -452,12 +496,24 @@ class KnowledgeUploadService:
         if duplicate:
             raise ValueError("目标章节下已存在同名知识点。")
 
+        before_note_snapshot = model_to_audit_dict(note)
         note.chapter_id = chapter_id
         note.concept_name = new_name
         note.concept_key = new_key
         note.note_summary = _clean_text(note_summary, max_length=240)
         note.note_body = str(note_body or "").strip()
         note.updated_at = datetime.now()
+        db.flush([note])
+        log_audit_change(
+            db=db,
+            target=note,
+            action="update",
+            before=before_note_snapshot,
+            after=note,
+            actor=actor,
+            origin_event_type="knowledge.note.update",
+            origin_public_id=str(note.id),
+        )
         db.commit()
 
         return {
@@ -580,17 +636,38 @@ class KnowledgeUploadService:
         }
 
         if existing:
+            before_report_snapshot = model_to_audit_dict(existing)
             existing.snapshot = snapshot
             existing.updated_at = datetime.now()
+            db.flush([existing])
+            log_audit_change(
+                db=db,
+                target=existing,
+                action="update",
+                before=before_report_snapshot,
+                after=existing,
+                actor=actor,
+                origin_event_type="knowledge.daily_report.generate",
+                origin_public_id=f"{actor['actor_key']}:{report_date.isoformat()}",
+            )
         else:
-            db.add(
-                KnowledgeDailyReport(
-                    actor_key=str(actor["actor_key"]),
-                    user_id=actor.get("paper_user_id"),
-                    device_id=actor.get("paper_device_id"),
-                    report_date=report_date,
-                    snapshot=snapshot,
-                )
+            report = KnowledgeDailyReport(
+                actor_key=str(actor["actor_key"]),
+                user_id=actor.get("paper_user_id"),
+                device_id=actor.get("paper_device_id"),
+                report_date=report_date,
+                snapshot=snapshot,
+            )
+            db.add(report)
+            db.flush([report])
+            log_audit_change(
+                db=db,
+                target=report,
+                action="create",
+                after=report,
+                actor=actor,
+                origin_event_type="knowledge.daily_report.generate",
+                origin_public_id=f"{actor['actor_key']}:{report_date.isoformat()}",
             )
         db.commit()
         return snapshot
@@ -941,6 +1018,7 @@ class KnowledgeUploadService:
         )
 
         if existing:
+            before_note_snapshot = model_to_audit_dict(existing)
             merged_summary, merged_body = await self._merge_note_content(
                 concept_name=concept_name,
                 existing_summary=existing.note_summary or "",
@@ -970,6 +1048,7 @@ class KnowledgeUploadService:
             db.add(note)
             db.flush()
             created = True
+            before_note_snapshot = None
 
         if upload_record is not None:
             db.add(
@@ -984,6 +1063,18 @@ class KnowledgeUploadService:
                     source_excerpt=_safe_excerpt(source_excerpt, max_length=220),
                 )
             )
+
+        db.flush([note])
+        log_audit_change(
+            db=db,
+            target=note,
+            action="create" if created else "update",
+            before=before_note_snapshot,
+            after=note,
+            actor=actor,
+            origin_event_type="knowledge.note.upsert",
+            origin_public_id=str(upload_record.id) if upload_record is not None else str(note.id),
+        )
 
         return note, created
 

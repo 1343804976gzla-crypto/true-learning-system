@@ -40,6 +40,7 @@ from api_contracts import (
     WrongAnswerVariantJudgeResponse,
     WrongAnswerChapterListResponse,
 )
+from database.audit import log_audit_change, model_to_audit_dict
 from services.content_parser_v2 import get_content_parser
 from services.data_identity import (
     DEFAULT_DEVICE_ID,
@@ -756,6 +757,8 @@ def _export_daily_review_pdf_for_actor(
 
     config = _build_daily_review_config(target_date, selected_candidates)
 
+    created_paper = paper is None
+    before_paper_snapshot = model_to_audit_dict(paper) if paper is not None else None
     if paper is None:
         paper = DailyReviewPaper(
             user_id=actor["paper_user_id"],
@@ -787,6 +790,17 @@ def _export_daily_review_pdf_for_actor(
             snapshot=candidate.snapshot,
         ))
 
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=paper,
+        action="create" if created_paper else "update",
+        before=before_paper_snapshot,
+        after=paper,
+        actor=actor,
+        origin_event_type="wrong_answers.daily_review_paper",
+        origin_public_id=f"{actor['actor_key']}:{target_date.isoformat()}",
+    )
     db.commit()
     db.refresh(paper)
 
@@ -1321,6 +1335,14 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
     # Upsert
     created = 0
     updated = 0
+    request_user_id, request_device_id = get_request_identity()
+    audit_actor = {
+        "paper_user_id": request_user_id,
+        "paper_device_id": request_device_id,
+        "actor_key": build_actor_key(request_user_id, request_device_id),
+    }
+    updated_snapshots: Dict[str, Dict[str, Any]] = {}
+    created_items: List[WrongAnswerV2] = []
     for fp, g in fp_groups.items():
         existing = db.query(WrongAnswerV2).filter(
             WrongAnswerV2.question_fingerprint == fp
@@ -1330,6 +1352,7 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
         sorted_ts = sorted(g["timestamps"]) if g["timestamps"] else []
 
         if existing:
+            updated_snapshots[fp] = model_to_audit_dict(existing) or {}
             existing.error_count = g["error_count"]
             existing.encounter_count = g["encounter_count"]
             existing.linked_record_ids = canonicalize_linked_record_ids(g["record_ids"])
@@ -1368,8 +1391,34 @@ async def sync_wrong_answers(db: Session = Depends(get_db)):
                 last_wrong_at=sorted_ts[-1] if sorted_ts else datetime.now(),
             )
             db.add(wa)
+            created_items.append(wa)
             created += 1
 
+    db.flush()
+    for fp, before_snapshot in updated_snapshots.items():
+        target = db.query(WrongAnswerV2).filter(WrongAnswerV2.question_fingerprint == fp).first()
+        if target is None:
+            continue
+        log_audit_change(
+            db=db,
+            target=target,
+            action="update",
+            before=before_snapshot,
+            after=target,
+            actor=audit_actor,
+            origin_event_type="wrong_answers.sync",
+            origin_public_id=fp,
+        )
+    for item in created_items:
+        log_audit_change(
+            db=db,
+            target=item,
+            action="create",
+            after=item,
+            actor=audit_actor,
+            origin_event_type="wrong_answers.sync",
+            origin_public_id=item.question_fingerprint,
+        )
     db.commit()
     total = db.query(WrongAnswerV2).filter(WrongAnswerV2.mastery_status == "active").count()
     return {"created": created, "updated": updated, "total_active": total}
@@ -1552,16 +1601,25 @@ async def confirm_external_wrong_import(
 
     now = datetime.now()
     today = date.today()
+    request_user_id, request_device_id = get_request_identity()
+    audit_actor = {
+        "paper_user_id": request_user_id,
+        "paper_device_id": request_device_id,
+        "actor_key": build_actor_key(request_user_id, request_device_id),
+    }
 
     created = 0
     skipped = 0
     updated = 0
     created_ids = []
+    updated_items: List[Tuple[WrongAnswerV2, Dict[str, Any]]] = []
+    created_items: List[WrongAnswerV2] = []
 
     for it in prepared:
         existing = existing_map.get(it["fingerprint"])
         if existing:
             changed = False
+            before_snapshot = model_to_audit_dict(existing)
             # 保守更新：只补缺失字段，不覆盖已有历史数据
             if not existing.chapter_id and it["chapter_id"]:
                 existing.chapter_id = it["chapter_id"]
@@ -1574,6 +1632,7 @@ async def confirm_external_wrong_import(
                 changed = True
             if changed:
                 existing.updated_at = now
+                updated_items.append((existing, before_snapshot or {}))
                 updated += 1
             else:
                 skipped += 1
@@ -1604,9 +1663,31 @@ async def confirm_external_wrong_import(
         )
         db.add(wa)
         db.flush()
+        created_items.append(wa)
         created += 1
         created_ids.append(wa.id)
 
+    for item, before_snapshot in updated_items:
+        log_audit_change(
+            db=db,
+            target=item,
+            action="update",
+            before=before_snapshot,
+            after=item,
+            actor=audit_actor,
+            origin_event_type="wrong_answers.import.confirm",
+            origin_public_id=item.question_fingerprint,
+        )
+    for item in created_items:
+        log_audit_change(
+            db=db,
+            target=item,
+            action="create",
+            after=item,
+            actor=audit_actor,
+            origin_event_type="wrong_answers.import.confirm",
+            origin_public_id=item.question_fingerprint,
+        )
     db.commit()
 
     return {
@@ -2167,6 +2248,12 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
     else:
         correct_raw = wa.correct_answer or ""
     is_correct = _answers_match(body.user_answer, correct_raw)
+    audit_actor = {
+        "paper_user_id": wa.user_id,
+        "paper_device_id": wa.device_id,
+        "actor_key": build_actor_key(wa.user_id, wa.device_id),
+    }
+    before_wa_snapshot = model_to_audit_dict(wa)
 
     confidence = _normalize_confidence_value(body.confidence)
 
@@ -2214,6 +2301,26 @@ async def submit_retry(wrong_id: int, body: RetryRequest, db: Session = Depends(
 
     can_archive = (is_correct and confidence == "sure") and not auto_archived
 
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=retry,
+        action="create",
+        after=retry,
+        actor=audit_actor,
+        origin_event_type="wrong_answers.retry",
+        origin_public_id=str(wrong_id),
+    )
+    log_audit_change(
+        db=db,
+        target=wa,
+        action="update",
+        before=before_wa_snapshot,
+        after=wa,
+        actor=audit_actor,
+        origin_event_type="wrong_answers.retry",
+        origin_public_id=str(wrong_id),
+    )
     db.commit()
 
     # 获取之前的重做记录用于对比
@@ -2260,9 +2367,26 @@ async def archive_wrong_answer(wrong_id: int, db: Session = Depends(get_db)):
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
     if not wa:
         raise HTTPException(status_code=404, detail="错题不存在")
+    audit_actor = {
+        "paper_user_id": wa.user_id,
+        "paper_device_id": wa.device_id,
+        "actor_key": build_actor_key(wa.user_id, wa.device_id),
+    }
+    before_snapshot = model_to_audit_dict(wa)
     wa.mastery_status = "archived"
     wa.archived_at = datetime.now()
     wa.updated_at = datetime.now()
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=wa,
+        action="update",
+        before=before_snapshot,
+        after=wa,
+        actor=audit_actor,
+        origin_event_type="wrong_answers.archive",
+        origin_public_id=str(wrong_id),
+    )
     db.commit()
     return {"success": True, "id": wrong_id, "status": "archived"}
 
@@ -2273,9 +2397,26 @@ async def unarchive_wrong_answer(wrong_id: int, db: Session = Depends(get_db)):
     wa = db.query(WrongAnswerV2).filter(WrongAnswerV2.id == wrong_id).first()
     if not wa:
         raise HTTPException(status_code=404, detail="错题不存在")
+    audit_actor = {
+        "paper_user_id": wa.user_id,
+        "paper_device_id": wa.device_id,
+        "actor_key": build_actor_key(wa.user_id, wa.device_id),
+    }
+    before_snapshot = model_to_audit_dict(wa)
     wa.mastery_status = "active"
     wa.archived_at = None
     wa.updated_at = datetime.now()
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=wa,
+        action="update",
+        before=before_snapshot,
+        after=wa,
+        actor=audit_actor,
+        origin_event_type="wrong_answers.unarchive",
+        origin_public_id=str(wrong_id),
+    )
     db.commit()
     return {"success": True, "id": wrong_id, "status": "active"}
 
@@ -2484,6 +2625,11 @@ async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="错题不存在")
 
     # 缓存策略：24h内复用
+    audit_actor = {
+        "paper_user_id": wa.user_id,
+        "paper_device_id": wa.device_id,
+        "actor_key": build_actor_key(wa.user_id, wa.device_id),
+    }
     cached_variant = canonicalize_variant_data(wa.variant_data)
     if cached_variant and cached_variant.get("generated_at"):
         from datetime import datetime as dt
@@ -2505,9 +2651,21 @@ async def generate_variant_question(wrong_id: int, db: Session = Depends(get_db)
     # 调用AI生成
     from services.variant_surgery_service import generate_variant
     try:
+        before_snapshot = model_to_audit_dict(wa)
         variant = await generate_variant(wa)
         wa.variant_data = canonicalize_variant_data(variant, fallback_generated_at=datetime.now())
         wa.updated_at = datetime.now()
+        db.flush()
+        log_audit_change(
+            db=db,
+            target=wa,
+            action="update",
+            before=before_snapshot,
+            after=wa,
+            actor=audit_actor,
+            origin_event_type="wrong_answers.variant.generate",
+            origin_public_id=str(wrong_id),
+        )
         db.commit()
 
         stored_variant = canonicalize_variant_data(wa.variant_data) or {}
@@ -2536,6 +2694,12 @@ async def judge_variant_answer(
     if not variant_data:
         raise HTTPException(status_code=400, detail="尚未生成变式题")
 
+    audit_actor = {
+        "paper_user_id": wa.user_id,
+        "paper_device_id": wa.device_id,
+        "actor_key": build_actor_key(wa.user_id, wa.device_id),
+    }
+    before_wa_snapshot = model_to_audit_dict(wa)
     is_correct = _answers_match(body.user_answer, variant_data.get("variant_answer") or "")
 
     # AI评估推理
@@ -2588,6 +2752,26 @@ async def judge_variant_answer(
 
     can_archive = (verdict == "logic_closed") and not auto_archived
 
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=retry,
+        action="create",
+        after=retry,
+        actor=audit_actor,
+        origin_event_type="wrong_answers.variant.judge",
+        origin_public_id=str(wrong_id),
+    )
+    log_audit_change(
+        db=db,
+        target=wa,
+        action="update",
+        before=before_wa_snapshot,
+        after=wa,
+        actor=audit_actor,
+        origin_event_type="wrong_answers.variant.judge",
+        origin_public_id=str(wrong_id),
+    )
     db.commit()
 
     return {

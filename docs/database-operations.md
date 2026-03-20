@@ -88,3 +88,58 @@ python scripts/migrate_legacy_compat_db.py --target data/legacy_compat.db
 1. 运行统一备份
 2. 运行巡检并确认 shadow 对照一致
 3. 再决定是否对 `learning.db` 做归档或移出主数据目录
+
+## 6. 审计落地状态（2026-03-20）
+
+当前 `audit_change_log` 已不再只是建表，占用中的关键写入链路已经接入：
+
+- `content_knowledge.db`
+  - `daily_uploads`
+  - `knowledge_upload_records`
+  - `knowledge_pending_classifications`
+  - `knowledge_point_notes`
+  - `knowledge_daily_reports`
+- `learning_runtime.db`
+  - `learning_sessions`
+  - `learning_activities`
+  - `question_records`
+  - `daily_learning_logs`
+- `wrong_answer_review.db`
+  - `wrong_answers_v2`
+  - `wrong_answer_retries`
+  - `daily_review_papers`
+- `agent.db`
+  - `agent_action_logs`
+
+审计字段当前统一包含：
+
+- `domain_name`
+- `entity_type`
+- `entity_id`
+- `public_id`
+- `action`
+- `actor_key`
+- `user_id`
+- `device_id`
+- `request_id`
+- `trace_id`
+- `source`
+- `origin_event_type`
+- `origin_public_id`
+- `before_json`
+- `after_json`
+- `changed_fields`
+- `created_at`
+
+当前已验证的隔离环境审计落盘结果：
+
+- `content`: 1
+- `runtime`: 7
+- `review`: 2
+- `agent`: 1
+
+说明：
+
+- 上述计数来自临时 SQLite 验证环境，不会污染正式库。
+- 审计快照会对超长文本做截断，避免把 OCR 原文或大段笔记完整复制进审计表。
+- 后续如果继续补链路，优先补回滚、批量修复脚本、legacy 兼容写入。

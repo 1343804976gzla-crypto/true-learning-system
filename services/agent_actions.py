@@ -10,6 +10,7 @@ from sqlalchemy import desc, inspect
 from sqlalchemy.orm import Session
 
 from agent_models import AgentActionLog, AgentSession
+from database.audit import log_audit_change, model_to_audit_dict
 from database.domains import agent_engine
 from learning_tracking_models import (
     DailyReviewPaper,
@@ -808,12 +809,26 @@ def _execute_update_wrong_answer_status(
     if len(items) != len(wrong_answer_ids):
         raise ValueError("待更新的错题已发生变化，请重新预览后再执行")
 
+    before_snapshots = {int(item.id): model_to_audit_dict(item) or {} for item in items}
+
     for item in items:
         item.mastery_status = target_status
         item.archived_at = now if target_status == "archived" else None
         item.updated_at = now
 
     db.flush()
+    for item in items:
+        log_audit_change(
+            db=db,
+            target=item,
+            action="update",
+            before=before_snapshots.get(int(item.id)),
+            after=item,
+            user_id=item.user_id,
+            device_id=item.device_id,
+            origin_event_type="agent.update_wrong_answer_status",
+            origin_public_id=str(item.id),
+        )
 
     refreshed = db.query(WrongAnswerV2).filter(WrongAnswerV2.id.in_(wrong_answer_ids)).all()
     all_verified = all(item.mastery_status == target_status for item in refreshed)
@@ -939,6 +954,7 @@ def _execute_update_concept_mastery(
         raise ValueError(f"待更新的知识点已发生变化: {missing}")
 
     update_map = {str(item["concept_id"]): item for item in updates}
+    before_snapshots = {concept.concept_id: model_to_audit_dict(concept) or {} for concept in concepts}
     for concept in concepts:
         plan = update_map.get(concept.concept_id)
         if plan is None:
@@ -950,6 +966,18 @@ def _execute_update_concept_mastery(
         concept.next_review = _parse_iso_date(plan.get("next_review")) or concept.next_review
 
     db.flush()
+    for concept in concepts:
+        log_audit_change(
+            db=db,
+            target=concept,
+            action="update",
+            before=before_snapshots.get(concept.concept_id),
+            after=concept,
+            user_id=concept.user_id,
+            device_id=concept.device_id,
+            origin_event_type="agent.update_concept_mastery",
+            origin_public_id=concept.concept_id,
+        )
 
     refreshed = db.query(ConceptMastery).filter(ConceptMastery.concept_id.in_(concept_ids)).all()
     refreshed_map = {concept.concept_id: concept for concept in refreshed}
@@ -1145,8 +1173,14 @@ def _execute_generate_quiz_set(
     )
     db.add(learning_session)
     db.flush()
+    audit_actor = {
+        "paper_user_id": context.get("user_id"),
+        "paper_device_id": context.get("device_id"),
+        "actor_key": build_actor_key(context.get("user_id"), context.get("device_id")),
+    }
 
     question_record_ids: List[int] = []
+    question_records_created: List[QuestionRecord] = []
     for index, question in enumerate(question_blueprints):
         question_record = QuestionRecord(
             user_id=context.get("user_id"),
@@ -1164,9 +1198,38 @@ def _execute_generate_quiz_set(
         )
         db.add(question_record)
         db.flush()
+        question_records_created.append(question_record)
         question_record_ids.append(int(question_record.id))
 
     db.flush()
+    log_audit_change(
+        db=db,
+        target=quiz_session,
+        action="create",
+        after=quiz_session,
+        actor=audit_actor,
+        origin_event_type="agent.generate_quiz_set",
+        origin_public_id=str(quiz_session.id),
+    )
+    log_audit_change(
+        db=db,
+        target=learning_session,
+        action="create",
+        after=learning_session,
+        actor=audit_actor,
+        origin_event_type="agent.generate_quiz_set",
+        origin_public_id=learning_session.id,
+    )
+    for question_record in question_records_created:
+        log_audit_change(
+            db=db,
+            target=question_record,
+            action="create",
+            after=question_record,
+            actor=audit_actor,
+            origin_event_type="agent.generate_quiz_set",
+            origin_public_id=learning_session.id,
+        )
 
     refreshed_quiz = db.query(QuizSession).filter(QuizSession.id == quiz_session.id).first()
     refreshed_learning_session = db.query(LearningSession).filter(LearningSession.id == learning_session.id).first()
@@ -1344,6 +1407,8 @@ def _execute_create_daily_review_paper(
         actor_key=actor_key,
         actor_keys=actor_keys,
     )
+    created_paper = paper is None
+    before_paper_snapshot = model_to_audit_dict(paper) if paper is not None else None
     if paper is None:
         paper = DailyReviewPaper(
             user_id=context.get("paper_user_id"),
@@ -1378,6 +1443,20 @@ def _execute_create_daily_review_paper(
         )
 
     db.flush()
+    log_audit_change(
+        db=db,
+        target=paper,
+        action="create" if created_paper else "update",
+        before=before_paper_snapshot,
+        after=paper,
+        actor={
+            "paper_user_id": context.get("paper_user_id"),
+            "paper_device_id": context.get("paper_device_id"),
+            "actor_key": actor_key,
+        },
+        origin_event_type="agent.create_daily_review_paper",
+        origin_public_id=f"{actor_key}:{paper_date.isoformat()}",
+    )
 
     refreshed_paper = db.query(DailyReviewPaper).filter(DailyReviewPaper.id == paper.id).first()
     actual_items = sorted(refreshed_paper.items, key=lambda item: item.position) if refreshed_paper else []
@@ -2085,6 +2164,8 @@ def _upsert_action_log(
         payload.user_id or session.user_id,
         payload.device_id or session.device_id,
     )
+    created_log = action_log is None
+    before_snapshot = model_to_audit_dict(action_log) if action_log is not None else None
     if action_log is None:
         action_log = AgentActionLog(
             id=str(uuid4()),
@@ -2114,6 +2195,18 @@ def _upsert_action_log(
         action_log.error_message = None
         action_log.executed_at = None
         action_log.confirmed_at = None
+        db.flush([action_log])
+        log_audit_change(
+            db=db,
+            target=action_log,
+            action="create" if created_log else "update",
+            before=before_snapshot,
+            after=action_log,
+            user_id=action_log.user_id,
+            device_id=action_log.device_id,
+            origin_event_type="agent.action_log.upsert",
+            origin_public_id=action_log.id,
+        )
         return action_log
 
     action_log.approval_status = "approved" if tool_definition.requires_confirmation else "auto"
@@ -2122,6 +2215,18 @@ def _upsert_action_log(
     action_log.verification_status = "skipped"
     action_log.error_message = None
     action_log.executed_at = None
+    db.flush([action_log])
+    log_audit_change(
+        db=db,
+        target=action_log,
+        action="create" if created_log else "update",
+        before=before_snapshot,
+        after=action_log,
+        user_id=action_log.user_id,
+        device_id=action_log.device_id,
+        origin_event_type="agent.action_log.upsert",
+        origin_public_id=action_log.id,
+    )
     return action_log
 
 
