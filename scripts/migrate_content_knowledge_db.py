@@ -16,6 +16,7 @@ from database.domains import CONTENT_DATABASE_URL, CORE_DATABASE_URL, get_sqlite
 from database.domains import ContentBase
 import knowledge_upload_models  # noqa: F401
 import models  # noqa: F401
+from scripts._script_audit import write_script_audit
 
 CONTENT_TABLES = [
     "daily_uploads",
@@ -157,6 +158,23 @@ def main() -> int:
             )
             if source_count != target_count:
                 raise SystemExit(f"row count mismatch for {table_name}")
+        write_script_audit(
+            target_conn,
+            domain_name="content",
+            entity_type="migrate_content_knowledge_db",
+            entity_id=f"migrate:{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            action="script_run",
+            after_payload={
+                "source": str(source_path),
+                "target": str(target_path),
+                "replace": bool(args.replace),
+                "tables": CONTENT_TABLES,
+                "copied_counts": copied_counts,
+            },
+            origin_event_type="script.migrate_content_knowledge_db",
+            origin_public_id=str(target_path),
+        )
+        target_conn.commit()
     finally:
         target_conn.close()
         source_conn.close()

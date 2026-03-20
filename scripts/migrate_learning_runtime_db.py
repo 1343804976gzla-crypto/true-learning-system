@@ -16,6 +16,7 @@ from database.domains import CORE_DATABASE_URL, RUNTIME_DATABASE_URL, get_sqlite
 from database.domains import RuntimeBase
 import learning_tracking_models  # noqa: F401
 import models  # noqa: F401
+from scripts._script_audit import write_script_audit
 
 RUNTIME_TABLES = [
     "learning_sessions",
@@ -158,6 +159,23 @@ def main() -> int:
             )
             if source_count != target_count:
                 raise SystemExit(f"row count mismatch for {table_name}")
+        write_script_audit(
+            target_conn,
+            domain_name="runtime",
+            entity_type="migrate_learning_runtime_db",
+            entity_id=f"migrate:{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            action="script_run",
+            after_payload={
+                "source": str(source_path),
+                "target": str(target_path),
+                "replace": bool(args.replace),
+                "tables": RUNTIME_TABLES,
+                "copied_counts": copied_counts,
+            },
+            origin_event_type="script.migrate_learning_runtime_db",
+            origin_public_id=str(target_path),
+        )
+        target_conn.commit()
     finally:
         target_conn.close()
         source_conn.close()

@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent_models import Base as AgentBase
 from database.domains import AGENT_DATABASE_URL, CORE_DATABASE_URL, get_sqlite_path
+from scripts._script_audit import write_script_audit
 
 AGENT_TABLES = [
     "agent_sessions",
@@ -167,6 +168,23 @@ def main() -> int:
             )
             if source_count != target_count:
                 raise SystemExit(f"row count mismatch for {table_name}")
+        write_script_audit(
+            target_conn,
+            domain_name="agent",
+            entity_type="migrate_agent_db",
+            entity_id=f"migrate:{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            action="script_run",
+            after_payload={
+                "source": str(source_path),
+                "target": str(target_path),
+                "replace": bool(args.replace),
+                "tables": AGENT_TABLES,
+                "copied_counts": copied_counts,
+            },
+            origin_event_type="script.migrate_agent_db",
+            origin_public_id=str(target_path),
+        )
+        target_conn.commit()
     finally:
         target_conn.close()
         source_conn.close()

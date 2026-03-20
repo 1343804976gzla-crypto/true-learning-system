@@ -184,4 +184,5 @@ python scripts/inspect_database_health.py --include-shadow
 
 - 第 3、4 步都必须在第 2 步之后执行。
 - 修复脚本和恢复脚本现在会写入一条脚本级审计汇总，便于回看“哪天跑过、改了多少、输出到哪里”。
+- `migrate_agent_db.py`、`migrate_content_knowledge_db.py`、`migrate_learning_runtime_db.py`、`migrate_wrong_answer_review_db.py`、`migrate_legacy_compat_db.py` 也会在目标库写入一条脚本级审计汇总。
 - 恢复脚本默认生成候选库，不应直接覆盖正式运行库。

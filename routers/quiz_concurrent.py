@@ -5,7 +5,7 @@
 from datetime import date, datetime, timedelta
 import random
 from types import SimpleNamespace
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import logging
 
@@ -13,12 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api_contracts import QuizAnalysisResponse, QuizSessionStartResponse, QuizSessionSubmitResponse
+from database.audit import log_audit_change, model_to_audit_dict
 from models import get_db, QuizSession, ConceptMastery, Chapter, TestRecord, WrongAnswer
 from services.concurrent_quiz import (
     get_concurrent_generator, 
     get_batch_grader,
     get_ai_analyzer
 )
+from services.data_identity import build_actor_key, get_request_identity
 from utils.data_contracts import (
     canonicalize_string_list,
     canonicalize_quiz_answers,
@@ -30,6 +32,15 @@ from utils.data_contracts import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/quiz-v2", tags=["quiz-v2"])
+
+
+def _legacy_audit_actor() -> Dict[str, Any]:
+    user_id, device_id = get_request_identity()
+    return {
+        "paper_user_id": user_id,
+        "paper_device_id": device_id,
+        "actor_key": build_actor_key(user_id, device_id),
+    }
 
 
 def _normalize_name(name: str) -> str:
@@ -96,6 +107,7 @@ async def start_concurrent_quiz(
     """
     寮€濮?0棰樺苟鍙戞祴楠?    骞跺彂鐢熸垚10閬撻鐩紝澶у箙鎻愬崌閫熷害
     """
+    audit_actor = _legacy_audit_actor()
     concepts = db.query(ConceptMastery).filter(
         ConceptMastery.chapter_id == chapter_id
     ).all()
@@ -104,6 +116,7 @@ async def start_concurrent_quiz(
     if not concepts:
         chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
         repaired = 0
+        repaired_ids: List[str] = []
         if chapter and isinstance(chapter.concepts, list):
             for i, item in enumerate(chapter.concepts):
                 if not isinstance(item, dict):
@@ -125,8 +138,23 @@ async def start_concurrent_quiz(
                     understanding=0.0,
                     application=0.0,
                 ))
+                repaired_ids.append(concept_id)
                 repaired += 1
         if repaired:
+            db.flush()
+            for concept_id in repaired_ids:
+                concept = db.query(ConceptMastery).filter(ConceptMastery.concept_id == concept_id).first()
+                if concept is None:
+                    continue
+                log_audit_change(
+                    db=db,
+                    target=concept,
+                    action="create",
+                    after=concept,
+                    actor=audit_actor,
+                    origin_event_type="quiz_v2.auto_repair_concept",
+                    origin_public_id=concept.concept_id,
+                )
             db.commit()
             logger.info("[quiz-v2] 自动回填知识点 chapter=%s, repaired=%s", chapter_id, repaired)
         concepts = db.query(ConceptMastery).filter(
@@ -144,6 +172,7 @@ async def start_concurrent_quiz(
                 f"{base}-娌荤枟鍘熷垯",
             ]
             seeded = 0
+            seeded_ids: List[str] = []
             for i, name in enumerate(seed_topics):
                 concept_id = f"{chapter_id}_seed_{i}"
                 exists = db.query(ConceptMastery).filter(
@@ -159,8 +188,23 @@ async def start_concurrent_quiz(
                     understanding=0.0,
                     application=0.0,
                 ))
+                seeded_ids.append(concept_id)
                 seeded += 1
             if seeded:
+                db.flush()
+                for concept_id in seeded_ids:
+                    concept = db.query(ConceptMastery).filter(ConceptMastery.concept_id == concept_id).first()
+                    if concept is None:
+                        continue
+                    log_audit_change(
+                        db=db,
+                        target=concept,
+                        action="create",
+                        after=concept,
+                        actor=audit_actor,
+                        origin_event_type="quiz_v2.seed_concept",
+                        origin_public_id=concept.concept_id,
+                    )
                 db.commit()
                 logger.info("[quiz-v2] 注入章节种子知识点 chapter=%s, seeded=%s", chapter_id, seeded)
             concepts = db.query(ConceptMastery).filter(
@@ -199,6 +243,16 @@ async def start_concurrent_quiz(
             score=0
         )
         db.add(test_record)
+        db.flush()
+        log_audit_change(
+            db=db,
+            target=test_record,
+            action="create",
+            after=test_record,
+            actor=audit_actor,
+            origin_event_type="quiz_v2.generate_test_record",
+            origin_public_id=str(test_record.id),
+        )
         db.commit()
         db.refresh(test_record)
         
@@ -229,6 +283,16 @@ async def start_concurrent_quiz(
         started_at=datetime.now()
     )
     db.add(session)
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=session,
+        action="create",
+        after=session,
+        actor=audit_actor,
+        origin_event_type="quiz_v2.start_session",
+        origin_public_id=str(session.id),
+    )
     db.commit()
     db.refresh(session)
     
@@ -256,6 +320,8 @@ async def submit_concurrent_quiz(
     answers = data.get("answers", [])
     if len(answers) != len(session.questions):
         raise HTTPException(status_code=400, detail="Invalid request payload")
+    audit_actor = _legacy_audit_actor()
+    before_session_snapshot = model_to_audit_dict(session)
     
     logger.info("开始批改 %d 道题目...", len(answers))
     
@@ -265,10 +331,13 @@ async def submit_concurrent_quiz(
     graded_results = await grader.grade_batch(session.questions, answers)
     
     logger.info("开始批改 %d 道题目...", len(answers))
-    
+
     
     answer_records = []
     correct_count = 0
+    test_audit_entries: List[tuple[TestRecord, Optional[Dict[str, Any]]]] = []
+    concept_audit_entries: Dict[str, tuple[ConceptMastery, Optional[Dict[str, Any]]]] = {}
+    wrong_audit_entries: List[tuple[WrongAnswer, Optional[Dict[str, Any]]]] = []
     
     for i, (question, answer, graded) in enumerate(zip(session.questions, answers, graded_results)):
         is_correct = graded.get("is_correct", False)
@@ -296,18 +365,22 @@ async def submit_concurrent_quiz(
         
         test = db.query(TestRecord).filter(TestRecord.id == question["test_id"]).first()
         if test:
+            before_test_snapshot = model_to_audit_dict(test)
             test.user_answer = answer.get("user_answer")
             test.confidence = normalized_confidence
             test.is_correct = is_correct
             test.ai_feedback = graded.get("feedback", "")
             test.weak_points = normalized_weak_points
             test.score = graded.get("score", 0)
+            test_audit_entries.append((test, before_test_snapshot))
         
         
         concept = db.query(ConceptMastery).filter(
             ConceptMastery.concept_id == question["concept_id"]
         ).first()
         if concept:
+            if concept.concept_id not in concept_audit_entries:
+                concept_audit_entries[concept.concept_id] = (concept, model_to_audit_dict(concept))
             if is_correct:
                 concept.retention = min(concept.retention + 0.1, 1.0)
             else:
@@ -320,6 +393,7 @@ async def submit_concurrent_quiz(
                 WrongAnswer.concept_id == question["concept_id"],
                 WrongAnswer.question == question["question"]
             ).first()
+            before_wrong_snapshot = model_to_audit_dict(existing) if existing else None
             
             if not existing:
                 wrong = WrongAnswer(
@@ -338,12 +412,14 @@ async def submit_concurrent_quiz(
                     is_mastered=False
                 )
                 db.add(wrong)
+                wrong_audit_entries.append((wrong, None))
             else:
                 existing.review_count += 1
                 existing.last_reviewed = datetime.now()
                 existing.user_answer = answer.get("user_answer")
                 existing.options = normalized_options
                 existing.weak_points = normalized_weak_points
+                wrong_audit_entries.append((existing, before_wrong_snapshot))
     
     # AI鎬荤粨鍒嗘瀽
     logger.info("开始生成综合分析报告...")
@@ -361,6 +437,50 @@ async def submit_concurrent_quiz(
     session.correct_count = correct_count
     session.score = int(correct_count / len(session.questions) * 100)
     session.completed_at = datetime.now()
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=session,
+        action="update",
+        before=before_session_snapshot,
+        after=session,
+        actor=audit_actor,
+        origin_event_type="quiz_v2.submit",
+        origin_public_id=str(session.id),
+    )
+    for test_record, before_snapshot in test_audit_entries:
+        log_audit_change(
+            db=db,
+            target=test_record,
+            action="update",
+            before=before_snapshot,
+            after=test_record,
+            actor=audit_actor,
+            origin_event_type="quiz_v2.submit",
+            origin_public_id=str(test_record.id),
+        )
+    for concept_id, (concept, before_snapshot) in concept_audit_entries.items():
+        log_audit_change(
+            db=db,
+            target=concept,
+            action="update",
+            before=before_snapshot,
+            after=concept,
+            actor=audit_actor,
+            origin_event_type="quiz_v2.submit",
+            origin_public_id=concept_id,
+        )
+    for wrong_entry, before_snapshot in wrong_audit_entries:
+        log_audit_change(
+            db=db,
+            target=wrong_entry,
+            action="create" if before_snapshot is None else "update",
+            before=before_snapshot,
+            after=wrong_entry,
+            actor=audit_actor,
+            origin_event_type="quiz_v2.submit",
+            origin_public_id=str(getattr(wrong_entry, "id", "") or session.id),
+        )
     db.commit()
     
     return {
