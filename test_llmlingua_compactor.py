@@ -34,6 +34,7 @@ def test_llmlingua_compactor_uses_digest_and_llmlingua(monkeypatch):
 
     compactor = LLMLinguaQuizCompactor()
     compactor.min_chars = 0
+    compactor.allow_cpu_model = True
     monkeypatch.setattr(
         compactor,
         "_build_digest",

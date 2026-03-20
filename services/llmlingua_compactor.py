@@ -191,6 +191,7 @@ class LLMLinguaQuizCompactor:
         self.min_final_ratio = _safe_float("QUIZ_LINGUA_MIN_FINAL_RATIO", default=0.55, minimum=0.2, maximum=0.95)
         self.max_digest_chars = _safe_int("QUIZ_LINGUA_MAX_DIGEST_CHARS", default=7000, minimum=1200)
         self.max_glossary_terms = _safe_int("QUIZ_LINGUA_MAX_GLOSSARY_TERMS", default=10, minimum=0)
+        self.allow_cpu_model = _env_flag("QUIZ_LINGUA_ALLOW_CPU_MODEL", default=False)
         self.model_name = (
             os.getenv("QUIZ_LINGUA_MODEL")
             or "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
@@ -446,6 +447,27 @@ class LLMLinguaQuizCompactor:
         saved_tokens = 0
         compression_rate = round(digest_chars / max(raw_chars, 1), 4)
         error = None
+
+        if self.device != "cuda" and not self.allow_cpu_model:
+            return QuizCompactionResult(
+                applied=True,
+                strategy="digest_only_cpu_skip",
+                final_text=final_text,
+                raw_text=raw_text,
+                digest_text=digest_text,
+                glossary=glossary,
+                model_name=self.model_name,
+                device=self.device,
+                raw_chars=raw_chars,
+                digest_chars=digest_chars,
+                final_chars=len(final_text),
+                origin_tokens=0,
+                compressed_tokens=0,
+                saved_tokens=0,
+                compression_rate=compression_rate,
+                context_blocks=len(blocks),
+                digest_paragraphs=int(digest["kept_paragraphs"]),
+            )
 
         try:
             compressor = self._get_compressor()

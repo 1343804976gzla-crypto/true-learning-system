@@ -1365,7 +1365,10 @@ class QuizService:
                 preferred_provider=None,
                 preferred_model=None,
                 operation="services.quiz_service_v2:_generate_single_paper",
-                metadata=compaction_meta,
+                metadata={
+                    **compaction_meta,
+                    "llm_pool_limit": 2 if num_questions <= 5 else 3,
+                },
             )
             result = await self.ai.generate_json(
                 prompt,
