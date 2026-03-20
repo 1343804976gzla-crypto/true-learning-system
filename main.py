@@ -49,6 +49,7 @@ from services.llm_audit import (
     reset_llm_audit_request_context,
     set_llm_audit_request_context,
 )
+from services.agent_runtime import ensure_agent_schema
 from services.openmanus_bridge import sync_openmanus_config
 from services.openviking_sync import install_openviking_sync_hooks
 from knowledge_upload_models import create_knowledge_upload_tables
@@ -131,6 +132,7 @@ async def startup():
             return
 
         init_db()
+        ensure_agent_schema()
         create_knowledge_upload_tables()
         ensure_learning_identity_schema()
         try:

@@ -10,6 +10,7 @@ from sqlalchemy import desc, inspect
 from sqlalchemy.orm import Session
 
 from agent_models import AgentActionLog, AgentSession
+from database.domains import agent_engine
 from learning_tracking_models import (
     DailyReviewPaper,
     DailyReviewPaperItem,
@@ -17,7 +18,7 @@ from learning_tracking_models import (
     QuestionRecord,
     WrongAnswerV2,
 )
-from models import Chapter, ConceptMastery, QuizSession, TestRecord, engine
+from models import Chapter, ConceptMastery, QuizSession, TestRecord
 from routers.wrong_answers_v2 import (
     ReviewCandidate,
     _build_daily_review_config,
@@ -161,16 +162,16 @@ class ActionExecutionResult:
 
 
 def ensure_agent_action_schema() -> None:
-    AgentActionLog.__table__.create(bind=engine, checkfirst=True)
+    AgentActionLog.__table__.create(bind=agent_engine, checkfirst=True)
     existing_columns = {
         str(column.get("name") or "").lower()
-        for column in inspect(engine).get_columns("agent_action_logs")
+        for column in inspect(agent_engine).get_columns("agent_action_logs")
     }
     if "preview_context" not in existing_columns:
-        with engine.begin() as connection:
+        with agent_engine.begin() as connection:
             connection.exec_driver_sql("ALTER TABLE agent_action_logs ADD COLUMN preview_context JSON")
     if "related_task_id" not in existing_columns:
-        with engine.begin() as connection:
+        with agent_engine.begin() as connection:
             connection.exec_driver_sql("ALTER TABLE agent_action_logs ADD COLUMN related_task_id VARCHAR")
 
 

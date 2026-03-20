@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from models import get_db
+from database.domains import get_agent_db
 from services.agent_actions import (
     AgentActionNotFoundError,
     execute_agent_action,
@@ -122,7 +122,7 @@ def _serialize_task_detail_response(db: Session, task) -> AgentTaskDetailRespons
 
 
 @router.post("/sessions", response_model=AgentSessionItem)
-async def create_agent_session(payload: AgentSessionCreateRequest, db: Session = Depends(get_db)) -> AgentSessionItem:
+async def create_agent_session(payload: AgentSessionCreateRequest, db: Session = Depends(get_agent_db)) -> AgentSessionItem:
     try:
         session = create_session(db, payload)
     except Exception as exc:
@@ -136,7 +136,7 @@ async def get_agent_sessions(
     device_id: str | None = Query(default=None),
     status: str = Query(default="active", pattern="^(active|archived|deleted|all)$"),
     limit: int = Query(default=20, ge=1, le=100),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentSessionListResponse:
     try:
         sessions = list_sessions(db, user_id=user_id, device_id=device_id, status=status, limit=limit)
@@ -151,7 +151,7 @@ async def get_agent_session(
     session_id: str,
     user_id: str | None = Query(default=None),
     device_id: str | None = Query(default=None),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentSessionItem:
     try:
         session = _resolve_session_with_optional_actor(db, session_id, user_id=user_id, device_id=device_id)
@@ -168,7 +168,7 @@ async def get_agent_messages(
     user_id: str | None = Query(default=None),
     device_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentMessageListResponse:
     try:
         session = _resolve_session_with_optional_actor(db, session_id, user_id=user_id, device_id=device_id)
@@ -186,7 +186,7 @@ async def get_agent_turns(
     user_id: str | None = Query(default=None),
     device_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentTurnStateListResponse:
     try:
         session = _resolve_session_with_optional_actor(db, session_id, user_id=user_id, device_id=device_id)
@@ -199,7 +199,7 @@ async def get_agent_turns(
 
 
 @router.post("/chat", response_model=AgentChatResponse)
-async def post_agent_chat(payload: AgentChatRequest, db: Session = Depends(get_db)) -> AgentChatResponse:
+async def post_agent_chat(payload: AgentChatRequest, db: Session = Depends(get_agent_db)) -> AgentChatResponse:
     try:
         return await run_chat(db, payload)
     except Exception as exc:
@@ -207,7 +207,7 @@ async def post_agent_chat(payload: AgentChatRequest, db: Session = Depends(get_d
 
 
 @router.post("/chat/stream", response_model=None, response_class=StreamingResponse)
-async def post_agent_chat_stream(payload: AgentChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
+async def post_agent_chat_stream(payload: AgentChatRequest, db: Session = Depends(get_agent_db)) -> StreamingResponse:
     async def event_stream():
         yield _sse_event("ready", {"message": "agent stream connected"})
 
@@ -312,7 +312,7 @@ async def post_agent_summary(
     session_id: str,
     user_id: str | None = Query(default=None),
     device_id: str | None = Query(default=None),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentSummaryResponse:
     try:
         return summarize_session(db, session_id, user_id=user_id, device_id=device_id)
@@ -326,7 +326,7 @@ async def get_agent_actions(
     user_id: str | None = Query(default=None),
     device_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentActionListResponse:
     try:
         session = _resolve_session_with_optional_actor(db, session_id, user_id=user_id, device_id=device_id)
@@ -340,7 +340,7 @@ async def get_agent_actions(
 @router.post("/actions", response_model=AgentActionExecuteResponse)
 async def post_agent_action(
     payload: AgentActionExecuteRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentActionExecuteResponse:
     try:
         session = _resolve_session_with_optional_actor(
@@ -362,7 +362,7 @@ async def get_agent_tasks(
     user_id: str | None = Query(default=None),
     device_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentTaskListResponse:
     try:
         session = _resolve_session_with_optional_actor(db, session_id, user_id=user_id, device_id=device_id)
@@ -376,7 +376,7 @@ async def get_agent_tasks(
 @router.post("/tasks", response_model=AgentTaskDetailResponse)
 async def post_agent_task(
     payload: AgentTaskCreateRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentTaskDetailResponse:
     try:
         session = _resolve_session_with_optional_actor(
@@ -398,7 +398,7 @@ async def get_agent_task(
     task_id: str,
     user_id: str | None = Query(default=None),
     device_id: str | None = Query(default=None),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentTaskDetailResponse:
     try:
         task = get_task_for_actor_or_none(db, task_id, user_id=user_id, device_id=device_id)
@@ -413,7 +413,7 @@ async def get_agent_task(
 async def post_agent_task_status(
     task_id: str,
     payload: AgentTaskStatusUpdateRequest,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_agent_db),
 ) -> AgentTaskDetailResponse:
     try:
         task = get_task_for_actor_or_none(db, task_id, user_id=payload.user_id, device_id=payload.device_id)

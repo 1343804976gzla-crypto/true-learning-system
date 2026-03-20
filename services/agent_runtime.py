@@ -27,8 +27,9 @@ from agent_models import (
     AgentToolCache,
     AgentTurnState,
 )
+from database.domains import agent_engine
 from learning_tracking_models import LearningSession, WrongAnswerV2
-from models import Chapter, engine
+from models import Chapter
 from services.agent_actions import list_action_tool_definitions
 from services.agent_context import build_agent_context, estimate_tokens, redact_sensitive_output
 from services.agent_memory import (
@@ -450,16 +451,16 @@ def ensure_agent_schema() -> None:
     if _AGENT_SCHEMA_READY:
         return
 
-    AgentSession.__table__.create(bind=engine, checkfirst=True)
-    AgentMessage.__table__.create(bind=engine, checkfirst=True)
-    AgentMemory.__table__.create(bind=engine, checkfirst=True)
-    AgentToolCall.__table__.create(bind=engine, checkfirst=True)
-    AgentTurnState.__table__.create(bind=engine, checkfirst=True)
-    AgentToolCache.__table__.create(bind=engine, checkfirst=True)
-    AgentActionLog.__table__.create(bind=engine, checkfirst=True)
-    AgentTask.__table__.create(bind=engine, checkfirst=True)
-    AgentTaskEvent.__table__.create(bind=engine, checkfirst=True)
-    with engine.begin() as connection:
+    AgentSession.__table__.create(bind=agent_engine, checkfirst=True)
+    AgentMessage.__table__.create(bind=agent_engine, checkfirst=True)
+    AgentMemory.__table__.create(bind=agent_engine, checkfirst=True)
+    AgentToolCall.__table__.create(bind=agent_engine, checkfirst=True)
+    AgentTurnState.__table__.create(bind=agent_engine, checkfirst=True)
+    AgentToolCache.__table__.create(bind=agent_engine, checkfirst=True)
+    AgentActionLog.__table__.create(bind=agent_engine, checkfirst=True)
+    AgentTask.__table__.create(bind=agent_engine, checkfirst=True)
+    AgentTaskEvent.__table__.create(bind=agent_engine, checkfirst=True)
+    with agent_engine.begin() as connection:
         connection.exec_driver_sql(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_messages_session_trace_role "
             "ON agent_messages (session_id, trace_id, role)"

@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Iterator
+
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
+
+def _normalize_database_url(value: str, *, default_relative_path: str | None = None) -> str:
+    candidate = (value or "").strip()
+    if not candidate and default_relative_path:
+        candidate = default_relative_path
+
+    if candidate.startswith("sqlite:///"):
+        return candidate
+
+    if not candidate:
+        raise ValueError("database path is required")
+
+    db_path = Path(candidate)
+    if not db_path.is_absolute():
+        db_path = (BASE_DIR / db_path).resolve()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{db_path.as_posix()}"
+
+
+def _resolve_database_url(*env_names: str, default_relative_path: str) -> str:
+    for env_name in env_names:
+        value = (os.getenv(env_name) or "").strip()
+        if value:
+            return _normalize_database_url(value)
+    return _normalize_database_url("", default_relative_path=default_relative_path)
+
+
+def get_sqlite_path(database_url: str) -> Path | None:
+    if not database_url.startswith("sqlite:///"):
+        return None
+    return Path(database_url.replace("sqlite:///", "", 1)).resolve()
+
+
+def _create_sqlite_engine(database_url: str) -> Engine:
+    engine = create_engine(
+        database_url,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        echo=False,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _configure_sqlite_connection(dbapi_connection, _connection_record):
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA busy_timeout = 30000")
+            cursor.execute("PRAGMA journal_mode = WAL")
+            cursor.execute("PRAGMA synchronous = NORMAL")
+            cursor.close()
+        except Exception:
+            pass
+
+    return engine
+
+
+CORE_DATABASE_URL = _resolve_database_url(
+    "DATABASE_PATH",
+    "CORE_DATABASE_PATH",
+    "CORE_DATABASE_URL",
+    default_relative_path="data/learning.db",
+)
+
+AGENT_DATABASE_URL = _normalize_database_url(
+    os.getenv("AGENT_DATABASE_PATH") or os.getenv("AGENT_DATABASE_URL") or CORE_DATABASE_URL
+)
+
+CoreBase = declarative_base()
+AgentBase = declarative_base()
+
+core_engine = _create_sqlite_engine(CORE_DATABASE_URL)
+agent_engine = _create_sqlite_engine(AGENT_DATABASE_URL)
+
+CoreSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=core_engine)
+AgentSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=agent_engine)
+
+
+class RoutedDomainSession(Session):
+    """Route agent ORM models to agent.db while keeping core models on learning.db."""
+
+    def get_bind(self, mapper=None, clause=None, **kwargs):
+        if mapper is not None:
+            table = getattr(mapper.class_, "__table__", None)
+            metadata = getattr(table, "metadata", None)
+            if metadata is AgentBase.metadata:
+                return agent_engine
+            if metadata is CoreBase.metadata:
+                return core_engine
+
+        froms = getattr(clause, "froms", None) or []
+        for from_clause in froms:
+            metadata = getattr(from_clause, "metadata", None)
+            if metadata is AgentBase.metadata:
+                return agent_engine
+            if metadata is CoreBase.metadata:
+                return core_engine
+
+        return core_engine
+
+
+AppSessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    class_=RoutedDomainSession,
+)
+
+
+def _session_dependency(factory: sessionmaker) -> Iterator[Session]:
+    db = factory()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_db() -> Iterator[Session]:
+    yield from _session_dependency(AppSessionLocal)
+
+
+def get_core_db() -> Iterator[Session]:
+    yield from _session_dependency(CoreSessionLocal)
+
+
+def get_agent_db() -> Iterator[Session]:
+    yield from _session_dependency(AppSessionLocal)
