@@ -7,7 +7,7 @@ from time import perf_counter
 from typing import Any, Dict, List, Literal, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import desc, func, or_
+from sqlalchemy import desc, false, func, or_
 from sqlalchemy.orm import Session
 
 from learning_tracking_models import INVALID_CHAPTER_IDS, LearningSession, WrongAnswerRetry, WrongAnswerV2
@@ -289,15 +289,17 @@ async def _run_wrong_answers(
         base_query = base_query.filter(WrongAnswerV2.chapter_id.in_(chapter_ids))
     if query_text:
         like = f"%{query_text}%"
-        base_query = (
-            base_query.outerjoin(Chapter, WrongAnswerV2.chapter_id == Chapter.id)
-            .filter(
-                or_(
-                    WrongAnswerV2.key_point.ilike(like),
-                    WrongAnswerV2.question_text.ilike(like),
-                    Chapter.chapter_title.ilike(like),
-                    Chapter.book.ilike(like),
-                )
+        chapter_match_ids = [
+            chapter.id
+            for chapter in db.query(Chapter.id)
+            .filter(or_(Chapter.chapter_title.ilike(like), Chapter.book.ilike(like)))
+            .all()
+        ]
+        base_query = base_query.filter(
+            or_(
+                WrongAnswerV2.key_point.ilike(like),
+                WrongAnswerV2.question_text.ilike(like),
+                WrongAnswerV2.chapter_id.in_(chapter_match_ids) if chapter_match_ids else false(),
             )
         )
     if args.status != "all":

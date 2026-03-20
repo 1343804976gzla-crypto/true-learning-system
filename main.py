@@ -53,6 +53,7 @@ from services.agent_runtime import ensure_agent_schema
 from services.openmanus_bridge import sync_openmanus_config
 from services.openviking_sync import install_openviking_sync_hooks
 from knowledge_upload_models import create_knowledge_upload_tables
+from learning_tracking_models import create_learning_tracking_tables
 from routers import api_router
 from utils.chapter_catalog import clean_batch_chapter_rows, normalize_book_name
 from routers.quiz import router as quiz_router
@@ -133,6 +134,7 @@ async def startup():
 
         init_db()
         ensure_agent_schema()
+        create_learning_tracking_tables()
         create_knowledge_upload_tables()
         ensure_learning_identity_schema()
         try:

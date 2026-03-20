@@ -11,7 +11,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as OrmSession
 
-from models import engine
+from database.domains import agent_engine, core_engine, review_engine
 
 DEVICE_ID_HEADER = "x-tls-device-id"
 USER_ID_HEADER = "x-tls-user-id"
@@ -25,22 +25,36 @@ _IDENTITY_SCHEMA_LOCK = Lock()
 _SINGLE_USER_DEVICE_CACHE: tuple[str, ...] | None = None
 _SINGLE_USER_DEVICE_CACHE_LOCK = Lock()
 
-_IDENTITY_TABLES = (
+_CORE_IDENTITY_TABLES = (
     "daily_uploads",
     "concept_mastery",
     "test_records",
     "learning_sessions",
     "learning_activities",
     "question_records",
+)
+_REVIEW_IDENTITY_TABLES = (
     "wrong_answers_v2",
     "wrong_answer_retries",
 )
-_SINGLE_USER_DEVICE_TABLES = _IDENTITY_TABLES + (
-    "daily_review_papers",
-    "daily_learning_logs",
-    "batch_exam_states",
-    "agent_sessions",
-)
+_SINGLE_USER_DEVICE_TABLES = {
+    core_engine: _CORE_IDENTITY_TABLES + (
+        "daily_learning_logs",
+        "batch_exam_states",
+    ),
+    review_engine: _REVIEW_IDENTITY_TABLES + (
+        "daily_review_papers",
+    ),
+    agent_engine: (
+        "agent_sessions",
+    ),
+}
+_IDENTITY_TABLES = {
+    core_engine: _CORE_IDENTITY_TABLES,
+    review_engine: _REVIEW_IDENTITY_TABLES + (
+        "daily_review_papers",
+    ),
+}
 
 
 def _normalize_identity(value: str | None) -> str | None:
@@ -72,28 +86,29 @@ def _load_single_user_device_aliases() -> list[str]:
             return list(_SINGLE_USER_DEVICE_CACHE)
 
         aliases = {DEFAULT_DEVICE_ID}
-        with engine.begin() as connection:
-            for table_name in dict.fromkeys(_SINGLE_USER_DEVICE_TABLES):
-                existing_columns = {
-                    str(row[1]).lower()
-                    for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
-                }
-                if "device_id" not in existing_columns:
-                    continue
-
-                rows = connection.exec_driver_sql(
-                    f"""
-                    SELECT DISTINCT device_id
-                    FROM {table_name}
-                    WHERE device_id IS NOT NULL AND TRIM(device_id) <> ''
-                    """
-                ).fetchall()
-                for row in rows:
-                    device_id = _normalize_identity(row[0])
-                    if not device_id:
+        for current_engine, table_names in _SINGLE_USER_DEVICE_TABLES.items():
+            with current_engine.begin() as connection:
+                for table_name in dict.fromkeys(table_names):
+                    existing_columns = {
+                        str(row[1]).lower()
+                        for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+                    }
+                    if "device_id" not in existing_columns:
                         continue
-                    if device_id == DEFAULT_DEVICE_ID or device_id.startswith("local-"):
-                        aliases.add(device_id)
+
+                    rows = connection.exec_driver_sql(
+                        f"""
+                        SELECT DISTINCT device_id
+                        FROM {table_name}
+                        WHERE device_id IS NOT NULL AND TRIM(device_id) <> ''
+                        """
+                    ).fetchall()
+                    for row in rows:
+                        device_id = _normalize_identity(row[0])
+                        if not device_id:
+                            continue
+                        if device_id == DEFAULT_DEVICE_ID or device_id.startswith("local-"):
+                            aliases.add(device_id)
 
         ordered = [DEFAULT_DEVICE_ID] + sorted(alias for alias in aliases if alias != DEFAULT_DEVICE_ID)
         _SINGLE_USER_DEVICE_CACHE = tuple(ordered)
@@ -524,32 +539,34 @@ def ensure_learning_identity_schema() -> None:
         max_attempts = 5
         for attempt in range(1, max_attempts + 1):
             try:
-                with engine.begin() as connection:
-                    dialect = connection.dialect.name
-                    if dialect != "sqlite":
-                        _IDENTITY_SCHEMA_READY = True
-                        return
-
-                    for table_name in _IDENTITY_TABLES:
-                        existing_columns = {
-                            str(row[1]).lower()
-                            for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
-                        }
-                        if not existing_columns:
+                for current_engine, table_names in _IDENTITY_TABLES.items():
+                    with current_engine.begin() as connection:
+                        dialect = connection.dialect.name
+                        if dialect != "sqlite":
                             continue
 
-                        if "user_id" not in existing_columns:
-                            connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN user_id TEXT")
-                        if "device_id" not in existing_columns:
-                            connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN device_id TEXT")
+                        for table_name in table_names:
+                            existing_columns = {
+                                str(row[1]).lower()
+                                for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()
+                            }
+                            if not existing_columns:
+                                continue
 
-                        connection.exec_driver_sql(
-                            f"UPDATE {table_name} SET device_id = ? WHERE device_id IS NULL OR TRIM(device_id) = ''",
-                            (DEFAULT_DEVICE_ID,),
-                        )
+                            if "user_id" not in existing_columns:
+                                connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN user_id TEXT")
+                            if "device_id" not in existing_columns:
+                                connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN device_id TEXT")
 
-                    _ensure_daily_review_paper_schema(connection)
-                    _ensure_daily_learning_log_schema(connection)
+                            connection.exec_driver_sql(
+                                f"UPDATE {table_name} SET device_id = ? WHERE device_id IS NULL OR TRIM(device_id) = ''",
+                                (DEFAULT_DEVICE_ID,),
+                            )
+
+                        if current_engine is review_engine:
+                            _ensure_daily_review_paper_schema(connection)
+                        if current_engine is core_engine:
+                            _ensure_daily_learning_log_schema(connection)
 
                     _IDENTITY_SCHEMA_READY = True
                     return

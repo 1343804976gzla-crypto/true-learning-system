@@ -25,6 +25,15 @@
 
 - `C:\Users\35456\true-learning-system\data\learning.db`
 
+补充说明：
+
+截至 2026-03-20 当前实现已经进入拆分过渡期，新增了：
+
+- `C:\Users\35456\true-learning-system\data\agent.db`
+- `C:\Users\35456\true-learning-system\data\wrong_answer_review.db`
+
+但从整体架构看，`content_knowledge` 与 `learning_runtime` 仍未物理拆出，系统仍处于“部分分库、部分单库”的中间阶段。
+
 但业务上已经包含多个明显不同的数据域：
 
 - 内容知识底座

@@ -1954,11 +1954,14 @@ async def get_wrong_answer_list(
     if severity:
         query = query.filter(WrongAnswerV2.severity_tag == severity)
 
-    # book 筛选 (需要 JOIN Chapter)
+    # book 筛选
     if book:
-        query = query.join(Chapter, WrongAnswerV2.chapter_id == Chapter.id).filter(
-            Chapter.book == book
-        )
+        chapter_ids_for_book = [chapter.id for chapter in db.query(Chapter.id).filter(Chapter.book == book).all()]
+        if not chapter_ids_for_book:
+            if view == "chapter":
+                return {"view": "chapter", "total": 0, "tree": {}}
+            return {"view": view, "total": 0, "page": page, "items": []}
+        query = query.filter(WrongAnswerV2.chapter_id.in_(chapter_ids_for_book))
 
     total = query.count()
 
@@ -2681,22 +2684,6 @@ async def recognize_chapters_for_wrong_answers(
 
         return None
 
-    def build_candidate_query():
-        return (
-            db.query(WrongAnswerV2)
-            .outerjoin(Chapter, WrongAnswerV2.chapter_id == Chapter.id)
-            .filter(
-                or_(
-                    WrongAnswerV2.chapter_id.is_(None),
-                    WrongAnswerV2.chapter_id == "",
-                    WrongAnswerV2.chapter_id == "0",
-                    WrongAnswerV2.chapter_id.like('%未分类%'),
-                    WrongAnswerV2.chapter_id.in_(["unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0"]),
-                    Chapter.id.is_(None),
-                )
-            )
-        )
-
     from services.ai_client import get_ai_client
 
     real_chapters = db.query(Chapter).filter(
@@ -2705,6 +2692,19 @@ async def recognize_chapters_for_wrong_answers(
         ~Chapter.id.like('%未分类%')
     ).all()
     valid_ids = {ch.id for ch in real_chapters}
+
+    def build_candidate_query():
+        invalid_values = ["unknown_ch0", "未知_ch0", "无法识别_ch0", "未分类_ch0"]
+        invalid_filters = [
+            WrongAnswerV2.chapter_id.is_(None),
+            WrongAnswerV2.chapter_id == "",
+            WrongAnswerV2.chapter_id == "0",
+            WrongAnswerV2.chapter_id.like('%未分类%'),
+            WrongAnswerV2.chapter_id.in_(invalid_values),
+        ]
+        if valid_ids:
+            invalid_filters.append(~WrongAnswerV2.chapter_id.in_(list(valid_ids)))
+        return db.query(WrongAnswerV2).filter(or_(*invalid_filters))
 
     chapter_text_parts = []
     current_book = ""

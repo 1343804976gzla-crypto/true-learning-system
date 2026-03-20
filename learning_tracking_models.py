@@ -4,17 +4,18 @@
 """
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Text, Date, DateTime, 
+    Column, Integer, String, Text, Date, DateTime,
     Float, Boolean, ForeignKey, JSON, Enum, Interval, UniqueConstraint
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import relationship
 from datetime import datetime, date, timedelta
 import enum
 import hashlib
 
-# 复用现有引擎和基类
-from models import Base, engine, SessionLocal
+# 复用现有数据库域
+from database.domains import CoreBase, ReviewBase, core_engine, review_engine
+
+Base = CoreBase
 
 
 INVALID_CHAPTER_IDS = {
@@ -249,7 +250,7 @@ class LearningInsight(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
-class WrongAnswerV2(Base):
+class WrongAnswerV2(ReviewBase):
     """
     错题本V2 - 基于QuestionRecord自动收录
     按题目指纹去重，聚合统计，急救标签分级
@@ -269,7 +270,7 @@ class WrongAnswerV2(Base):
     key_point = Column(String, index=True)
     question_type = Column(String)       # A1/A2/A3/X
     difficulty = Column(String)          # 基础/提高/难题
-    chapter_id = Column(String, ForeignKey("chapters.id"), nullable=True)
+    chapter_id = Column(String, nullable=True, index=True)
 
     # 聚合统计
     error_count = Column(Integer, default=1)
@@ -343,7 +344,7 @@ class WrongAnswerV2(Base):
     retries = relationship("WrongAnswerRetry", back_populates="wrong_answer", cascade="all, delete-orphan")
 
 
-class WrongAnswerRetry(Base):
+class WrongAnswerRetry(ReviewBase):
     """
     错题重做记录 - 每次重做产生一条
     """
@@ -377,7 +378,7 @@ class WrongAnswerRetry(Base):
     wrong_answer = relationship("WrongAnswerV2", back_populates="retries")
 
 
-class DailyReviewPaper(Base):
+class DailyReviewPaper(ReviewBase):
     """
     每日复习卷主表
     同一 actor 在同一天只保留一份抽题结果，确保重复导出时题卷稳定。
@@ -400,7 +401,7 @@ class DailyReviewPaper(Base):
     items = relationship("DailyReviewPaperItem", back_populates="paper", cascade="all, delete-orphan")
 
 
-class DailyReviewPaperItem(Base):
+class DailyReviewPaperItem(ReviewBase):
     """
     每日复习卷题目快照
     保存抽中题目的顺序与快照，便于后续稳定复现 PDF 内容与 5 天避重。
@@ -423,7 +424,7 @@ class DailyReviewPaperItem(Base):
     paper = relationship("DailyReviewPaper", back_populates="items")
 
 
-class ChapterReviewChapter(Base):
+class ChapterReviewChapter(ReviewBase):
     """
     章节复习主表
     基于上传内容构建，按 actor + chapter 维度保存合并后的原文与复习状态。
@@ -459,7 +460,7 @@ class ChapterReviewChapter(Base):
     tasks = relationship("ChapterReviewTask", back_populates="review_chapter", cascade="all, delete-orphan")
 
 
-class ChapterReviewUnit(Base):
+class ChapterReviewUnit(ReviewBase):
     """
     章节复习单元
     把长章节切成更适合每日复习的若干块，每块固定生成 10 道简答题。
@@ -494,7 +495,7 @@ class ChapterReviewUnit(Base):
     tasks = relationship("ChapterReviewTask", back_populates="unit", cascade="all, delete-orphan")
 
 
-class ChapterReviewTask(Base):
+class ChapterReviewTask(ReviewBase):
     """
     每日复习任务
     一个任务对应一个复习单元，可顺延、暂停并在第二天继续完成。
@@ -532,7 +533,7 @@ class ChapterReviewTask(Base):
     questions = relationship("ChapterReviewTaskQuestion", back_populates="task", cascade="all, delete-orphan")
 
 
-class ChapterReviewTaskQuestion(Base):
+class ChapterReviewTaskQuestion(ReviewBase):
     """
     复习任务题目快照
     保存生成的简答题、参考答案、解析与用户作答，便于中断续做与 PDF 导出。
@@ -590,12 +591,15 @@ class BatchExamState(Base):
 # 创建表的函数
 def create_learning_tracking_tables():
     """创建学习轨迹记录相关的表"""
-    Base.metadata.create_all(bind=engine, tables=[
+    CoreBase.metadata.create_all(bind=core_engine, tables=[
         LearningSession.__table__,
         LearningActivity.__table__,
         QuestionRecord.__table__,
         DailyLearningLog.__table__,
         LearningInsight.__table__,
+        BatchExamState.__table__,
+    ])
+    ReviewBase.metadata.create_all(bind=review_engine, tables=[
         WrongAnswerV2.__table__,
         WrongAnswerRetry.__table__,
         DailyReviewPaper.__table__,
@@ -604,7 +608,6 @@ def create_learning_tracking_tables():
         ChapterReviewUnit.__table__,
         ChapterReviewTask.__table__,
         ChapterReviewTaskQuestion.__table__,
-        BatchExamState.__table__,
     ])
     print("✅ 学习轨迹记录表创建完成")
 

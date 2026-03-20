@@ -14,30 +14,40 @@
 
 ## 2. 当前实际数据库现状
 
-当前 `localhost:8000` 在线服务实际连接的是：
+截至 2026-03-20 当前代码已经进入“分库过渡期”，不再是纯单库。
+
+当前 `localhost:8000` 实际使用的数据库文件是：
 
 - `C:\Users\35456\true-learning-system\data\learning.db`
+- `C:\Users\35456\true-learning-system\data\agent.db`
+- `C:\Users\35456\true-learning-system\data\wrong_answer_review.db`
 
-虽然从业务上已经出现了多个数据域，但物理上目前仍然主要共用一个 SQLite 文件：
+当前实际分布：
 
 - `learning.db`
+  - 上传数据
+  - 章节与知识点
+  - 做题记录
+  - 旧兼容表
+- `agent.db`
+  - `agent_*`
+- `wrong_answer_review.db`
+  - `wrong_answers_v2`
+  - `wrong_answer_retries`
+  - `daily_review_papers`
+  - `daily_review_paper_items`
+  - `chapter_review_*`
 
-也就是说：
+也就是说，当前物理层已经完成两步拆分：
 
-- 上传数据
-- 章节与知识点
-- 做题记录
-- 错题本
-- 每日复习卷
-- 章节复习任务
-- Agent 会话
+1. Agent 域已拆出
+2. Modern Review 域已拆出
 
-目前都还在同一个 SQLite 文件里。
+尚未拆出的仍主要是：
 
-因此“每份功能对应的数据库”需要分两层理解：
-
-1. 当前物理层：都在同一个 `learning.db`
-2. 建议逻辑层：应该拆成多个独立数据库
+- 内容知识底座
+- 做题运行态
+- 旧兼容错题表 `wrong_answers`
 
 ## 3. 功能总览与建议拆库总表
 
@@ -45,7 +55,7 @@
 |---|---|---|---|---|
 | 内容上传与课程知识底座 | `/upload` `/chapter/{id}` `/graph` `/api/chapters*` `/api/concept/{id}` | `daily_uploads`, `chapters`, `concept_mastery`, `knowledge_*` | `content_knowledge.db` | 全站知识基础层 |
 | 做题运行态 | `/quiz/batch/*` `/quiz/detail` `/quiz/practice/*` `/quiz/fast/*` `/quiz/super/*` `/api/tracking/session/*` | `learning_sessions`, `learning_activities`, `question_records`, `batch_exam_states`, `quiz_sessions`, `test_records`, `feynman_sessions`, `variations` | `learning_runtime.db` | 做题、交卷、会话恢复的运行数据 |
-| 错题与复习闭环 | `/wrong-answers` `/api/wrong-answers/*` `/api/challenge/*` `/api/fusion/*` `/knowledge-archive` | `wrong_answers_v2`, `wrong_answer_retries`, `daily_review_papers`, `daily_review_paper_items`, `chapter_review_*`, `wrong_answers` | `wrong_answer_review.db` | 最核心的长期学习资产 |
+| 错题与复习闭环 | `/wrong-answers` `/api/wrong-answers/*` `/api/challenge/*` `/api/fusion/*` `/knowledge-archive` | `wrong_answers_v2`, `wrong_answer_retries`, `daily_review_papers`, `daily_review_paper_items`, `chapter_review_*`, `wrong_answers` | `wrong_answer_review.db` | 其中 modern review 表已实际迁出，`wrong_answers` 旧表暂未迁出 |
 | 历史统计与看板 | `/` `/history` `/learning-tracking` | 读取上面多个域的表，另有 `daily_learning_logs`, `learning_insights`, `knowledge_daily_reports` | 聚合层，不建议单独建库 | 本质是跨库读取或预聚合 |
 | Agent | `/agent` `/api/agent/*` | `agent_sessions`, `agent_messages`, `agent_memories`, `agent_tool_calls`, `agent_turn_states`, `agent_tool_cache`, `agent_action_logs`, `agent_tasks`, `agent_task_events` | `agent.db` | 天然适合独立拆库 |
 | 兼容旧功能 | `/api/quiz/*` 旧接口 | `wrong_answers`, `quiz_sessions`, `test_records`, `feynman_sessions`, `variations`, `concept_links` | 过渡期可放 `legacy_compat.db` 或暂放 `learning_runtime.db` | 当前仍被部分旧路由使用 |
