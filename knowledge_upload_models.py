@@ -15,7 +15,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
-from models import Base, engine
+from database.domains import ContentBase, content_engine
+
+Base = ContentBase
 
 
 class KnowledgeUploadRecord(Base):
@@ -141,7 +143,7 @@ class KnowledgeDailyReport(Base):
 
 def create_knowledge_upload_tables() -> None:
     Base.metadata.create_all(
-        bind=engine,
+        bind=content_engine,
         tables=[
             KnowledgeUploadRecord.__table__,
             KnowledgePointNote.__table__,

@@ -19,6 +19,7 @@
 当前 `localhost:8000` 实际使用的数据库文件是：
 
 - `C:\Users\35456\true-learning-system\data\learning.db`
+- `C:\Users\35456\true-learning-system\data\content_knowledge.db`
 - `C:\Users\35456\true-learning-system\data\agent.db`
 - `C:\Users\35456\true-learning-system\data\learning_runtime.db`
 - `C:\Users\35456\true-learning-system\data\wrong_answer_review.db`
@@ -26,9 +27,13 @@
 当前实际分布：
 
 - `learning.db`
-  - 上传数据
-  - 章节与知识点
-  - 旧兼容表
+  - legacy 兼容表
+- `content_knowledge.db`
+  - `daily_uploads`
+  - `chapters`
+  - `concept_mastery`
+  - `concept_links`
+  - `knowledge_*`
 - `learning_runtime.db`
   - `learning_sessions`
   - `learning_activities`
@@ -49,15 +54,15 @@
   - `daily_review_paper_items`
   - `chapter_review_*`
 
-也就是说，当前物理层已经完成三步拆分：
+也就是说，当前四个主业务域都已完成物理拆分：
 
-1. Agent 域已拆出
-2. Modern Review 域已拆出
-3. Runtime 域已拆出
+1. Content 域已拆出
+2. Agent 域已拆出
+3. Modern Review 域已拆出
+4. Runtime 域已拆出
 
 尚未拆出的仍主要是：
 
-- 内容知识底座
 - 旧兼容错题表 `wrong_answers`
 
 ## 3. 功能总览与建议拆库总表

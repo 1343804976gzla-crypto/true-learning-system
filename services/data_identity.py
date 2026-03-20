@@ -11,7 +11,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as OrmSession
 
-from database.domains import agent_engine, core_engine, review_engine, runtime_engine
+from database.domains import agent_engine, content_engine, review_engine, runtime_engine
 
 DEVICE_ID_HEADER = "x-tls-device-id"
 USER_ID_HEADER = "x-tls-user-id"
@@ -25,9 +25,14 @@ _IDENTITY_SCHEMA_LOCK = Lock()
 _SINGLE_USER_DEVICE_CACHE: tuple[str, ...] | None = None
 _SINGLE_USER_DEVICE_CACHE_LOCK = Lock()
 
-_CORE_IDENTITY_TABLES = (
+_CONTENT_IDENTITY_TABLES = (
     "daily_uploads",
     "concept_mastery",
+    "knowledge_upload_records",
+    "knowledge_point_notes",
+    "knowledge_point_sources",
+    "knowledge_pending_classifications",
+    "knowledge_daily_reports",
 )
 _RUNTIME_IDENTITY_TABLES = (
     "test_records",
@@ -42,7 +47,7 @@ _REVIEW_IDENTITY_TABLES = (
     "wrong_answer_retries",
 )
 _SINGLE_USER_DEVICE_TABLES = {
-    core_engine: _CORE_IDENTITY_TABLES,
+    content_engine: _CONTENT_IDENTITY_TABLES,
     runtime_engine: _RUNTIME_IDENTITY_TABLES,
     review_engine: _REVIEW_IDENTITY_TABLES + (
         "daily_review_papers",
@@ -52,7 +57,7 @@ _SINGLE_USER_DEVICE_TABLES = {
     ),
 }
 _IDENTITY_TABLES = {
-    core_engine: _CORE_IDENTITY_TABLES,
+    content_engine: _CONTENT_IDENTITY_TABLES,
     runtime_engine: _RUNTIME_IDENTITY_TABLES,
     review_engine: _REVIEW_IDENTITY_TABLES + (
         "daily_review_papers",

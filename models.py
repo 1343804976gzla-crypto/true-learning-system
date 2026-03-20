@@ -20,25 +20,30 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database.domains import (
+    CONTENT_DATABASE_URL,
     CORE_DATABASE_URL,
     RUNTIME_DATABASE_URL,
     AppSessionLocal,
+    ContentBase,
     CoreBase,
     RuntimeBase,
+    content_engine,
     core_engine,
     get_db,
     runtime_engine,
 )
 
 DATABASE_URL = CORE_DATABASE_URL
+CONTENT_DB_URL = CONTENT_DATABASE_URL
 RUNTIME_DB_URL = RUNTIME_DATABASE_URL
 engine = core_engine
+content_db_engine = content_engine
 runtime_db_engine = runtime_engine
 SessionLocal = AppSessionLocal
 Base = CoreBase
 
 
-class DailyUpload(Base):
+class DailyUpload(ContentBase):
     __tablename__ = "daily_uploads"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -50,7 +55,7 @@ class DailyUpload(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
-class Chapter(Base):
+class Chapter(ContentBase):
     __tablename__ = "chapters"
 
     id = Column(String, primary_key=True, index=True)
@@ -66,7 +71,7 @@ class Chapter(Base):
     concept_mastery_records = relationship("ConceptMastery", back_populates="chapter")
 
 
-class ConceptMastery(Base):
+class ConceptMastery(ContentBase):
     __tablename__ = "concept_mastery"
 
     user_id = Column(String, nullable=True, index=True)
@@ -81,7 +86,6 @@ class ConceptMastery(Base):
     next_review = Column(Date, index=True)
 
     chapter = relationship("Chapter", back_populates="concept_mastery_records")
-    wrong_answers = relationship("WrongAnswer", back_populates="concept")
 
 
 class TestRecord(RuntimeBase):
@@ -122,7 +126,7 @@ class FeynmanSession(RuntimeBase):
     completed_at = Column(DateTime)
 
 
-class ConceptLink(Base):
+class ConceptLink(ContentBase):
     __tablename__ = "concept_links"
 
     from_concept = Column(String, nullable=False)
@@ -149,11 +153,11 @@ class Variation(RuntimeBase):
     created_at = Column(DateTime, default=datetime.now)
 
 
-class WrongAnswer(Base):
+class WrongAnswer(CoreBase):
     __tablename__ = "wrong_answers"
 
     id = Column(Integer, primary_key=True, index=True)
-    concept_id = Column(String, ForeignKey("concept_mastery.concept_id"), nullable=False)
+    concept_id = Column(String, nullable=False, index=True)
 
     question = Column(Text, nullable=False)
     options = Column(JSON)
@@ -169,8 +173,6 @@ class WrongAnswer(Base):
     next_review = Column(Date, default=date.today)
     mastery_level = Column(Integer, default=0)
     is_mastered = Column(Boolean, default=False)
-
-    concept = relationship("ConceptMastery", back_populates="wrong_answers")
     created_at = Column(DateTime, default=datetime.now)
 
 
@@ -190,7 +192,8 @@ class QuizSession(RuntimeBase):
 
 
 def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
+    CoreBase.metadata.create_all(bind=engine)
+    ContentBase.metadata.create_all(bind=content_db_engine)
     RuntimeBase.metadata.create_all(bind=runtime_db_engine)
     print("Database initialized")
 

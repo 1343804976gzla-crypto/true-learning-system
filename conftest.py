@@ -12,6 +12,7 @@ os.close(_fd)
 
 # Keep pytest runs isolated from the user's real learning.db.
 os.environ["DATABASE_PATH"] = str(Path(_db_path).resolve())
+os.environ["CONTENT_DATABASE_PATH"] = str(Path(_db_path).resolve())
 os.environ["AGENT_DATABASE_PATH"] = str(Path(_db_path).resolve())
 os.environ["RUNTIME_DATABASE_PATH"] = str(Path(_db_path).resolve())
 os.environ["REVIEW_DATABASE_PATH"] = str(Path(_db_path).resolve())
@@ -24,7 +25,7 @@ import knowledge_upload_models  # noqa: F401
 
 from learning_tracking_models import create_learning_tracking_tables
 from knowledge_upload_models import create_knowledge_upload_tables
-from models import Base, engine, runtime_db_engine, init_db
+from models import Base, content_db_engine, engine, runtime_db_engine, init_db
 from database.domains import agent_engine, review_engine
 from services.data_identity import clear_identity_caches_for_tests
 
@@ -56,6 +57,7 @@ def reset_test_database():
 
     clear_identity_caches_for_tests()
     engine.dispose()
+    content_db_engine.dispose()
     runtime_db_engine.dispose()
     agent_engine.dispose()
     review_engine.dispose()
@@ -71,6 +73,7 @@ def reset_test_database():
     clear_identity_caches_for_tests()
     yield
     engine.dispose()
+    content_db_engine.dispose()
     runtime_db_engine.dispose()
     agent_engine.dispose()
     review_engine.dispose()

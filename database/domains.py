@@ -72,6 +72,9 @@ CORE_DATABASE_URL = _resolve_database_url(
     "CORE_DATABASE_URL",
     default_relative_path="data/learning.db",
 )
+CONTENT_DATABASE_URL = _normalize_database_url(
+    os.getenv("CONTENT_DATABASE_PATH") or os.getenv("CONTENT_DATABASE_URL") or CORE_DATABASE_URL
+)
 
 AGENT_DATABASE_URL = _normalize_database_url(
     os.getenv("AGENT_DATABASE_PATH") or os.getenv("AGENT_DATABASE_URL") or CORE_DATABASE_URL
@@ -84,16 +87,19 @@ REVIEW_DATABASE_URL = _normalize_database_url(
 )
 
 CoreBase = declarative_base()
+ContentBase = declarative_base()
 AgentBase = declarative_base()
 RuntimeBase = declarative_base()
 ReviewBase = declarative_base()
 
 core_engine = _create_sqlite_engine(CORE_DATABASE_URL)
+content_engine = _create_sqlite_engine(CONTENT_DATABASE_URL)
 agent_engine = _create_sqlite_engine(AGENT_DATABASE_URL)
 runtime_engine = _create_sqlite_engine(RUNTIME_DATABASE_URL)
 review_engine = _create_sqlite_engine(REVIEW_DATABASE_URL)
 
 CoreSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=core_engine)
+ContentSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=content_engine)
 AgentSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=agent_engine)
 RuntimeSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=runtime_engine)
 ReviewSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=review_engine)
@@ -106,6 +112,8 @@ class RoutedDomainSession(Session):
         if mapper is not None:
             table = getattr(mapper.class_, "__table__", None)
             metadata = getattr(table, "metadata", None)
+            if metadata is ContentBase.metadata:
+                return content_engine
             if metadata is AgentBase.metadata:
                 return agent_engine
             if metadata is RuntimeBase.metadata:
@@ -118,6 +126,8 @@ class RoutedDomainSession(Session):
         froms = getattr(clause, "froms", None) or []
         for from_clause in froms:
             metadata = getattr(from_clause, "metadata", None)
+            if metadata is ContentBase.metadata:
+                return content_engine
             if metadata is AgentBase.metadata:
                 return agent_engine
             if metadata is RuntimeBase.metadata:
@@ -151,6 +161,10 @@ def get_db() -> Iterator[Session]:
 
 def get_core_db() -> Iterator[Session]:
     yield from _session_dependency(CoreSessionLocal)
+
+
+def get_content_db() -> Iterator[Session]:
+    yield from _session_dependency(AppSessionLocal)
 
 
 def get_agent_db() -> Iterator[Session]:
