@@ -5,25 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}True Learning System{% endblock %}</title>
 
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: {
-                        serif: ['"Noto Serif SC"', 'Georgia', '"Times New Roman"', 'serif'],
-                        sans: ['-apple-system', '"PingFang SC"', '"Segoe UI"', 'Roboto', 'sans-serif'],
-                    },
-                    colors: {
-                        cream: '#FEFBF6',
-                        warm: { 100: '#FAF6F0', 200: '#F5EDE0', 300: '#E8DCC8', 400: '#C4B49A', 500: '#8B7355' },
-                    }
-                }
-            }
-        }
-    </script>
+    <link rel="stylesheet" href="/static/css/tailwind.css">
 
     <!-- Google Fonts: Noto Serif SC -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -134,7 +116,7 @@
         })();
     </script>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="/static/vendor/chart.umd.min.js"></script>
 
     <style>
         :root {

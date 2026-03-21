@@ -4,8 +4,10 @@
 
 import hashlib
 import io
+import logging
 from datetime import date, datetime, timedelta
 from typing import List, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -20,7 +22,7 @@ from api_contracts import (
     HistoryTimelineResponse,
     HistoryUploadResponse,
 )
-from models import get_db, DailyUpload, Chapter
+from models import get_db, AppSessionLocal, DailyUpload, Chapter
 from learning_tracking_models import LearningSession
 from services.chapter_review_service import (
     DEFAULT_REVIEW_TIME_BUDGET_MINUTES,
@@ -29,6 +31,7 @@ from services.chapter_review_service import (
     ensure_task_questions,
     export_today_review_pdf,
     grade_task_answers,
+    regenerate_task_questions,
     save_task_progress,
     serialize_task_detail,
 )
@@ -382,6 +385,23 @@ async def get_learning_timeline(
     }
 
 
+_preheat_logger = logging.getLogger("review_preheat")
+
+
+async def _preheat_task_questions(session_factory, actor_key: str, task_ids: list[int]):
+    """后台预热：串行生成题目，避免 SQLite 在并发写入时锁表。"""
+    for task_id in task_ids:
+        db = session_factory()
+        try:
+            await ensure_task_questions(db, actor_key=actor_key, task_id=task_id)
+            db.commit()
+        except Exception:
+            _preheat_logger.exception("预热题目生成失败 task_id=%s", task_id)
+            db.rollback()
+        finally:
+            db.close()
+
+
 @router.get("/review-plan", response_model=HistoryReviewPlanResponse)
 async def get_today_review_plan(
     time_budget_minutes: int = Query(default=DEFAULT_REVIEW_TIME_BUDGET_MINUTES, ge=15, le=120),
@@ -396,6 +416,7 @@ async def get_today_review_plan(
         time_budget_minutes=time_budget_minutes,
     )
     db.commit()
+
     return payload
 
 
@@ -475,7 +496,22 @@ async def export_review_pdf(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}",
             "Cache-Control": "no-store",
         },
     )
+
+
+@router.post("/task/{task_id}/regenerate-questions")
+async def regenerate_questions_endpoint(
+    task_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    强制重新生成指定任务的题目（删除旧题，重新调用AI生成）。
+    仅删除未作答的题目，已作答的保留。
+    """
+    actor = resolve_request_actor_scope()
+    task = await regenerate_task_questions(db, actor_key=actor["actor_key"], task_id=task_id)
+    db.commit()
+    return serialize_task_detail(task)

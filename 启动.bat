@@ -1,43 +1,38 @@
 @echo off
+setlocal
 title True Learning System
 color 0A
 
 echo ========================================
 echo   True Learning System
-echo   医学考研智能学习系统
 echo ========================================
 echo.
 
 cd /d "C:\Users\35456\true-learning-system"
 
-echo [1/4] 清理端口冲突...
+echo [1/4] Cleaning previous Python processes...
 taskkill /F /IM pythonw.exe >nul 2>&1
 taskkill /F /IM python.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
-echo [2/4] 启动服务器...
-set TLS_RELOAD=1
-start /B python main.py > server.log 2>&1
+if not defined TLS_RELOAD set TLS_RELOAD=0
+if /I "%TLS_RELOAD%"=="1" (
+    echo [2/4] Starting server in hot reload mode...
+) else (
+    echo [2/4] Starting server in stable mode...
+)
+start "" /B cmd /c "python main.py > server.log 2>&1"
 
-echo [3/4] 等待服务器启动...
+echo [3/4] Waiting for server startup...
 timeout /t 5 /nobreak >nul
 
-echo [4/4] 正在打开浏览器...
+echo [4/4] Opening browser...
 start http://localhost:8000/wrong-answers
 
 echo.
-echo ========================================
-echo   启动完成！
-echo ========================================
+echo Server started: http://localhost:8000/wrong-answers
+echo Logs: server.log
+echo Set TLS_RELOAD=1 before running this script if you need hot reload.
 echo.
-echo 访问地址:
-echo   - 错题本: http://localhost:8000/wrong-answers
-echo   - 错题看板: http://localhost:8000/wrong-answers
-echo.
-echo 提示:
-echo   - 服务器正在后台运行
-echo   - 可以关闭此窗口
-echo   - 如需停止服务器，请在任务管理器中结束 python.exe 进程
-echo.
-
 pause
+endlocal

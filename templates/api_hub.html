@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}API Hub Dashboard{% endblock %}
+{% block content %}
+<div style="max-width:1200px;margin:0 auto;padding:20px;font-family:system-ui,-apple-system,sans-serif">
+  <h1 style="margin-bottom:8px">API Hub Dashboard</h1>
+  <p style="color:#666;margin-bottom:24px">Provider management, pool configuration, and usage analytics</p>
+
+  <!-- Provider Cards -->
+  <h2>Providers</h2>
+  <div id="providers" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:32px"></div>
+
+  <!-- Pool Configuration -->
+  <h2>Pool Configuration</h2>
+  <div id="pools" style="margin-bottom:32px"></div>
+
+  <!-- Cost Summary -->
+  <h2>Cost Summary</h2>
+  <div id="costs" style="display:flex;gap:16px;margin-bottom:32px;flex-wrap:wrap"></div>
+
+  <!-- Usage Chart -->
+  <h2>Usage Timeline (24h)</h2>
+  <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:16px;margin-bottom:32px">
+    <canvas id="usageChart" height="200"></canvas>
+  </div>
+
+  <!-- Health Timeline -->
+  <h2>Provider Health</h2>
+  <div id="health" style="margin-bottom:32px"></div>
+
+  <!-- Price Table -->
+  <h2>Price Table</h2>
+  <table id="prices" style="width:100%;border-collapse:collapse;margin-bottom:32px">
+    <thead><tr style="background:#f5f5f5">
+      <th style="padding:8px;text-align:left;border-bottom:2px solid #ddd">Provider/Model</th>
+      <th style="padding:8px;text-align:right;border-bottom:2px solid #ddd">Input $/1K</th>
+      <th style="padding:8px;text-align:right;border-bottom:2px solid #ddd">Output $/1K</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+const API = '/api/hub';
+const card = (bg, border) => `background:${bg};border:1px solid ${border};border-radius:8px;padding:16px`;
+
+async function loadProviders() {
+  const res = await fetch(`${API}/providers`);
+  const data = await res.json();
+  const el = document.getElementById('providers');
+  el.innerHTML = data.map(p => {
+    const dot = p.healthy ? '🟢' : '🔴';
+    const toggle = p.enabled ? 'Disable' : 'Enable';
+    return `<div style="${card('#fff','#e0e0e0')}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${dot} ${p.name}</strong>
+        <button onclick="toggleProvider('${p.name}',${!p.enabled})" style="padding:4px 12px;border:1px solid #ccc;border-radius:4px;cursor:pointer">${toggle}</button>
+      </div>
+      <div style="color:#666;font-size:13px;margin-top:8px">Model: ${p.model || 'N/A'}</div>
+      <div style="color:#666;font-size:13px">Rate: ${(p.success_rate*100).toFixed(1)}% | Latency: ${p.avg_latency_ms}ms | Samples: ${p.sample_count}</div>
+      <button onclick="testProvider('${p.name}')" style="margin-top:8px;padding:4px 12px;border:1px solid #4CAF50;color:#4CAF50;border-radius:4px;cursor:pointer;background:transparent">Test</button>
+    </div>`;
+  }).join('');
+}
+</script>
+<script>
+async function toggleProvider(name, enable) {
+  await fetch(`${API}/providers/${name}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:enable})});
+  loadProviders();
+}
+async function testProvider(name) {
+  const btn = event.target; btn.textContent = 'Testing...'; btn.disabled = true;
+  const res = await fetch(`${API}/providers/${name}/test`, {method:'POST'});
+  const r = await res.json();
+  btn.textContent = r.success ? `OK (${r.latency_ms}ms)` : `Failed`;
+  btn.style.borderColor = r.success ? '#4CAF50' : '#f44336';
+  btn.style.color = r.success ? '#4CAF50' : '#f44336';
+  setTimeout(() => { btn.textContent = 'Test'; btn.disabled = false; btn.style.borderColor = '#4CAF50'; btn.style.color = '#4CAF50'; }, 3000);
+}
+
+async function loadPools() {
+  const res = await fetch(`${API}/pools`);
+  const data = await res.json();
+  const el = document.getElementById('pools');
+  el.innerHTML = data.map(pool => {
+    const rows = pool.entries.map((e, i) => `<tr><td style="padding:6px 12px">${i+1}</td><td style="padding:6px 12px">${e.provider}</td><td style="padding:6px 12px">${e.model}</td></tr>`).join('');
+    return `<div style="${card('#fff','#e0e0e0')};margin-bottom:12px">
+      <strong>${pool.name} Pool</strong> (${pool.entries.length} models)
+      <table style="width:100%;margin-top:8px;border-collapse:collapse">
+        <thead><tr style="background:#f9f9f9"><th style="padding:6px 12px;text-align:left">#</th><th style="padding:6px 12px;text-align:left">Provider</th><th style="padding:6px 12px;text-align:left">Model</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+}
+
+async function loadCosts() {
+  const res = await fetch(`${API}/usage/costs`);
+  const data = await res.json();
+  const el = document.getElementById('costs');
+  el.innerHTML = [
+    {label:'Today', val:data.daily_usd, color:'#2196F3'},
+    {label:'This Week', val:data.weekly_usd, color:'#FF9800'},
+    {label:'This Month', val:data.monthly_usd, color:'#4CAF50'},
+  ].map(c => `<div style="${card(c.color+'11', c.color+'44')};min-width:160px;text-align:center">
+    <div style="font-size:13px;color:#666">${c.label}</div>
+    <div style="font-size:24px;font-weight:bold;color:${c.color}">$${c.val.toFixed(4)}</div>
+  </div>`).join('');
+}
+
+async function loadUsageChart() {
+  const res = await fetch(`${API}/usage/timeline?period=24h`);
+  const data = await res.json();
+  const labels = Object.keys(data.series || {});
+  const tokens = labels.map(k => (data.series[k]?.total_tokens || 0));
+  const costs = labels.map(k => (data.series[k]?.total_cost || 0));
+  const ctx = document.getElementById('usageChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {label:'Tokens', data:tokens, backgroundColor:'rgba(33,150,243,0.6)', yAxisID:'y'},
+        {label:'Cost ($)', data:costs, backgroundColor:'rgba(255,152,0,0.6)', yAxisID:'y1'},
+      ]
+    },
+    options: {
+      responsive:true,
+      scales: {
+        y:{position:'left', title:{display:true, text:'Tokens'}},
+        y1:{position:'right', title:{display:true, text:'Cost ($)'}, grid:{drawOnChartArea:false}},
+      }
+    }
+  });
+}
+
+async function loadHealth() {
+  const res = await fetch(`${API}/health`);
+  const data = await res.json();
+  const el = document.getElementById('health');
+  el.innerHTML = Object.entries(data).map(([name, h]) => {
+    const color = h.healthy ? '#4CAF50' : '#f44336';
+    const pct = (h.success_rate * 100).toFixed(1);
+    return `<div style="display:inline-block;${card('#fff','#e0e0e0')};margin:0 8px 8px 0;min-width:200px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${color};display:inline-block"></span>
+        <strong>${name}</strong>
+      </div>
+      <div style="margin-top:4px;font-size:13px;color:#666">Success: ${pct}% | Avg: ${h.avg_latency_ms}ms</div>
+      <div style="margin-top:4px;height:4px;background:#eee;border-radius:2px">
+        <div style="height:100%;width:${pct}%;background:${color};border-radius:2px"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadPrices() {
+  const res = await fetch(`${API}/prices`);
+  const data = await res.json();
+  const tbody = document.querySelector('#prices tbody');
+  tbody.innerHTML = data.map(p => `<tr>
+    <td style="padding:8px;border-bottom:1px solid #eee">${p.key}</td>
+    <td style="padding:8px;text-align:right;border-bottom:1px solid #eee">$${p.input_per_1k.toFixed(4)}</td>
+    <td style="padding:8px;text-align:right;border-bottom:1px solid #eee">$${p.output_per_1k.toFixed(4)}</td>
+  </tr>`).join('');
+}
+
+// Load all on page ready
+Promise.all([loadProviders(), loadPools(), loadCosts(), loadUsageChart(), loadHealth(), loadPrices()]);
+</script>
+{% endblock %}

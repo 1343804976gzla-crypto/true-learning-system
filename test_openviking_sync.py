@@ -3,8 +3,11 @@ from __future__ import annotations
 from datetime import date, datetime
 from uuid import uuid4
 
+import httpx
+
 from learning_tracking_models import LearningSession, QuestionRecord
 from models import Chapter, DailyUpload, SessionLocal
+from services import openviking_service
 from services import openviking_sync
 
 
@@ -223,3 +226,90 @@ def test_bulk_import_openviking_exports_uploads_per_table_directory(monkeypatch,
     assert add_calls[0]["to"] == "viking://resources/test-sync/daily_uploads"
     assert add_calls[1]["path"] == str(question_dir)
     assert add_calls[1]["to"] == "viking://resources/test-sync/question_records"
+
+
+def test_process_sync_operations_degrades_to_local_export_when_openviking_temporarily_unavailable(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENVIKING_SYNC_ENABLED", "true")
+    monkeypatch.setenv("OPENVIKING_ENABLED", "true")
+    monkeypatch.setenv("OPENVIKING_URL", "http://localhost:1933")
+    monkeypatch.setenv("OPENVIKING_SYNC_EXPORT_DIR", str(tmp_path))
+    monkeypatch.setenv("OPENVIKING_SYNC_ROOT_URI", "viking://resources/test-sync")
+
+    openviking_sync._ENSURED_REMOTE_DIRS.clear()
+
+    monkeypatch.setattr(openviking_sync, "openviking_stat", lambda uri, missing_ok=False: None)
+    monkeypatch.setattr(openviking_sync, "openviking_mkdir", lambda uri: {"uri": uri})
+    monkeypatch.setattr(openviking_sync, "openviking_remove_uri", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        openviking_sync,
+        "openviking_add_resource",
+        lambda **kwargs: (_ for _ in ()).throw(
+            openviking_service.OpenVikingTemporarilyUnavailableError("bad gateway")
+        ),
+    )
+
+    upload = DailyUpload(
+        id=99,
+        date=date(2026, 3, 21),
+        raw_content="Deferred OpenViking upload should still keep local export.",
+        ai_extracted={"book": "Internal Medicine", "chapter_title": "Deferred Sync"},
+    )
+    operation = openviking_sync.build_sync_operation(upload, action="upsert")
+
+    counts = openviking_sync.process_sync_operations([operation])
+
+    assert counts == {"upserted": 1, "deleted": 0, "failed": 0}
+    assert operation is not None
+    assert operation.export_path.exists()
+
+
+def test_openviking_service_enters_failure_cooldown_after_server_error(monkeypatch):
+    monkeypatch.setenv("OPENVIKING_ENABLED", "true")
+    monkeypatch.setenv("OPENVIKING_URL", "http://localhost:1933")
+    monkeypatch.setenv("OPENVIKING_FAILURE_COOLDOWN_SECONDS", "60")
+
+    openviking_service._clear_openviking_failure()
+    request_count = {"value": 0}
+
+    class _FakeResponse:
+        status_code = 502
+        text = "bad gateway"
+
+        def raise_for_status(self):
+            request = httpx.Request("GET", "http://localhost:1933/api/v1/fs/stat")
+            raise httpx.HTTPStatusError("bad gateway", request=request, response=self)
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def request(self, *args, **kwargs):
+            request_count["value"] += 1
+            return _FakeResponse()
+
+    monkeypatch.setattr(openviking_service.httpx, "Client", _FakeClient)
+
+    try:
+        try:
+            openviking_service.openviking_stat("viking://resources/test-sync")
+        except openviking_service.OpenVikingTemporarilyUnavailableError:
+            pass
+        else:
+            raise AssertionError("expected temporary unavailability on first server error")
+
+        try:
+            openviking_service.openviking_stat("viking://resources/test-sync")
+        except openviking_service.OpenVikingTemporarilyUnavailableError:
+            pass
+        else:
+            raise AssertionError("expected cooldown to block repeated requests")
+    finally:
+        openviking_service._clear_openviking_failure()
+
+    assert request_count["value"] == 1

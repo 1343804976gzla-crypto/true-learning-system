@@ -25,6 +25,7 @@ from api_contracts import (
     BatchExamSubmitResponse,
     BatchVariationResponse,
 )
+from database.audit import log_audit_change, model_to_audit_dict
 from models import get_db, QuizSession, WrongAnswer, ConceptMastery, Chapter
 from learning_tracking_models import (
     BatchExamState,
@@ -163,6 +164,8 @@ def _upsert_batch_exam_state(
 ) -> BatchExamState:
     actor = resolve_request_actor_scope()
     state = _load_batch_exam_state(db, exam_id, include_submitted=True)
+    created_state = state is None
+    before_snapshot = model_to_audit_dict(state) if state is not None else None
     if state is None:
         state = BatchExamState(
             id=exam_id,
@@ -190,6 +193,17 @@ def _upsert_batch_exam_state(
         state.submitted_at = None
     state.updated_at = datetime.now()
     db.flush()
+    log_audit_change(
+        db=db,
+        target=state,
+        action="create" if created_state else "update",
+        before=before_snapshot,
+        after=state,
+        actor=actor,
+        public_id=exam_id,
+        origin_event_type="quiz_batch.upsert_state",
+        origin_public_id=exam_id,
+    )
     return state
 
 DETAIL_PRIORITY_WEIGHTS = {
@@ -707,6 +721,7 @@ async def submit_exam(
     if not exam:
         raise HTTPException(status_code=404, detail="试卷已过期或不存在")
 
+    audit_actor = resolve_request_actor_scope()
     answers = request.answers
     confidence: Dict[str, Optional[str]] = {}
     for key, value in (request.confidence or {}).items():
@@ -804,6 +819,8 @@ async def submit_exam(
         completed_at=datetime.now()
     )
     db.add(quiz_session)
+    created_chapter_ids: set[str] = set()
+    created_concept_ids: set[str] = set()
 
     def ensure_concept_for_question(q: dict, q_index: int) -> Optional[ConceptMastery]:
         if not session_chapter_id:
@@ -824,6 +841,16 @@ async def submit_exam(
             )
             db.add(chapter)
             db.flush()
+            created_chapter_ids.add(target_chapter_id)
+            log_audit_change(
+                db=db,
+                target=chapter,
+                action="create",
+                after=chapter,
+                actor=audit_actor,
+                origin_event_type="quiz_batch.auto_create_chapter",
+                origin_public_id=target_chapter_id,
+            )
 
         key_point = (q.get("key_point") or "").strip() or f"试卷考点{q_index + 1}"
         digest = hashlib.md5(f"{target_chapter_id}|{key_point}".encode("utf-8")).hexdigest()[:12]
@@ -846,6 +873,16 @@ async def submit_exam(
             )
             db.add(concept)
             db.flush()
+            created_concept_ids.add(concept_id)
+            log_audit_change(
+                db=db,
+                target=concept,
+                action="create",
+                after=concept,
+                actor=audit_actor,
+                origin_event_type="quiz_batch.auto_create_concept",
+                origin_public_id=concept_id,
+            )
 
         return concept
 
@@ -876,9 +913,17 @@ async def submit_exam(
     severity_order = {"normal": 0, "landmine": 1, "stubborn": 2, "critical": 3}
 
     question_concepts = _build_question_concepts_safely(db, questions, ensure_concept_for_question)
+    concept_audit_entries: Dict[str, Tuple[ConceptMastery, Optional[Dict[str, Any]]]] = {}
+    wrong_answer_audit_entries: List[Tuple[WrongAnswerV2, Optional[Dict[str, Any]]]] = []
 
     # 错题录入：使用 WrongAnswerV2 系统（带指纹去重）
     for i, detail in enumerate(result["details"]):
+        concept = question_concepts.get(i)
+        if concept is not None and concept.concept_id not in concept_audit_entries:
+            concept_audit_entries[concept.concept_id] = (
+                concept,
+                None if concept.concept_id in created_concept_ids else model_to_audit_dict(concept),
+            )
         apply_exam_result_to_concept(question_concepts.get(i), detail)
 
         question = questions[i]
@@ -915,6 +960,7 @@ async def submit_exam(
         ).first()
 
         if existing:
+            before_wrong_snapshot = model_to_audit_dict(existing)
             existing.question_text = question_text
             existing.options = normalize_option_map(question.get("options"))
             existing.correct_answer = question.get("correct_answer", "")
@@ -948,6 +994,7 @@ async def submit_exam(
                 "[WrongAnswer] 更新题目: %s... (error_count=%s, severity=%s)",
                 fingerprint[:8], existing.error_count, existing.severity_tag,
             )
+            wrong_answer_audit_entries.append((existing, before_wrong_snapshot))
             continue
 
         severity = _compute_exam_follow_up_severity(
@@ -975,82 +1022,12 @@ async def submit_exam(
             updated_at=now,
         )
         db.add(wrong)
+        wrong_answer_audit_entries.append((wrong, None))
         logger.info(
             "[WrongAnswer] 新增题目: %s... (error_count=%s, severity=%s)",
             fingerprint[:8], event_error_count, severity,
         )
         continue
-
-        if False and not detail["is_correct"]:
-            question = questions[i]
-            key_point = _get_question_key_point(question, i)
-            current_exam_severity = _severity_from_confidence(detail.get("confidence"))
-            exam_wrong_questions.append(
-                {
-                    "key_point": key_point,
-                    "severity_tag": current_exam_severity,
-                    "error_count": 1,
-                    "question_index": i,
-                }
-            )
-
-            # 生成题目指纹（用于去重）
-            question_text = question.get("question", "")
-            fingerprint = make_fingerprint(question_text)
-
-            # 检查是否已存在（按指纹去重）
-            existing = db.query(WrongAnswerV2).filter(
-                WrongAnswerV2.question_fingerprint == fingerprint
-            ).first()
-
-            if existing:
-                # 已存在：更新统计
-                existing.error_count += 1
-                existing.encounter_count += 1
-                existing.last_wrong_at = datetime.now()
-                existing.updated_at = datetime.now()
-
-                # 更新严重度标签
-                if detail.get("confidence") == "sure" and existing.severity_tag != "critical":
-                    existing.severity_tag = "critical"  # 自信但答错 → 致命盲区
-                elif existing.error_count >= 2 and existing.severity_tag not in ("critical", "stubborn"):
-                    existing.severity_tag = "stubborn"  # 错误次数 >= 2 → 顽固病灶
-
-                logger.info("[WrongAnswer] 更新已有错题: %s... (错误次数: %s)", fingerprint[:8], existing.error_count)
-            else:
-                # 不存在：创建新错题
-                concept_id = question_concepts[i].concept_id
-                wrong_chapter_id = session_chapter_id or None
-
-                # 判断初始严重度
-                if detail.get("confidence") == "sure":
-                    severity = "critical"  # 自信但答错 → 致命盲区
-                elif detail.get("confidence") in ("unsure", "no"):
-                    severity = "landmine"  # 不确定但答错 → 隐形地雷
-                else:
-                    severity = "normal"
-
-                wrong = WrongAnswerV2(
-                    question_fingerprint=fingerprint,
-                    question_text=question_text,
-                    options=normalize_option_map(question.get("options")),
-                    correct_answer=question.get("correct_answer", ""),
-                    explanation=question.get("explanation", ""),
-                    key_point=question.get("key_point", ""),
-                    question_type=question.get("type", "A1"),
-                    difficulty=question.get("difficulty", "基础"),
-                    chapter_id=wrong_chapter_id,
-                    error_count=1,
-                    encounter_count=1,
-                    severity_tag=severity,
-                    mastery_status="active",
-                    first_wrong_at=datetime.now(),
-                    last_wrong_at=datetime.now(),
-                    created_at=datetime.now(),
-                    updated_at=datetime.now()
-                )
-                db.add(wrong)
-                logger.info("[WrongAnswer] 新增错题: %s... (严重度: %s)", fingerprint[:8], severity)
 
     exam["chapter_id"] = session_chapter_id or exam.get("chapter_id", "")
     exam["exam_wrong_questions"] = exam_wrong_questions
@@ -1062,18 +1039,54 @@ async def submit_exam(
     if exam_id in _exam_cache:
         del _exam_cache[exam_id]
 
-    detail_persisted = _commit_batch_submit_safely(db, "batch submit detail persistence")
-    state_persisted = False
-    if detail_persisted:
-        try:
-            _upsert_batch_exam_state(db, exam_id=exam_id, exam=exam, mark_submitted=True)
-            state_persisted = _commit_batch_submit_safely(db, "batch submit state persistence")
-        except SQLAlchemyError as exc:
-            db.rollback()
-            logger.warning("[Exam] batch submit state preparation failed: %s", exc)
+    db.flush()
+    log_audit_change(
+        db=db,
+        target=quiz_session,
+        action="create",
+        after=quiz_session,
+        actor=audit_actor,
+        origin_event_type="quiz_batch.submit_create_session",
+        origin_public_id=str(quiz_session.id),
+    )
+    for concept_id, (concept, before_snapshot) in concept_audit_entries.items():
+        # 新建 concept 的 "create" 已在 ensure_concept_for_question 中记录，
+        # 这里只记录 apply_exam_result_to_concept 带来的变更。
+        if concept_id in created_concept_ids:
+            continue
+        log_audit_change(
+            db=db,
+            target=concept,
+            action="update",
+            before=before_snapshot,
+            after=concept,
+            actor=audit_actor,
+            origin_event_type="quiz_batch.submit_update_concept",
+            origin_public_id=concept_id,
+        )
+    for wrong, before_snapshot in wrong_answer_audit_entries:
+        log_audit_change(
+            db=db,
+            target=wrong,
+            action="create" if before_snapshot is None else "update",
+            before=before_snapshot,
+            after=wrong,
+            actor=audit_actor,
+            origin_event_type="quiz_batch.submit_upsert_wrong_answer",
+            origin_public_id=str(getattr(wrong, "id", "") or wrong.question_fingerprint),
+        )
+
+    # 把 BatchExamState 标记 submitted 也放进同一个事务，避免分裂提交
+    try:
+        _upsert_batch_exam_state(db, exam_id=exam_id, exam=exam, mark_submitted=True)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning("[Exam] batch submit state preparation failed (pre-commit): %s", exc)
+
+    persisted = _commit_batch_submit_safely(db, "batch submit all-in-one persistence")
 
     logger.info("[QUIZ_SESSION] submitted exam score=%s", result["score"])
-    if not (detail_persisted and state_persisted):
+    if not persisted:
         logger.info("[Exam] batch submit completed with partial persistence: %s", result["score"])
     return result
 

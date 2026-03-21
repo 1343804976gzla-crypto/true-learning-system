@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time as _time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
@@ -13,6 +15,9 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(BASE_DIR / ".env")
 
 logger = logging.getLogger(__name__)
+_OPENVIKING_FAILURE_LOCK = threading.Lock()
+_OPENVIKING_COOLDOWN_UNTIL = 0.0
+_OPENVIKING_LAST_FAILURE = ""
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -42,6 +47,54 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _openviking_failure_cooldown_seconds() -> float:
+    return max(_env_float("OPENVIKING_FAILURE_COOLDOWN_SECONDS", default=30.0), 0.0)
+
+
+def _remember_openviking_failure(exc: Exception) -> str:
+    global _OPENVIKING_COOLDOWN_UNTIL, _OPENVIKING_LAST_FAILURE
+    message = str(exc)[:300] or "OpenViking request failed."
+    cooldown_seconds = _openviking_failure_cooldown_seconds()
+    if cooldown_seconds <= 0:
+        return message
+    with _OPENVIKING_FAILURE_LOCK:
+        _OPENVIKING_COOLDOWN_UNTIL = max(_OPENVIKING_COOLDOWN_UNTIL, _time.time() + cooldown_seconds)
+        _OPENVIKING_LAST_FAILURE = message
+    return message
+
+
+def _clear_openviking_failure() -> None:
+    global _OPENVIKING_COOLDOWN_UNTIL, _OPENVIKING_LAST_FAILURE
+    with _OPENVIKING_FAILURE_LOCK:
+        _OPENVIKING_COOLDOWN_UNTIL = 0.0
+        _OPENVIKING_LAST_FAILURE = ""
+
+
+def _raise_if_openviking_cooling_down() -> None:
+    with _OPENVIKING_FAILURE_LOCK:
+        cooldown_until = _OPENVIKING_COOLDOWN_UNTIL
+        last_failure = _OPENVIKING_LAST_FAILURE
+    remaining = cooldown_until - _time.time()
+    if remaining <= 0:
+        return
+    detail = last_failure or "recent OpenViking failure"
+    raise OpenVikingTemporarilyUnavailableError(
+        f"OpenViking temporarily unavailable for {int(remaining) + 1}s after: {detail}"
+    )
+
+
+def _should_activate_cooldown(exc: Exception) -> bool:
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = getattr(exc, "response", None)
+        if response is not None and response.status_code >= 500:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class OpenVikingConfig:
     enabled: bool
@@ -51,6 +104,10 @@ class OpenVikingConfig:
     timeout: float
     default_limit: int
     default_target_uri: str
+
+
+class OpenVikingTemporarilyUnavailableError(RuntimeError):
+    """Raised when OpenViking is in a temporary failure cooldown window."""
 
 
 def get_openviking_config() -> OpenVikingConfig:
@@ -105,15 +162,25 @@ def _sync_request(
     config = get_openviking_config()
     if not bool(config.enabled and config.url):
         raise RuntimeError("OpenViking is disabled.")
+    _raise_if_openviking_cooling_down()
 
-    with httpx.Client(
-        base_url=config.url.rstrip("/"),
-        headers=_build_headers(config),
-        timeout=max(float(request_timeout or config.timeout), 1.0),
-    ) as client:
-        response = client.request(method.upper(), path, params=params, json=json_body)
-        response.raise_for_status()
-        return _extract_result_payload(response.json())
+    try:
+        with httpx.Client(
+            base_url=config.url.rstrip("/"),
+            headers=_build_headers(config),
+            timeout=max(float(request_timeout or config.timeout), 1.0),
+        ) as client:
+            response = client.request(method.upper(), path, params=params, json=json_body)
+            response.raise_for_status()
+            payload = _extract_result_payload(response.json())
+    except Exception as exc:
+        if _should_activate_cooldown(exc):
+            message = _remember_openviking_failure(exc)
+            raise OpenVikingTemporarilyUnavailableError(message) from exc
+        raise
+
+    _clear_openviking_failure()
+    return payload
 
 
 def openviking_stat(uri: str, *, missing_ok: bool = False) -> Dict[str, Any] | None:

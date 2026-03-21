@@ -111,6 +111,10 @@ app.include_router(llm_router)
 from routers.agent import router as agent_router
 app.include_router(agent_router)
 
+# 注册 API Hub 管理路由
+from routers.api_hub import router as api_hub_router
+app.include_router(api_hub_router)
+
 # 模板和静态文件
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -148,6 +152,13 @@ async def startup():
         except Exception as exc:
             logger.warning("rebuild daily logs failed on startup: %s", exc)
         install_openviking_sync_hooks()
+        try:
+            # Create API Hub tables
+            from database.domains import runtime_engine, RuntimeBase
+            from services.api_hub.models import ApiHubUsage, ApiHubHealthLog, ApiHubPrice  # noqa: F401
+            RuntimeBase.metadata.create_all(bind=runtime_engine)
+        except Exception as exc:
+            logger.warning("API Hub table creation failed: %s", exc)
         try:
             openmanus_status = sync_openmanus_config()
             if openmanus_status.get("available"):
@@ -800,6 +811,14 @@ async def history_page(request: Request):
 async def agent_page(request: Request):
     """Agent 对话页面"""
     return templates.TemplateResponse("agent.html", {
+        "request": request
+    })
+
+
+@app.get("/api-hub", response_class=HTMLResponse)
+async def api_hub_dashboard(request: Request):
+    """API Hub management dashboard"""
+    return templates.TemplateResponse("api_hub.html", {
         "request": request
     })
 

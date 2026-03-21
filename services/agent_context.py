@@ -33,7 +33,7 @@ INJECTION_PATTERNS = [
 REDACTION_PATTERNS = [
     (re.compile(r"sk-[A-Za-z0-9_\-]{12,}"), "[REDACTED_API_KEY]"),
     (re.compile(r"sqlite:///[^\s\"']+"), "[REDACTED_DB_URL]"),
-    (re.compile(r"[A-Za-z]:\\\\Users\\\\[^\s\"']+"), "[REDACTED_PATH]"),
+    (re.compile(r"[A-Za-z]:\\Users\\[^\s\"']+"), "[REDACTED_PATH]"),
 ]
 
 

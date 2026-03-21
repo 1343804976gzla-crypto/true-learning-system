@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from services.ai_client import get_ai_client
 from utils.data_contracts import normalize_confidence
+from utils.answer import normalize_answer
 
 
 def _empty_confidence_stats() -> Dict[str, int]:
@@ -61,17 +62,54 @@ Return JSON only.
             if not isinstance(result, dict):
                 raise ValueError("AI result is not a dict")
 
-            result.setdefault("question", f"About {concept_name}, which statement is correct?")
-            result.setdefault("options", {"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D"})
-            result.setdefault("correct_answer", "A")
-            result.setdefault("explanation", "No explanation returned.")
-            result.setdefault("key_points", [concept_name])
-            result.setdefault("difficulty", "medium")
-            result.setdefault("common_mistakes", [])
+            normalized_question = str(result.get("question") or "").strip() or f"About {concept_name}, which statement is correct?"
+            raw_options = result.get("options")
+            if not isinstance(raw_options, dict):
+                raw_options = {}
+            normalized_options = {
+                key: (str(raw_options.get(key) or "").strip() or f"Option {key}")
+                for key in ("A", "B", "C", "D")
+            }
+            normalized_answer = str(result.get("correct_answer") or "").strip().upper()
+            if normalized_answer not in {"A", "B", "C", "D"}:
+                normalized_answer = "A"
+            normalized_explanation = str(result.get("explanation") or "").strip() or "No explanation returned."
 
-            result["concept_name"] = concept_name
-            result["generated_at"] = datetime.now().isoformat()
-            return result
+            raw_key_points = result.get("key_points")
+            if isinstance(raw_key_points, list):
+                normalized_key_points = [
+                    str(item).strip()
+                    for item in raw_key_points
+                    if str(item).strip()
+                ]
+            else:
+                normalized_key_points = []
+            if not normalized_key_points:
+                normalized_key_points = [concept_name]
+
+            raw_common_mistakes = result.get("common_mistakes")
+            if isinstance(raw_common_mistakes, list):
+                normalized_common_mistakes = [
+                    str(item).strip()
+                    for item in raw_common_mistakes
+                    if str(item).strip()
+                ]
+            else:
+                normalized_common_mistakes = []
+
+            difficulty = str(result.get("difficulty") or "").strip() or "medium"
+
+            return {
+                "question": normalized_question,
+                "options": normalized_options,
+                "correct_answer": normalized_answer,
+                "explanation": normalized_explanation,
+                "key_points": normalized_key_points,
+                "difficulty": difficulty,
+                "common_mistakes": normalized_common_mistakes,
+                "concept_name": concept_name,
+                "generated_at": datetime.now().isoformat(),
+            }
         except Exception as e:
             print(f"[pre-gen] generation failed for concept={concept_name}: {e}")
             return self._create_fallback_quiz(concept_name)
@@ -130,13 +168,8 @@ class LocalGrader:
 
     def grade_answer(self, quiz: Dict[str, Any], user_answer: str, confidence: str) -> Dict[str, Any]:
         """Grade one answer."""
-        # 清理答案：去除空格、点号、逗号等，只保留字母A-E
-        def clean_answer(ans):
-            import re
-            return re.sub(r'[^A-E]', '', (ans or "").strip().upper())
-
-        correct_answer = clean_answer(quiz.get("correct_answer"))
-        user_answer = clean_answer(user_answer)
+        correct_answer = normalize_answer(quiz.get("correct_answer") or "")
+        user_answer = normalize_answer(user_answer or "")
 
         if quiz.get("type") == "X":
             is_correct = sorted(user_answer) == sorted(correct_answer)
@@ -275,7 +308,14 @@ class ComprehensiveAnalyzer:
             return analysis
         except Exception as e:
             print(f"[pre-gen] comprehensive analysis failed: {e}")
-            return self._create_fallback_analysis(score, correct_count, wrong_count, all_weak_points)
+            return self._create_fallback_analysis(
+                score,
+                correct_count,
+                wrong_count,
+                all_weak_points,
+                confidence_stats=confidence_stats,
+                error_types=error_types,
+            )
 
     def _build_analysis_prompt(
         self,
@@ -312,6 +352,9 @@ class ComprehensiveAnalyzer:
         correct_count: int,
         wrong_count: int,
         weak_points: List[str],
+        *,
+        confidence_stats: Optional[Dict[str, int]] = None,
+        error_types: Optional[Dict[str, int]] = None,
     ) -> Dict[str, Any]:
         """Fallback analysis payload."""
         return {
@@ -328,8 +371,8 @@ class ComprehensiveAnalyzer:
             "score": score,
             "correct_count": correct_count,
             "wrong_count": wrong_count,
-            "confidence_stats": _empty_confidence_stats(),
-            "error_types": {"blind_spot": 0, "knowledge_gap": 0, "unknown": 0},
+            "confidence_stats": dict(confidence_stats or _empty_confidence_stats()),
+            "error_types": dict(error_types or {"blind_spot": 0, "knowledge_gap": 0, "unknown": 0}),
             "weak_points_summary": list(set(weak_points)),
         }
 

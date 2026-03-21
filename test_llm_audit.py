@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from services.ai_client import AIClient
+from services.api_hub import retry_engine
+from services.api_hub.health_monitor import HealthMonitor
 from services.llm_audit import (
     create_llm_call_context,
     iter_llm_audit_events,
@@ -33,6 +34,26 @@ class _DummyClient:
         self.base_url = "https://unit.test/v1"
 
 
+class _RetryingCompletions:
+    def __init__(self, response):
+        self._response = response
+        self._calls = 0
+
+    def create(self, **kwargs):
+        self._calls += 1
+        if self._calls == 1:
+            error = RuntimeError("429 rate limit")
+            error.status_code = 429
+            raise error
+        return self._response
+
+
+class _RetryingClient:
+    def __init__(self, response):
+        self.chat = SimpleNamespace(completions=_RetryingCompletions(response))
+        self.base_url = "https://unit.test/v1"
+
+
 @pytest.mark.asyncio
 async def test_llm_audit_records_successful_attempt(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_AUDIT_ENABLED", "true")
@@ -53,7 +74,6 @@ async def test_llm_audit_records_successful_attempt(tmp_path, monkeypatch):
         ),
     )
     dummy_client = _DummyClient(response)
-    ai = AIClient()
     messages = [{"role": "user", "content": "hello audit"}]
     call_context = create_llm_call_context(
         call_kind="content",
@@ -79,7 +99,7 @@ async def test_llm_audit_records_successful_attempt(tmp_path, monkeypatch):
     )
 
     try:
-        text = await ai._call_model_with_audit(
+        text = await retry_engine.call_model_with_audit(
             client=dummy_client,
             model="demo-model",
             provider_name="demo/demo-model",
@@ -165,3 +185,48 @@ def test_llm_audit_summary_groups_requests():
     provider_top = summary["providers"][0]
     assert provider_top["provider"] == "openrouter"
     assert provider_top["total_tokens"] == 300
+
+
+@pytest.mark.asyncio
+async def test_call_model_with_audit_tracks_final_health_and_usage_once():
+    response = SimpleNamespace(
+        id="resp_retry_1",
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="retry-ok"),
+                finish_reason="stop",
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=9,
+            completion_tokens=4,
+            total_tokens=13,
+        ),
+    )
+    dummy_client = _RetryingClient(response)
+    health = HealthMonitor()
+    usage_records = []
+
+    text = await retry_engine.call_model_with_audit(
+        client=dummy_client,
+        model="demo-model",
+        provider_name="demo/demo-model",
+        messages=[{"role": "user", "content": "hello retry"}],
+        max_tokens=128,
+        temperature=0.2,
+        timeout=30,
+        pool_name="Heavy",
+        pool_index=1,
+        pool_size=1,
+        health_callback=health.make_callback(),
+        usage_callback=lambda **kwargs: usage_records.append(kwargs),
+    )
+
+    status = health.get_status("demo")
+
+    assert text == "retry-ok"
+    assert status.sample_count == 1
+    assert status.success_rate == 1.0
+    assert len(usage_records) == 1
+    assert usage_records[0]["status"] == "success"
+    assert usage_records[0]["usage"]["total_tokens"] == 13

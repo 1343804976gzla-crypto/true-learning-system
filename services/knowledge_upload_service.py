@@ -49,19 +49,18 @@ def _safe_excerpt(value: str, max_length: int = 180) -> str:
 
 
 def _vision_pool_entries(ai_client) -> List[tuple[Any, str, str]]:
-    parse_pool = getattr(ai_client, "_parse_pool", None)
-    default_heavy_pool = getattr(ai_client, "_default_heavy_pool", None)
-    if callable(parse_pool) and callable(default_heavy_pool):
-        try:
-            pool = parse_pool("POOL_VISION", default_heavy_pool())
-            if pool:
-                return list(pool)
-        except Exception:
-            pass
+    # Use PoolManager.get_pool("Vision") which resolves PoolSpec → PoolEntry
+    pools = getattr(ai_client, "pools", None)
+    if pools is not None:
+        pool = pools.get_pool("Vision")
+        if pool:
+            return list(pool)
 
-    heavy_pool = getattr(ai_client, "_heavy_pool", None)
-    if heavy_pool:
-        return list(heavy_pool)
+    # Fallback: use Heavy pool (resolved PoolEntry tuples)
+    if pools is not None:
+        heavy = pools.get_pool("Heavy")
+        if heavy:
+            return list(heavy)
     return []
 
 

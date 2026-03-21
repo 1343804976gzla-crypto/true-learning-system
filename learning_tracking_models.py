@@ -537,6 +537,16 @@ class ChapterReviewTaskQuestion(ReviewBase):
     """
     复习任务题目快照
     保存生成的简答题、参考答案、解析与用户作答，便于中断续做与 PDF 导出。
+
+    生成流程：
+        ensure_task_questions()
+          → _ai_generate_questions()   成功 → generation_source="ai"
+          → _fallback_questions_from_text()  兜底 → generation_source="fallback"
+
+    质量保障：
+        - generation_source 标记来源，便于后续质量筛查
+        - 导出 PDF 时通过 _is_low_quality_question() 检测垃圾题目
+        - 检测到低质量题目会自动删除并重新生成
     """
     __tablename__ = "chapter_review_task_questions"
     __table_args__ = (
@@ -551,6 +561,8 @@ class ChapterReviewTaskQuestion(ReviewBase):
     key_points = Column(JSON, nullable=True)
     explanation = Column(Text, nullable=True)
     source_excerpt = Column(Text, nullable=True)
+    # ── 题目来源标记：ai / fallback ──
+    generation_source = Column(String(16), nullable=True, default=None)
     user_answer = Column(Text, nullable=True)
     ai_score = Column(Integer, nullable=True)
     ai_feedback = Column(Text, nullable=True)

@@ -42,6 +42,7 @@ from models import (
 from services.data_identity import ensure_learning_identity_schema
 from services.openviking_service import (
     BASE_DIR,
+    OpenVikingTemporarilyUnavailableError,
     get_openviking_config,
     is_openviking_enabled,
     openviking_add_resource,
@@ -390,7 +391,15 @@ def process_sync_operations(
             if operation.action == "delete":
                 _remove_local_export(operation.export_path)
                 if not export_only and config.upload_enabled:
-                    _delete_remote_resource(operation)
+                    try:
+                        _delete_remote_resource(operation)
+                    except OpenVikingTemporarilyUnavailableError as exc:
+                        if not upload_skipped_logged:
+                            logger.warning(
+                                "OpenViking temporarily unavailable; local exports will continue and remote sync is deferred: %s",
+                                str(exc)[:300],
+                            )
+                            upload_skipped_logged = True
                 counts["deleted"] += 1
                 continue
 
@@ -407,7 +416,15 @@ def process_sync_operations(
                 counts["upserted"] += 1
                 continue
 
-            _upsert_remote_resource(operation, config)
+            try:
+                _upsert_remote_resource(operation, config)
+            except OpenVikingTemporarilyUnavailableError as exc:
+                if not upload_skipped_logged:
+                    logger.warning(
+                        "OpenViking temporarily unavailable; local exports will continue and remote sync is deferred: %s",
+                        str(exc)[:300],
+                    )
+                    upload_skipped_logged = True
             counts["upserted"] += 1
         except Exception as exc:
             counts["failed"] += 1

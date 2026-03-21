@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "build:templates-css": "tailwindcss -i templates/tailwind.input.css -o static/css/tailwind.css --minify"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

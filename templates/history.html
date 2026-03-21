@@ -1976,10 +1976,23 @@
 
     async function downloadTodayReviewPdf() {
         const budget = Number(historyElements.reviewBudget.value || 40);
+        const reviewDate = historyState.reviewPlan && historyState.reviewPlan.date ? historyState.reviewPlan.date : '';
         historyElements.reviewPdfBtn.disabled = true;
-        historyElements.reviewPdfBtn.textContent = '导出中...';
+        historyElements.reviewPdfBtn.textContent = '正在生成题目，首次可能需要 1-2 分钟...';
         try {
-            const response = await fetch(`/api/history/review-pdf?time_budget_minutes=${encodeURIComponent(budget)}`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 180000);
+            const params = new URLSearchParams({
+                time_budget_minutes: String(budget),
+            });
+            if (reviewDate) {
+                params.set('review_date', reviewDate);
+            }
+            const response = await fetch(
+                `/api/history/review-pdf?${params.toString()}`,
+                { signal: controller.signal }
+            );
+            clearTimeout(timeoutId);
             if (!response.ok) {
                 let message = 'PDF 导出失败';
                 try {
@@ -1992,15 +2005,25 @@
             const blob = await response.blob();
             const objectUrl = URL.createObjectURL(blob);
             const link = document.createElement('a');
+            const contentDisposition = response.headers.get('Content-Disposition') || '';
+            const encodedNameMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+            const plainNameMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i);
+            const downloadName = encodedNameMatch
+                ? decodeURIComponent(encodedNameMatch[1])
+                : (plainNameMatch ? plainNameMatch[1] : (reviewDate ? `chapter-review-${reviewDate}.pdf` : 'chapter-review.pdf'));
             link.href = objectUrl;
-            link.download = 'today-review.pdf';
+            link.download = downloadName;
             document.body.appendChild(link);
             link.click();
             link.remove();
             window.setTimeout(() => URL.revokeObjectURL(objectUrl), 800);
         } catch (error) {
             console.error('导出 PDF 失败:', error);
-            alert(error && error.message ? error.message : 'PDF 导出失败');
+            if (error && error.name === 'AbortError') {
+                alert('导出超时，题目可能正在后台生成中，请稍后重试。');
+            } else {
+                alert(error && error.message ? error.message : 'PDF 导出失败');
+            }
         } finally {
             historyElements.reviewPdfBtn.disabled = false;
             historyElements.reviewPdfBtn.textContent = '导出今日 PDF';

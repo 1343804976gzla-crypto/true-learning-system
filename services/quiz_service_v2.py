@@ -23,6 +23,7 @@ from utils.chapter_catalog import (
     extract_book_name_from_text,
     normalize_book_name,
 )
+from utils.answer import normalize_answer
 
 # 配置日志
 logging.basicConfig(
@@ -330,7 +331,7 @@ class QuizService:
             questions, expire_time = self._segment_cache[segment_key]
             if datetime.now() < expire_time:
                 print(f"[QuizService] ✅ 分段缓存命中: {segment_key[:32]}...")
-                return questions
+                return copy.deepcopy(questions)
             else:
                 # 过期，删除
                 del self._segment_cache[segment_key]
@@ -344,7 +345,7 @@ class QuizService:
             return
 
         expire_time = datetime.now() + timedelta(seconds=self.cache_ttl_seconds)
-        self._cache[cache_key] = (result, expire_time)
+        self._cache[cache_key] = (copy.deepcopy(result), expire_time)
         print(f"[QuizService] 💾 已缓存: {cache_key[:32]}... (过期时间: {expire_time.strftime('%H:%M:%S')})")
 
     def _save_to_segment_cache(self, segment_key: str, questions: List[Dict]):
@@ -353,7 +354,7 @@ class QuizService:
             return
 
         expire_time = datetime.now() + timedelta(seconds=self.cache_ttl_seconds)
-        self._segment_cache[segment_key] = (questions, expire_time)
+        self._segment_cache[segment_key] = (copy.deepcopy(questions), expire_time)
         print(f"[QuizService] 💾 已缓存分段: {segment_key[:32]}... (过期时间: {expire_time.strftime('%H:%M:%S')})")
 
     def _clean_expired_cache(self):
@@ -1600,11 +1601,6 @@ E：……
         if user_confidence is None:
             user_confidence = {}
 
-        # 答案清理函数：只保留 A-E 字母
-        def clean_answer(ans: str) -> str:
-            import re
-            return re.sub(r'[^A-E]', '', (ans or '').strip().upper())
-
         details = []
         correct_count = 0
         wrong_by_difficulty = {"基础": 0, "提高": 0, "难题": 0}
@@ -1618,8 +1614,8 @@ E：……
                 break
 
             # 清理答案：只保留 A-E 字母
-            user_ans = clean_answer(user_answers[i])
-            correct_ans = clean_answer(question.get("correct_answer", ""))
+            user_ans = normalize_answer(user_answers[i] or "")
+            correct_ans = normalize_answer(question.get("correct_answer", "") or "")
             difficulty = question.get("difficulty", "基础")
             conf = user_confidence.get(str(i), user_confidence.get(i, ""))
 

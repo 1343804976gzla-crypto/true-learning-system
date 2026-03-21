@@ -194,13 +194,25 @@ async def create_fusion_question(
     if len(request.parent_ids) < 2 or len(request.parent_ids) > 4:
         raise HTTPException(status_code=400, detail="融合题必须由2-4道原题组成")
 
+    normalized_parent_ids = canonicalize_parent_ids(request.parent_ids)
+
     # 验证所有原题
     parents = db.query(WrongAnswerV2).filter(
-        WrongAnswerV2.id.in_(request.parent_ids)
+        WrongAnswerV2.id.in_(normalized_parent_ids)
     ).all()
 
-    if len(parents) != len(request.parent_ids):
+    if len(parents) != len(normalized_parent_ids):
         raise HTTPException(status_code=404, detail="部分原题不存在")
+
+    # 提前检查是否已经存在相同 parent_ids 的融合题，避免重复触发 AI 生成
+    existing_by_parents = (
+        db.query(WrongAnswerV2)
+        .filter(WrongAnswerV2.is_fusion == True)
+        .all()
+    )
+    for existing in existing_by_parents:
+        if canonicalize_parent_ids(existing.parent_ids) == normalized_parent_ids:
+            raise HTTPException(status_code=409, detail="该融合组合已存在")
 
     # 验证解锁条件
     for parent in parents:
@@ -212,7 +224,7 @@ async def create_fusion_question(
             )
 
     # 生成融合题
-    result = await service.generate_fusion_question(request.parent_ids, db)
+    result = await service.generate_fusion_question(normalized_parent_ids, db)
 
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
@@ -226,7 +238,7 @@ async def create_fusion_question(
     # 创建融合题记录
     # 生成唯一指纹
     import hashlib
-    fingerprint_base = f"fusion:{':'.join(map(str, sorted(request.parent_ids)))}:{result['fusion_question'][:50]}"
+    fingerprint_base = f"fusion:{':'.join(map(str, normalized_parent_ids))}:{result['fusion_question'][:50]}"
     question_fingerprint = hashlib.md5(fingerprint_base.encode()).hexdigest()
 
     # 检查是否已存在
@@ -257,7 +269,7 @@ async def create_fusion_question(
         retry_count=0,
         severity_tag="critical",  # 融合题默认为critical，答错惩罚重
         mastery_status="active",  # 融合题需要重新学习
-        parent_ids=canonicalize_parent_ids(request.parent_ids),
+        parent_ids=normalized_parent_ids,
         is_fusion=True,
         fusion_level=fusion_level,
         sm2_penalty_factor=penalty,
@@ -285,7 +297,7 @@ async def create_fusion_question(
         fusion_id=fusion.id,
         fusion_question=fusion.question_text,
         fusion_level=fusion.fusion_level,
-        parent_ids=request.parent_ids,
+        parent_ids=normalized_parent_ids,
         expected_key_points=result.get("expected_key_points", [])
     )
 

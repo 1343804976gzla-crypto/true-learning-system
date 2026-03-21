@@ -22,6 +22,7 @@ _request_context: ContextVar[dict[str, Any] | None] = ContextVar(
 _write_lock = threading.Lock()
 _SKIP_CALLSITE_MODULE_PREFIXES = (
     "services.ai_client",
+    "services.api_hub",
     "services.llm_audit",
     "asyncio",
     "contextvars",

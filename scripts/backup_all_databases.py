@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from database.audit import audit_targets
+from scripts._script_audit import write_script_audit
 
 
 def _parse_args() -> argparse.Namespace:
@@ -47,6 +48,26 @@ def main() -> int:
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup_path = backup_dir / f"{target.path.stem}.backup-{timestamp}{target.path.suffix}"
         _backup_sqlite(target.path, backup_path)
+        source_conn = sqlite3.connect(str(target.path))
+        try:
+            write_script_audit(
+                source_conn,
+                domain_name=target.name,
+                entity_type="backup_all_databases",
+                entity_id=f"backup:{target.name}:{timestamp}",
+                action="script_run",
+                after_payload={
+                    "source": str(target.path),
+                    "backup_path": str(backup_path),
+                    "include_shadow": bool(args.include_shadow),
+                    "output_dir": str(custom_output_dir) if custom_output_dir else "",
+                },
+                origin_event_type="script.backup_all_databases",
+                origin_public_id=str(backup_path),
+            )
+            source_conn.commit()
+        finally:
+            source_conn.close()
         created.append(backup_path)
         print(f"[backup] {target.name}: {backup_path}")
 

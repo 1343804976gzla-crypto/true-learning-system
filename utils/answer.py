@@ -19,7 +19,39 @@ def normalize_answer(raw: str) -> str:
       - "A,C"        → "AC"   (多选题逗号)
       - ""           → ""
     """
-    return "".join(sorted(set(re.findall(r"[A-E]", (raw or "").strip().upper()))))
+    text = (raw or "").strip().upper()
+    if not text:
+        return ""
+
+    separator_pattern = r"[\s、，,;/；和与及+\-]+"
+
+    def _normalize_group(group: str) -> str:
+        letters = re.findall(r"[A-E]", group)
+        return "".join(sorted(set(letters)))
+
+    exact_compact = re.sub(separator_pattern, "", text)
+    if exact_compact and re.fullmatch(r"[A-E]+", exact_compact):
+        return _normalize_group(exact_compact)
+
+    leading_match = re.match(
+        rf"^\s*([A-E](?:{separator_pattern}[A-E])*)(?:[\s\.\)、,:：]|$)",
+        text,
+    )
+    if leading_match:
+        return _normalize_group(leading_match.group(1))
+
+    marker_match = re.search(
+        rf"(?:答案|ANSWER|SELECT|CHOOSE|选|选择)(?:是|为|:|：|\s)*([A-E](?:{separator_pattern}[A-E])*)",
+        text,
+    )
+    if marker_match:
+        return _normalize_group(marker_match.group(1))
+
+    single_match = re.search(r"(?<![A-Z])[A-E](?![A-Z])", text)
+    if single_match:
+        return single_match.group(0)
+
+    return ""
 
 
 def answers_match(user_answer: str, correct_answer: str) -> bool:
