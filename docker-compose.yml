@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: true-learning-system
+    restart: unless-stopped
+    ports:
+      - "${TLS_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      SINGLE_USER_MODE: "true"
+      TLS_RELOAD: "0"
+      OPENVIKING_ENABLED: "false"
+      OPENVIKING_SYNC_ENABLED: "false"
+      TZ: "Asia/Shanghai"
+    volumes:
+      - tls_app_data:/app/data
+      - ./.env:/app/.env:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/usr/local/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  tls_app_data:
+    name: true-learning-system_tls_app_data
+    external: true
