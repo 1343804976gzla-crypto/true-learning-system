@@ -7,7 +7,7 @@ from time import perf_counter
 from typing import Any, Dict, List, Literal, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import desc, false, func, or_
+from sqlalchemy import and_, case, desc, false, func, or_
 from sqlalchemy.orm import Session
 
 from learning_tracking_models import INVALID_CHAPTER_IDS, LearningSession, WrongAnswerRetry, WrongAnswerV2
@@ -72,6 +72,159 @@ class OpenVikingSearchArgs(_ToolArgsModel):
 class OpenManusConsultArgs(_ToolArgsModel):
     query: str = Field(min_length=1, max_length=2000)
     max_steps: int = Field(default=4, ge=1, le=8)
+
+
+READ_CONTRACT_VERSION = "db-read.v1"
+RUNTIME_OVERRIDE_KEY = "__runtime"
+READ_FILTER_KEYS = (
+    "status",
+    "query",
+    "chapter_ids",
+    "period",
+    "days",
+    "session_type",
+    "due_days",
+    "daily_planned_review",
+    "target_uri",
+    "max_steps",
+)
+
+
+def _split_runtime_overrides(overrides: Dict[str, Any] | None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    payload = dict(overrides or {})
+    runtime_context = payload.pop(RUNTIME_OVERRIDE_KEY, {})
+    if not isinstance(runtime_context, dict):
+        runtime_context = {}
+    return payload, runtime_context
+
+
+def _clean_read_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_clean_read_value(item) for item in value[:8] if item not in (None, "", [], {})]
+    if isinstance(value, dict):
+        return {
+            str(key): _clean_read_value(item)
+            for key, item in value.items()
+            if item not in (None, "", [], {})
+        }
+    if isinstance(value, str):
+        return " ".join(value.split())[:160]
+    return value
+
+
+def _runtime_focus_briefs(runtime_context: Dict[str, Any]) -> List[Dict[str, str]]:
+    briefs: List[Dict[str, str]] = []
+    for item in list(runtime_context.get("focuses") or [])[:4]:
+        if not isinstance(item, dict):
+            continue
+        focus_id = " ".join(str(item.get("id") or "").split())
+        title = " ".join(str(item.get("title") or "").split())
+        if not focus_id and not title:
+            continue
+        briefs.append(
+            {
+                "id": focus_id,
+                "title": title or focus_id,
+            }
+        )
+    return briefs
+
+
+def _extract_read_filters(tool_args: Dict[str, Any]) -> Dict[str, Any]:
+    filters: Dict[str, Any] = {}
+    for key in READ_FILTER_KEYS:
+        value = tool_args.get(key)
+        if value in (None, "", [], {}):
+            continue
+        filters[key] = _clean_read_value(value)
+    return filters
+
+
+def _build_read_contract(
+    tool_name: str,
+    tool_args: Dict[str, Any],
+    runtime_context: Dict[str, Any],
+    *,
+    read_mode: str,
+    source_tables: List[str],
+    selected_fields: List[str],
+    sort: List[str],
+) -> Dict[str, Any]:
+    return {
+        "version": READ_CONTRACT_VERSION,
+        "tool_name": tool_name,
+        "read_mode": read_mode,
+        "read_full_database": False,
+        "scope": "actor_scoped",
+        "filters": _extract_read_filters(tool_args),
+        "limit": int(tool_args["limit"]) if "limit" in tool_args and str(tool_args.get("limit") or "").strip() else None,
+        "source_tables": list(source_tables),
+        "selected_fields": list(selected_fields),
+        "sort": list(sort),
+        "intent": {
+            "goal": " ".join(str(runtime_context.get("goal") or "").split()),
+            "output_mode": " ".join(str(runtime_context.get("output_mode") or "").split()),
+            "time_horizon": " ".join(str(runtime_context.get("time_horizon") or "").split()),
+            "message_excerpt": " ".join(str(runtime_context.get("message_excerpt") or "").split()),
+            "focuses": _runtime_focus_briefs(runtime_context),
+            "reason": " ".join(str(runtime_context.get("reason") or "").split()),
+        },
+    }
+
+
+def _attach_standard_read_format(
+    tool_name: str,
+    tool_args: Dict[str, Any],
+    payload: Dict[str, Any],
+    runtime_context: Dict[str, Any],
+    *,
+    read_mode: str,
+    source_tables: List[str],
+    selected_fields: List[str],
+    sort: List[str],
+    total_count: int | None = None,
+    returned_count: int | None = None,
+) -> Dict[str, Any]:
+    normalized = dict(payload or {})
+    if returned_count is None:
+        for key in ("returned_count", "count"):
+            value = normalized.get(key)
+            if isinstance(value, (int, float)):
+                returned_count = int(value)
+                break
+        else:
+            for key in ("items", "recent_uploads", "weak_concepts", "recent_sessions", "daily_trend", "weekly_trend"):
+                value = normalized.get(key)
+                if isinstance(value, list):
+                    returned_count = len(value)
+                    break
+    if total_count is None:
+        for key in ("count", "total_concepts", "total_uploads_in_window", "current_backlog"):
+            value = normalized.get(key)
+            if isinstance(value, (int, float)):
+                total_count = int(value)
+                break
+    resolved_total = max(int(total_count or 0), 0)
+    resolved_returned = max(int(returned_count or 0), 0)
+    sampled = bool(normalized.get("sampled")) or resolved_total > resolved_returned
+
+    normalized["tool_name"] = tool_name
+    normalized["read_contract"] = _build_read_contract(
+        tool_name,
+        tool_args,
+        runtime_context,
+        read_mode=read_mode,
+        source_tables=source_tables,
+        selected_fields=selected_fields,
+        sort=sort,
+    )
+    normalized["result_stats"] = {
+        "total_count": resolved_total,
+        "returned_count": resolved_returned,
+        "sampled": sampled,
+        "has_more": resolved_total > resolved_returned,
+    }
+    return normalized
 
 
 READ_TOOL_DEFINITIONS: List[AgentToolDefinition] = [
@@ -275,6 +428,7 @@ async def _run_wrong_answers(
     *,
     user_id: str | None = None,
     device_id: str | None = None,
+    runtime_context: Dict[str, Any] | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     args = WrongAnswersArgs.model_validate(overrides or {})
     query_text = _normalize_query_text(args.query)
@@ -432,7 +586,30 @@ async def _run_wrong_answers(
             for item in items
         ],
     }
-    return args.model_dump(mode="json"), payload
+    tool_args = args.model_dump(mode="json")
+    return tool_args, _attach_standard_read_format(
+        "get_wrong_answers",
+        tool_args,
+        payload,
+        runtime_context or {},
+        read_mode="targeted_list",
+        source_tables=["wrong_answers_v2", "wrong_answer_retries", "chapters"],
+        selected_fields=[
+            "id",
+            "chapter_id",
+            "key_point",
+            "question_text",
+            "error_count",
+            "encounter_count",
+            "severity_tag",
+            "mastery_status",
+            "next_review_date",
+            "last_wrong_at",
+        ],
+        sort=["updated_at desc", "last_wrong_at desc", "id desc"],
+        total_count=total_count,
+        returned_count=returned_count,
+    )
 
 
 async def _run_learning_sessions(
@@ -441,6 +618,7 @@ async def _run_learning_sessions(
     *,
     user_id: str | None = None,
     device_id: str | None = None,
+    runtime_context: Dict[str, Any] | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     args = LearningSessionsArgs.model_validate(overrides or {})
     query_text = _normalize_query_text(args.query)
@@ -497,7 +675,29 @@ async def _run_learning_sessions(
             for session in sessions
         ],
     }
-    return args.model_dump(mode="json"), payload
+    tool_args = args.model_dump(mode="json")
+    return tool_args, _attach_standard_read_format(
+        "get_learning_sessions",
+        tool_args,
+        payload,
+        runtime_context or {},
+        read_mode="targeted_list",
+        source_tables=["learning_sessions"],
+        selected_fields=[
+            "id",
+            "title",
+            "session_type",
+            "status",
+            "chapter_id",
+            "knowledge_point",
+            "score",
+            "accuracy",
+            "started_at",
+        ],
+        sort=["started_at desc", "id desc"],
+        total_count=len(sessions),
+        returned_count=len(sessions),
+    )
 
 
 async def _run_progress_summary(
@@ -506,6 +706,7 @@ async def _run_progress_summary(
     *,
     user_id: str | None = None,
     device_id: str | None = None,
+    runtime_context: Dict[str, Any] | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     args = ProgressSummaryArgs.model_validate(overrides or {})
     route_period = "all" if args.period == "all" else args.period.replace("d", "")
@@ -530,7 +731,27 @@ async def _run_progress_summary(
         "weakest_area": board.get("weakest_area"),
         "wow_delta": board.get("wow_delta"),
     }
-    return args.model_dump(mode="json"), payload
+    tool_args = args.model_dump(mode="json")
+    overview = payload.get("overview") or {}
+    return tool_args, _attach_standard_read_format(
+        "get_progress_summary",
+        tool_args,
+        payload,
+        runtime_context or {},
+        read_mode="aggregate_summary",
+        source_tables=["learning_sessions", "question_records", "concept_mastery"],
+        selected_fields=[
+            "total_questions",
+            "total_sessions",
+            "accuracy",
+            "daily_trend",
+            "weak_points",
+            "recent_sessions",
+        ],
+        sort=["period scoped aggregate", "recent_sessions by started_at desc"],
+        total_count=int(overview.get("total_questions") or 0),
+        returned_count=len(payload.get("recent_sessions") or []),
+    )
 
 
 def _mastery_score(item: ConceptMastery) -> float:
@@ -926,6 +1147,7 @@ async def _run_review_pressure(
     *,
     user_id: str | None = None,
     device_id: str | None = None,
+    runtime_context: Dict[str, Any] | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     args = ReviewPressureArgs.model_validate(overrides or {})
     dashboard = await get_dashboard_stats(
@@ -979,7 +1201,26 @@ async def _run_review_pressure(
         "due_wrong_answers": int(due_wrong_answers or 0),
         "recent_test_accuracy": recent_test_accuracy,
     }
-    return args.model_dump(mode="json"), payload
+    tool_args = args.model_dump(mode="json")
+    return tool_args, _attach_standard_read_format(
+        "get_review_pressure",
+        tool_args,
+        payload,
+        runtime_context or {},
+        read_mode="aggregate_summary",
+        source_tables=["wrong_answers_v2", "test_records"],
+        selected_fields=[
+            "current_backlog",
+            "avg_new_per_day",
+            "estimated_days_to_clear",
+            "daily_required_reviews",
+            "due_wrong_answers",
+            "recent_test_accuracy",
+        ],
+        sort=["aggregate metrics", "recent_test_records by tested_at desc"],
+        total_count=int(payload.get("current_backlog") or 0),
+        returned_count=len(payload.get("weekly_trend") or []),
+    )
 
 
 async def _run_openviking_search(
@@ -988,6 +1229,7 @@ async def _run_openviking_search(
     *,
     user_id: str | None = None,
     device_id: str | None = None,
+    runtime_context: Dict[str, Any] | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     del db, user_id, device_id
     args = OpenVikingSearchArgs.model_validate(overrides or {})
@@ -996,7 +1238,19 @@ async def _run_openviking_search(
         target_uri=args.target_uri,
         limit=args.limit,
     )
-    return args.model_dump(mode="json"), payload
+    tool_args = args.model_dump(mode="json")
+    return tool_args, _attach_standard_read_format(
+        "search_openviking_context",
+        tool_args,
+        payload,
+        runtime_context or {},
+        read_mode="external_reference",
+        source_tables=["openviking.resources", "openviking.memories", "openviking.skills"],
+        selected_fields=["query", "resources", "memories", "skills", "count"],
+        sort=["provider managed relevance"],
+        total_count=int(payload.get("count") or 0),
+        returned_count=int(payload.get("count") or 0),
+    )
 
 
 async def _run_openmanus_consult(
@@ -1005,6 +1259,7 @@ async def _run_openmanus_consult(
     *,
     user_id: str | None = None,
     device_id: str | None = None,
+    runtime_context: Dict[str, Any] | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     del db, user_id, device_id
     args = OpenManusConsultArgs.model_validate(overrides or {})
@@ -1023,7 +1278,407 @@ async def _run_openmanus_consult(
         "run_result": str(result.get("run_result") or "").strip(),
         "count": int(result.get("count") or (1 if str(result.get("answer") or "").strip() else 0)),
     }
-    return args.model_dump(mode="json"), payload
+    tool_args = args.model_dump(mode="json")
+    return tool_args, _attach_standard_read_format(
+        "consult_openmanus",
+        tool_args,
+        payload,
+        runtime_context or {},
+        read_mode="delegated_reference",
+        source_tables=["openmanus.run_result"],
+        selected_fields=["query", "answer", "tool_names", "steps_executed", "message_count"],
+        sort=["delegated agent final answer"],
+        total_count=int(payload.get("count") or 0),
+        returned_count=int(payload.get("count") or 0),
+    )
+
+
+async def _run_knowledge_mastery(
+    db: Session,
+    overrides: Dict[str, Any],
+    *,
+    user_id: str | None = None,
+    device_id: str | None = None,
+    runtime_context: Dict[str, Any] | None = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    args = KnowledgeMasteryArgs.model_validate(overrides or {})
+    requested_chapter_ids = _normalize_chapter_ids(args.chapter_ids)
+    invalid_chapter_ids = [value for value in INVALID_CHAPTER_IDS if str(value or "").strip()]
+    today = date.today()
+    due_cutoff = today + timedelta(days=args.due_days)
+    score_expr = (
+        func.coalesce(ConceptMastery.retention, 0.0)
+        + func.coalesce(ConceptMastery.understanding, 0.0)
+        + func.coalesce(ConceptMastery.application, 0.0)
+    ) / 3.0
+    measured_filter = or_(
+        ConceptMastery.last_tested.isnot(None),
+        ConceptMastery.next_review.isnot(None),
+        func.coalesce(ConceptMastery.retention, 0.0) > 0,
+        func.coalesce(ConceptMastery.understanding, 0.0) > 0,
+        func.coalesce(ConceptMastery.application, 0.0) > 0,
+    )
+
+    base_query = _apply_actor_scope(
+        db.query(ConceptMastery),
+        ConceptMastery,
+        user_id=user_id,
+        device_id=device_id,
+    )
+    if requested_chapter_ids:
+        base_query = base_query.filter(ConceptMastery.chapter_id.in_(requested_chapter_ids))
+
+    usable_query = base_query.filter(
+        ConceptMastery.chapter_id.isnot(None),
+        func.trim(ConceptMastery.chapter_id) != "",
+        ~ConceptMastery.chapter_id.in_(invalid_chapter_ids),
+    )
+    reported_query = usable_query if usable_query.limit(1).first() is not None else base_query
+    measured_query = reported_query.filter(measured_filter)
+    focus_query = measured_query if measured_query.limit(1).first() is not None else reported_query
+
+    total_concepts = int(reported_query.count())
+    measured_count = int(measured_query.count())
+    reported_chapter_ids = [
+        str(row[0])
+        for row in (
+            reported_query.with_entities(ConceptMastery.chapter_id)
+            .filter(ConceptMastery.chapter_id.isnot(None), func.trim(ConceptMastery.chapter_id) != "")
+            .distinct()
+            .limit(24)
+            .all()
+        )
+        if str(row[0] or "").strip()
+    ]
+
+    weak_rows = (
+        focus_query.order_by(
+            score_expr.asc(),
+            case((ConceptMastery.next_review.is_(None), 1), else_=0).asc(),
+            ConceptMastery.next_review.asc(),
+            case((ConceptMastery.last_tested.is_(None), 1), else_=0).asc(),
+            ConceptMastery.last_tested.asc(),
+            ConceptMastery.concept_id.asc(),
+        )
+        .limit(args.limit)
+        .all()
+    )
+
+    due_count_expr = func.sum(
+        case(
+            (
+                and_(
+                    ConceptMastery.next_review.isnot(None),
+                    ConceptMastery.next_review <= due_cutoff,
+                ),
+                1,
+            ),
+            else_=0,
+        )
+    )
+    weak_chapter_rows = (
+        focus_query.with_entities(
+            ConceptMastery.chapter_id,
+            func.count(ConceptMastery.concept_id).label("concept_count"),
+            func.avg(score_expr).label("avg_mastery"),
+            due_count_expr.label("due_count"),
+        )
+        .filter(
+            ConceptMastery.chapter_id.isnot(None),
+            func.trim(ConceptMastery.chapter_id) != "",
+            ~ConceptMastery.chapter_id.in_(invalid_chapter_ids),
+        )
+        .group_by(ConceptMastery.chapter_id)
+        .order_by(
+            func.avg(score_expr).asc(),
+            due_count_expr.desc(),
+            func.count(ConceptMastery.concept_id).desc(),
+            ConceptMastery.chapter_id.asc(),
+        )
+        .limit(max(3, min(args.limit, 6)))
+        .all()
+    )
+
+    chapter_lookup_ids = {
+        *reported_chapter_ids,
+        *[str(item.chapter_id) for item in weak_rows if str(item.chapter_id or "").strip()],
+        *[str(row[0]) for row in weak_chapter_rows if str(row[0] or "").strip()],
+    }
+    chapters = (
+        db.query(Chapter).filter(Chapter.id.in_(list(chapter_lookup_ids))).all()
+        if chapter_lookup_ids
+        else []
+    )
+    chapter_map = {chapter.id: chapter for chapter in chapters}
+
+    weak_concepts = [
+        {
+            "concept_id": item.concept_id,
+            "name": item.name,
+            "chapter_id": item.chapter_id,
+            "chapter_label": _chapter_label(chapter_map.get(item.chapter_id or "")),
+            "mastery_score": round(_mastery_score(item) * 100, 1),
+            "retention": round(float(item.retention or 0) * 100, 1),
+            "understanding": round(float(item.understanding or 0) * 100, 1),
+            "application": round(float(item.application or 0) * 100, 1),
+            "next_review": item.next_review.isoformat() if item.next_review else None,
+        }
+        for item in weak_rows
+    ]
+    weak_chapters = [
+        {
+            "chapter_id": str(chapter_id or ""),
+            "chapter_label": _chapter_label(chapter_map.get(str(chapter_id or ""))) or "未标记章节",
+            "concept_count": int(concept_count or 0),
+            "avg_mastery": round(float(avg_mastery or 0.0) * 100, 1),
+            "due_count": int(due_count or 0),
+        }
+        for chapter_id, concept_count, avg_mastery, due_count in weak_chapter_rows
+        if str(chapter_id or "").strip()
+    ]
+
+    avg_row = focus_query.with_entities(
+        func.avg(func.coalesce(ConceptMastery.retention, 0.0)),
+        func.avg(func.coalesce(ConceptMastery.understanding, 0.0)),
+        func.avg(func.coalesce(ConceptMastery.application, 0.0)),
+    ).one()
+    avg_retention = round(float(avg_row[0] or 0.0) * 100, 1)
+    avg_understanding = round(float(avg_row[1] or 0.0) * 100, 1)
+    avg_application = round(float(avg_row[2] or 0.0) * 100, 1)
+    avg_mastery = round((avg_retention + avg_understanding + avg_application) / 3, 1) if total_concepts else 0.0
+    due_today = int(
+        focus_query.filter(
+            ConceptMastery.next_review.isnot(None),
+            ConceptMastery.next_review <= today,
+        ).count()
+    )
+    due_in_window = int(
+        focus_query.filter(
+            ConceptMastery.next_review.isnot(None),
+            ConceptMastery.next_review <= due_cutoff,
+        ).count()
+    )
+
+    payload = {
+        "generated_at": datetime.now().isoformat(),
+        "chapter_ids": reported_chapter_ids,
+        "total_concepts": total_concepts,
+        "measured_concepts": measured_count,
+        "unmeasured_concepts": max(total_concepts - measured_count, 0),
+        "avg_mastery": avg_mastery,
+        "avg_retention": avg_retention,
+        "avg_understanding": avg_understanding,
+        "avg_application": avg_application,
+        "due_today": due_today,
+        "due_in_window": due_in_window,
+        "window_days": args.due_days,
+        "weak_concepts": weak_concepts,
+        "weak_chapters": weak_chapters,
+    }
+    tool_args = args.model_dump(mode="json")
+    return tool_args, _attach_standard_read_format(
+        "get_knowledge_mastery",
+        tool_args,
+        payload,
+        runtime_context or {},
+        read_mode="targeted_summary",
+        source_tables=["concept_mastery", "chapters"],
+        selected_fields=[
+            "concept_id",
+            "chapter_id",
+            "name",
+            "retention",
+            "understanding",
+            "application",
+            "last_tested",
+            "next_review",
+        ],
+        sort=["mastery_score asc", "next_review asc", "last_tested asc"],
+        total_count=total_concepts,
+        returned_count=len(weak_concepts),
+    )
+
+
+async def _run_study_history(
+    db: Session,
+    overrides: Dict[str, Any],
+    *,
+    user_id: str | None = None,
+    device_id: str | None = None,
+    runtime_context: Dict[str, Any] | None = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    args = StudyHistoryArgs.model_validate(overrides or {})
+    query_text = _normalize_query_text(args.query)
+    requested_chapter_ids = set(_normalize_chapter_ids(args.chapter_ids))
+    cutoff = date.today() - timedelta(days=args.days - 1)
+    cutoff_dt = datetime.combine(cutoff, datetime.min.time())
+
+    uploads = (
+        _apply_actor_scope(
+            db.query(DailyUpload),
+            DailyUpload,
+            user_id=user_id,
+            device_id=device_id,
+        )
+        .filter(DailyUpload.date >= cutoff)
+        .order_by(desc(DailyUpload.date), desc(DailyUpload.id))
+        .all()
+    )
+    all_upload_dates = {
+        row[0]
+        for row in _apply_actor_scope(
+            db.query(DailyUpload.date),
+            DailyUpload,
+            user_id=user_id,
+            device_id=device_id,
+        ).distinct().all()
+        if row[0]
+    }
+
+    session_date_rows = (
+        _apply_actor_scope(
+            db.query(func.date(func.coalesce(LearningSession.started_at, LearningSession.created_at))),
+            LearningSession,
+            user_id=user_id,
+            device_id=device_id,
+        )
+        .filter(
+            LearningSession.uploaded_content.isnot(None),
+            func.trim(LearningSession.uploaded_content) != "",
+        )
+        .distinct()
+        .all()
+    )
+    session_upload_dates = {
+        date.fromisoformat(str(row[0]))
+        for row in session_date_rows
+        if row[0]
+    }
+
+    window_session_uploads = (
+        _apply_actor_scope(
+            db.query(LearningSession),
+            LearningSession,
+            user_id=user_id,
+            device_id=device_id,
+        )
+        .filter(
+            LearningSession.uploaded_content.isnot(None),
+            func.trim(LearningSession.uploaded_content) != "",
+            or_(
+                LearningSession.started_at >= cutoff_dt,
+                and_(
+                    LearningSession.started_at.is_(None),
+                    LearningSession.created_at >= cutoff_dt,
+                ),
+            ),
+        )
+        .order_by(
+            desc(LearningSession.started_at),
+            desc(LearningSession.created_at),
+            desc(LearningSession.id),
+        )
+        .all()
+    )
+    session_chapter_ids = list(
+        {
+            str(session.chapter_id).strip()
+            for session in window_session_uploads
+            if str(session.chapter_id or "").strip()
+        }
+    )
+    chapters = db.query(Chapter).filter(Chapter.id.in_(session_chapter_ids)).all() if session_chapter_ids else []
+    chapter_map = {chapter.id: chapter for chapter in chapters}
+    merged_records, _session_fallback_count = _merge_study_history_records(
+        uploads,
+        window_session_uploads,
+        chapter_map,
+    )
+    if requested_chapter_ids:
+        merged_records = [
+            record for record in merged_records if str(record.get("chapter_id") or "") in requested_chapter_ids
+        ]
+    if query_text:
+        merged_records = [
+            record for record in merged_records if _record_matches_query(record, query_text)
+        ]
+    weekly_cutoff = date.today() - timedelta(days=6)
+    weekly_uploads = sum(
+        1 for record in merged_records if record.get("date") and record["date"] >= weekly_cutoff
+    )
+
+    book_distribution: Dict[str, int] = {}
+    for record in merged_records:
+        book = str(record.get("book") or "未知")
+        book_distribution[book] = book_distribution.get(book, 0) + 1
+    book_distribution = dict(
+        sorted(book_distribution.items(), key=lambda item: (-item[1], item[0]))[:6]
+    )
+
+    recent_uploads = []
+    for record in merged_records[: args.limit]:
+        recent_uploads.append(
+            {
+                "id": int(record["id"]),
+                "date": record["date"].isoformat() if record.get("date") else None,
+                "book": record.get("book") or "未知",
+                "chapter_title": record.get("chapter_title") or "未识别章节",
+                "chapter_id": record.get("chapter_id"),
+                "main_topic": record.get("main_topic"),
+                "summary": (record.get("summary") or "")[:160],
+                "source": record.get("source"),
+            }
+        )
+
+    all_study_dates = sorted(all_upload_dates | session_upload_dates)
+    filtered_study_dates = sorted(
+        {
+            record["date"]
+            for record in merged_records
+            if record.get("date")
+        }
+    )
+    payload = {
+        "days": args.days,
+        "generated_at": datetime.now().isoformat(),
+        "query": query_text,
+        "chapter_ids": list(requested_chapter_ids),
+        "total_uploads_in_window": len(merged_records),
+        "weekly_uploads": weekly_uploads,
+        "streak_days": _compute_streak_days(
+            filtered_study_dates if (query_text or requested_chapter_ids) else all_study_dates
+        ),
+        "latest_study_date": (
+            (filtered_study_dates[-1] if filtered_study_dates else None)
+            if (query_text or requested_chapter_ids)
+            else (all_study_dates[-1] if all_study_dates else None)
+        ).isoformat() if ((filtered_study_dates if (query_text or requested_chapter_ids) else all_study_dates)) else None,
+        "daily_upload_count_in_window": sum(1 for record in merged_records if record.get("source") == "daily_upload"),
+        "session_fallback_count_in_window": sum(1 for record in merged_records if record.get("source") == "learning_session"),
+        "book_distribution": book_distribution,
+        "recent_uploads": recent_uploads,
+    }
+    tool_args = args.model_dump(mode="json")
+    return tool_args, _attach_standard_read_format(
+        "get_study_history",
+        tool_args,
+        payload,
+        runtime_context or {},
+        read_mode="windowed_history",
+        source_tables=["daily_uploads", "learning_sessions", "chapters"],
+        selected_fields=[
+            "date",
+            "book",
+            "chapter_title",
+            "chapter_id",
+            "main_topic",
+            "summary",
+            "source",
+        ],
+        sort=["date desc", "created_at desc", "id desc"],
+        total_count=len(merged_records),
+        returned_count=len(recent_uploads),
+    )
 
 
 async def execute_agent_tool(
@@ -1035,23 +1690,71 @@ async def execute_agent_tool(
     device_id: str | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
     started = perf_counter()
-    overrides = overrides or {}
+    overrides, runtime_context = _split_runtime_overrides(overrides)
     if tool_name == "get_wrong_answers":
-        tool_args, result = await _run_wrong_answers(db, overrides, user_id=user_id, device_id=device_id)
+        tool_args, result = await _run_wrong_answers(
+            db,
+            overrides,
+            user_id=user_id,
+            device_id=device_id,
+            runtime_context=runtime_context,
+        )
     elif tool_name == "get_learning_sessions":
-        tool_args, result = await _run_learning_sessions(db, overrides, user_id=user_id, device_id=device_id)
+        tool_args, result = await _run_learning_sessions(
+            db,
+            overrides,
+            user_id=user_id,
+            device_id=device_id,
+            runtime_context=runtime_context,
+        )
     elif tool_name == "get_progress_summary":
-        tool_args, result = await _run_progress_summary(db, overrides, user_id=user_id, device_id=device_id)
+        tool_args, result = await _run_progress_summary(
+            db,
+            overrides,
+            user_id=user_id,
+            device_id=device_id,
+            runtime_context=runtime_context,
+        )
     elif tool_name == "get_knowledge_mastery":
-        tool_args, result = await _run_knowledge_mastery(db, overrides, user_id=user_id, device_id=device_id)
+        tool_args, result = await _run_knowledge_mastery(
+            db,
+            overrides,
+            user_id=user_id,
+            device_id=device_id,
+            runtime_context=runtime_context,
+        )
     elif tool_name == "get_study_history":
-        tool_args, result = await _run_study_history(db, overrides, user_id=user_id, device_id=device_id)
+        tool_args, result = await _run_study_history(
+            db,
+            overrides,
+            user_id=user_id,
+            device_id=device_id,
+            runtime_context=runtime_context,
+        )
     elif tool_name == "get_review_pressure":
-        tool_args, result = await _run_review_pressure(db, overrides, user_id=user_id, device_id=device_id)
+        tool_args, result = await _run_review_pressure(
+            db,
+            overrides,
+            user_id=user_id,
+            device_id=device_id,
+            runtime_context=runtime_context,
+        )
     elif tool_name == "search_openviking_context":
-        tool_args, result = await _run_openviking_search(db, overrides, user_id=user_id, device_id=device_id)
+        tool_args, result = await _run_openviking_search(
+            db,
+            overrides,
+            user_id=user_id,
+            device_id=device_id,
+            runtime_context=runtime_context,
+        )
     elif tool_name == "consult_openmanus":
-        tool_args, result = await _run_openmanus_consult(db, overrides, user_id=user_id, device_id=device_id)
+        tool_args, result = await _run_openmanus_consult(
+            db,
+            overrides,
+            user_id=user_id,
+            device_id=device_id,
+            runtime_context=runtime_context,
+        )
     else:
         raise ValueError(f"不支持的工具: {tool_name}")
 

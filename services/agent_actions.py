@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import date, datetime, timedelta
+import os
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
@@ -49,6 +50,10 @@ from utils.data_contracts import canonicalize_quiz_answers, canonicalize_quiz_qu
 
 
 class AgentActionNotFoundError(LookupError):
+    pass
+
+
+class AgentWriteActionsDisabledError(PermissionError):
     pass
 
 
@@ -162,6 +167,19 @@ class ActionExecutionResult:
     error_message: Optional[str] = None
 
 
+def are_agent_write_actions_enabled() -> bool:
+    value = str(os.getenv("AGENT_WRITE_ACTIONS_ENABLED") or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
+
+
+def agent_write_actions_disabled_message() -> str:
+    return "Agent 写数据库动作已禁用，当前只允许只读工具访问数据库。"
+
+
+def _action_log_table_exists() -> bool:
+    return bool(inspect(agent_engine).has_table(AgentActionLog.__tablename__))
+
+
 def ensure_agent_action_schema() -> None:
     AgentActionLog.__table__.create(bind=agent_engine, checkfirst=True)
     existing_columns = {
@@ -230,11 +248,16 @@ def _jsonify_action_preview_value(value: Any) -> Any:
 
 
 def list_action_tool_definitions() -> List[AgentToolDefinition]:
+    if not are_agent_write_actions_enabled():
+        return []
     return ACTION_TOOL_DEFINITIONS
 
 
 def list_session_actions(db: Session, session_id: str, limit: int = 50) -> List[AgentActionLog]:
-    ensure_agent_action_schema()
+    if are_agent_write_actions_enabled():
+        ensure_agent_action_schema()
+    elif not _action_log_table_exists():
+        return []
     return (
         db.query(AgentActionLog)
         .filter(AgentActionLog.session_id == session_id)
@@ -245,7 +268,10 @@ def list_session_actions(db: Session, session_id: str, limit: int = 50) -> List[
 
 
 def list_task_actions(db: Session, task_id: str, limit: int = 20) -> List[AgentActionLog]:
-    ensure_agent_action_schema()
+    if are_agent_write_actions_enabled():
+        ensure_agent_action_schema()
+    elif not _action_log_table_exists():
+        return []
     return (
         db.query(AgentActionLog)
         .filter(AgentActionLog.related_task_id == task_id)
@@ -329,6 +355,9 @@ def execute_agent_action(
     session: AgentSession,
     payload: AgentActionExecuteRequest,
 ) -> AgentActionExecuteResponse:
+    if not are_agent_write_actions_enabled():
+        raise AgentWriteActionsDisabledError(agent_write_actions_disabled_message())
+
     ensure_learning_identity_schema()
     ensure_agent_action_schema()
 

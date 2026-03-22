@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 import os
 import threading
@@ -12,7 +12,7 @@ import json
 import re
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -68,6 +68,8 @@ logger = logging.getLogger(__name__)
 _AGENT_SCHEMA_READY = False
 DEFAULT_AGENT_PROVIDER = "deepseek"
 DEFAULT_AGENT_MODEL = "deepseek-chat"
+AGENT_LLM_MAX_CALLS_PER_TASK = max(1, int(os.getenv("AGENT_LLM_MAX_CALLS_PER_TASK") or 4))
+AGENT_LLM_MIN_INTERVAL_SECONDS = max(0.0, float(os.getenv("AGENT_LLM_MIN_INTERVAL_SECONDS") or 2.0))
 DEFAULT_TUTOR_TEMPLATE = "tutor.v2"
 AGENT_IDENTITY_REQUIRED = "agent_identity_required"
 AGENT_SESSION_NOT_FOUND = "agent_session_not_found"
@@ -95,6 +97,7 @@ class PreparedChatTurn:
     source_cards: List[AgentSourceCard]
     draft_plan: AgentPlanBundle
     action_suggestions: List[Dict[str, Any]]
+    llm_budget: "AgentLlmBudget"
 
 
 class AgentIdentityRequiredError(ValueError):
@@ -113,6 +116,64 @@ class AgentDuplicateResponseAvailableError(RuntimeError):
     def __init__(self, response: AgentChatResponse):
         super().__init__("duplicate agent response available")
         self.response = response
+
+
+class AgentLlmRateLimitError(RuntimeError):
+    pass
+
+
+@dataclass
+class AgentLlmBudget:
+    trace_id: str
+    max_calls: int = AGENT_LLM_MAX_CALLS_PER_TASK
+    min_interval_seconds: float = AGENT_LLM_MIN_INTERVAL_SECONDS
+    call_count: int = 0
+    last_call_started_at: float = 0.0
+    total_wait_seconds: float = 0.0
+    wait_events: List[Dict[str, Any]] = field(default_factory=list)
+
+    def remaining_calls(self) -> int:
+        return max(0, self.max_calls - self.call_count)
+
+    def can_call(self, *, reserve_after: int = 0) -> bool:
+        return self.call_count < max(0, self.max_calls - reserve_after)
+
+    async def acquire(self, call_kind: str, *, reserve_after: int = 0) -> None:
+        if not self.can_call(reserve_after=reserve_after):
+            raise AgentLlmRateLimitError(
+                f"Agent 单次任务 LLM 调用次数已达上限（{self.max_calls} 次），已停止继续调用。"
+            )
+
+        wait_seconds = 0.0
+        now = perf_counter()
+        if self.call_count > 0 and self.min_interval_seconds > 0:
+            elapsed = now - self.last_call_started_at
+            wait_seconds = max(0.0, self.min_interval_seconds - elapsed)
+
+        if wait_seconds > 0:
+            await asyncio.sleep(wait_seconds)
+            self.total_wait_seconds += wait_seconds
+            self.wait_events.append(
+                {
+                    "call_kind": call_kind,
+                    "wait_seconds": round(wait_seconds, 3),
+                }
+            )
+
+        self.call_count += 1
+        self.last_call_started_at = perf_counter()
+
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "provider": DEFAULT_AGENT_PROVIDER,
+            "model": DEFAULT_AGENT_MODEL,
+            "call_count": self.call_count,
+            "max_calls": self.max_calls,
+            "remaining_calls": self.remaining_calls(),
+            "min_interval_seconds": self.min_interval_seconds,
+            "total_wait_seconds": round(self.total_wait_seconds, 3),
+            "wait_event_count": len(self.wait_events),
+        }
 
 
 def _is_retryable_sqlite_lock_error(exc: Exception) -> bool:
@@ -223,13 +284,7 @@ def _default_prompt_template_for_agent_type(agent_type: str) -> str | None:
 
 
 def _resolved_agent_model(provider: str | None, model: str | None) -> tuple[str, str]:
-    resolved_provider = (provider or "").strip()
-    resolved_model = (model or "").strip()
-    if not resolved_provider or resolved_provider == "auto":
-        resolved_provider = DEFAULT_AGENT_PROVIDER
-    if not resolved_model or resolved_model == "auto":
-        resolved_model = DEFAULT_AGENT_MODEL
-    return resolved_provider, resolved_model
+    return DEFAULT_AGENT_PROVIDER, DEFAULT_AGENT_MODEL
 
 
 def _apply_session_runtime_defaults(session: AgentSession) -> AgentSession:
@@ -245,6 +300,105 @@ def _session_model_options(session: AgentSession) -> Dict[str, str]:
         "preferred_provider": provider,
         "preferred_model": model,
     }
+
+
+async def _agent_llm_generate_json(
+    ai_client: Any,
+    *,
+    llm_budget: AgentLlmBudget,
+    reserve_after: int,
+    prompt: str,
+    schema: Dict[str, Any],
+    max_tokens: int,
+    temperature: float,
+    timeout: int,
+    preferred_provider: str,
+    preferred_model: str,
+) -> Dict[str, Any]:
+    await llm_budget.acquire("json", reserve_after=reserve_after)
+    kwargs = {
+        "prompt": prompt,
+        "schema": schema,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "timeout": timeout,
+        "use_heavy": False,
+        "preferred_provider": preferred_provider,
+        "preferred_model": preferred_model,
+        "fallback_to_pool": False,
+    }
+    try:
+        return await ai_client.generate_json(**kwargs)
+    except TypeError as exc:
+        if "fallback_to_pool" not in str(exc):
+            raise
+        kwargs.pop("fallback_to_pool", None)
+        return await ai_client.generate_json(**kwargs)
+
+
+async def _agent_llm_generate_content(
+    ai_client: Any,
+    *,
+    llm_budget: AgentLlmBudget,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    timeout: int,
+    preferred_provider: str,
+    preferred_model: str,
+) -> str:
+    await llm_budget.acquire("content")
+    kwargs = {
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "timeout": timeout,
+        "use_heavy": False,
+        "preferred_provider": preferred_provider,
+        "preferred_model": preferred_model,
+        "fallback_to_pool": False,
+    }
+    try:
+        return await ai_client.generate_content(**kwargs)
+    except TypeError as exc:
+        if "fallback_to_pool" not in str(exc):
+            raise
+        kwargs.pop("fallback_to_pool", None)
+        return await ai_client.generate_content(**kwargs)
+
+
+async def _agent_llm_generate_content_stream(
+    ai_client: Any,
+    *,
+    llm_budget: AgentLlmBudget,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    timeout: int,
+    preferred_provider: str,
+    preferred_model: str,
+) -> AsyncIterator[str]:
+    await llm_budget.acquire("content_stream")
+    kwargs = {
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "timeout": timeout,
+        "use_heavy": False,
+        "preferred_provider": preferred_provider,
+        "preferred_model": preferred_model,
+        "fallback_to_pool": False,
+    }
+    try:
+        async for chunk in ai_client.generate_content_stream(**kwargs):
+            yield chunk
+        return
+    except TypeError as exc:
+        if "fallback_to_pool" not in str(exc):
+            raise
+        kwargs.pop("fallback_to_pool", None)
+        async for chunk in ai_client.generate_content_stream(**kwargs):
+            yield chunk
 
 
 def _format_percent(value: Any) -> str:
@@ -294,6 +448,7 @@ def _build_execution_state(
     stage: str,
     error_message: str | None = None,
     context_usage: AgentContextUsage | None = None,
+    llm_budget: AgentLlmBudget | None = None,
 ) -> Dict[str, Any]:
     total_tools = len(tool_run_snapshots)
     cache_hits = sum(1 for item in tool_run_snapshots if item.get("cache_hit"))
@@ -343,6 +498,8 @@ def _build_execution_state(
     }
     if context_usage is not None:
         payload["context_usage"] = context_usage.model_dump(mode="json")
+    if llm_budget is not None:
+        payload["llm_budget"] = llm_budget.snapshot()
     if error_message:
         payload["error_message"] = error_message
     return payload
@@ -508,6 +665,8 @@ def serialize_session(
         message_count = counts.get(session.id, 0)
         last_message_preview = previews.get(session.id)
 
+    provider, model = _resolved_agent_model(session.provider, session.model)
+
     return AgentSessionItem(
         id=session.id,
         user_id=session.user_id,
@@ -515,8 +674,8 @@ def serialize_session(
         title=session.title,
         agent_type=session.agent_type,
         status=session.status,
-        model=session.model,
-        provider=session.provider,
+        model=model,
+        provider=provider,
         prompt_template_id=session.prompt_template_id,
         context_summary=session.context_summary,
         message_count=message_count or 0,
@@ -1519,6 +1678,9 @@ def _build_action_suggestions(
     request_analysis: Dict[str, Any],
     tool_results: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
+    if not _action_tool_definition_map():
+        return []
+
     suggestions: List[Dict[str, Any]] = []
     output_mode = request_analysis.get("output_mode")
 
@@ -2068,6 +2230,7 @@ async def _decide_response_strategy(
     tool_results: Dict[str, Any],
     source_cards: List[AgentSourceCard],
     draft_plan: AgentPlanBundle,
+    llm_budget: AgentLlmBudget,
     preferred_provider: str | None = None,
     preferred_model: str | None = None,
 ) -> Dict[str, Any]:
@@ -2082,6 +2245,12 @@ async def _decide_response_strategy(
     ai_client = get_ai_client()
     if not hasattr(ai_client, "generate_json"):
         return rule_strategy
+    if not llm_budget.can_call(reserve_after=1):
+        return {
+            **rule_strategy,
+            "source": "rule_budget",
+            "planner_error": "single_task_llm_budget_reached",
+        }
 
     planner_prompt = "\n\n".join(
         [
@@ -2105,13 +2274,15 @@ async def _decide_response_strategy(
     )
 
     try:
-        planner_payload = await ai_client.generate_json(
-            planner_prompt,
+        planner_payload = await _agent_llm_generate_json(
+            ai_client,
+            llm_budget=llm_budget,
+            reserve_after=1,
+            prompt=planner_prompt,
             schema=RESPONSE_STRATEGY_SCHEMA,
             max_tokens=700,
             temperature=0.1,
             timeout=35,
-            use_heavy=False,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
         )
@@ -2167,6 +2338,7 @@ async def _decide_follow_up_tools(
     source_cards: List[AgentSourceCard],
     draft_plan: AgentPlanBundle,
     iteration: int,
+    llm_budget: AgentLlmBudget,
     preferred_provider: str | None = None,
     preferred_model: str | None = None,
 ) -> Dict[str, Any]:
@@ -2193,6 +2365,12 @@ async def _decide_follow_up_tools(
             "source": "rule_fallback",
             "reason": "当前 AI client 不支持结构化调度，回退到规则链。",
         }
+    if not llm_budget.can_call(reserve_after=2):
+        return {
+            "follow_ups": [],
+            "source": "rule_budget",
+            "reason": "单次任务的 LLM 调用预算已接近上限，停止继续扩展工具。",
+        }
 
     planner_prompt = "\n\n".join(
         [
@@ -2213,13 +2391,15 @@ async def _decide_follow_up_tools(
     )
 
     try:
-        planner_payload = await ai_client.generate_json(
-            planner_prompt,
+        planner_payload = await _agent_llm_generate_json(
+            ai_client,
+            llm_budget=llm_budget,
+            reserve_after=2,
+            prompt=planner_prompt,
             schema=FOLLOW_UP_PLANNER_SCHEMA,
             max_tokens=900,
             temperature=0.1,
             timeout=35,
-            use_heavy=False,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
         )
@@ -2606,6 +2786,243 @@ def _assistant_content_structured(
     }
 
 
+_legacy_build_request_analysis = build_request_analysis
+
+
+def _tool_focuses(request_analysis: Dict[str, Any], tool_name: str) -> List[Dict[str, str]]:
+    matches: List[Dict[str, str]] = []
+    for focus in request_analysis.get("focuses") or []:
+        if tool_name not in (focus.get("tools") or []):
+            continue
+        matches.append(
+            {
+                "id": str(focus.get("id") or "").strip(),
+                "title": str(focus.get("title") or focus.get("id") or tool_name).strip(),
+            }
+        )
+    return matches
+
+
+def _derive_intent_tool_overrides(
+    request_analysis: Dict[str, Any],
+    selected_tools: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    output_mode = str(request_analysis.get("output_mode") or "answer")
+    time_horizon = str(request_analysis.get("time_horizon") or "当前")
+    short_horizon = time_horizon in {"当前", "今天", "今晚", "明天"}
+    medium_horizon = time_horizon in {"本周", "近期"}
+    long_horizon = time_horizon in {"长期"}
+
+    overrides: Dict[str, Dict[str, Any]] = {}
+    for tool_name in selected_tools:
+        override: Dict[str, Any] = {}
+        if tool_name == "get_progress_summary":
+            override["period"] = "all" if long_horizon else ("30d" if output_mode in {"plan", "prediction", "history"} or medium_horizon else "7d")
+        elif tool_name == "get_wrong_answers":
+            override["status"] = "active"
+            override["limit"] = 4 if output_mode in {"plan", "prediction"} else 6
+        elif tool_name == "get_learning_sessions":
+            override["limit"] = 4 if output_mode in {"plan", "prediction"} else (6 if output_mode == "history" else 5)
+            override["session_type"] = "all"
+        elif tool_name == "get_knowledge_mastery":
+            override["limit"] = 4 if output_mode in {"plan", "prediction"} else 6
+            override["due_days"] = 14 if long_horizon else (7 if medium_horizon else 3)
+        elif tool_name == "get_study_history":
+            override["days"] = 90 if long_horizon else (30 if output_mode in {"plan", "prediction", "history"} or medium_horizon else 14)
+            override["limit"] = 4 if output_mode in {"plan", "prediction"} else 6
+        elif tool_name == "get_review_pressure":
+            override["daily_planned_review"] = 30 if output_mode == "prediction" else 20
+        elif tool_name == "search_openviking_context":
+            override["limit"] = 4
+        elif tool_name == "consult_openmanus":
+            override["max_steps"] = 3 if output_mode in {"answer", "diagnosis"} else 4
+
+        if override:
+            overrides[tool_name] = override
+    return overrides
+
+
+def _build_intent_read_plan(
+    request_analysis: Dict[str, Any],
+    selected_tools: List[str],
+) -> Dict[str, Any]:
+    overrides = _derive_intent_tool_overrides(request_analysis, selected_tools)
+    plan_items: List[Dict[str, Any]] = []
+    for tool_name in selected_tools:
+        plan_items.append(
+            {
+                "tool_name": tool_name,
+                "title": _tool_label(tool_name),
+                "filters": overrides.get(tool_name, {}),
+                "related_focuses": _tool_focuses(request_analysis, tool_name),
+            }
+        )
+    return {
+        "mode": "intent_scoped",
+        "read_full_database": False,
+        "strategy": "先按当前意图做限量读取，再根据证据缺口补读，不做一次性全库扫描。",
+        "tools": plan_items,
+    }
+
+
+def build_request_analysis(
+    message: str,
+    selected_tools: List[str],
+    *,
+    requested_tools_explicit: bool = False,
+) -> Dict[str, Any]:
+    analysis = _legacy_build_request_analysis(
+        message,
+        selected_tools,
+        requested_tools_explicit=requested_tools_explicit,
+    )
+    analysis["read_strategy"] = "intent_scoped"
+    analysis["read_plan"] = _build_intent_read_plan(analysis, selected_tools)
+    return analysis
+
+
+def _extract_topic_hint(message: str) -> str:
+    clean_message = _normalize_topic_text(message)
+    if not clean_message:
+        return ""
+
+    topic_series_match = re.search(r"(专题[\u4e00-\u9fffA-Za-z0-9路()（）]{2,20})", clean_message)
+    if topic_series_match:
+        topic = _normalize_topic_text(topic_series_match.group(1))
+        if topic:
+            return topic
+
+    for pattern in _TOPIC_PATTERNS:
+        match = pattern.search(clean_message)
+        if not match:
+            continue
+        topic = _normalize_topic_text(match.group(1))
+        if topic:
+            return topic
+    return ""
+
+
+def _derive_topic_tool_overrides(
+    db: Session,
+    message: str,
+    selected_tools: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    topic = _extract_topic_hint(message)
+    if not topic:
+        return {}
+
+    topic_variants = _expand_topic_variants(topic)[:6]
+    chapter_ids: List[str] = []
+    seen_chapter_ids: set[str] = set()
+    if topic_variants:
+        chapter_filters = [Chapter.chapter_title.ilike(f"%{variant}%") for variant in topic_variants]
+        for row in db.query(Chapter.id).filter(or_(*chapter_filters)).limit(12).all():
+            chapter_id_text = str(row[0] or "").strip()
+            if not chapter_id_text or chapter_id_text in seen_chapter_ids:
+                continue
+            seen_chapter_ids.add(chapter_id_text)
+            chapter_ids.append(chapter_id_text)
+            if len(chapter_ids) >= 6:
+                break
+
+        learning_filters = [LearningSession.knowledge_point.ilike(f"%{variant}%") for variant in topic_variants]
+        learning_filters.extend(LearningSession.title.ilike(f"%{variant}%") for variant in topic_variants)
+        for row in db.query(LearningSession.chapter_id).filter(
+            LearningSession.chapter_id.isnot(None),
+            or_(*learning_filters),
+        ).limit(8).all():
+            chapter_id_text = str(row[0] or "").strip()
+            if not chapter_id_text or chapter_id_text in seen_chapter_ids:
+                continue
+            seen_chapter_ids.add(chapter_id_text)
+            chapter_ids.append(chapter_id_text)
+            if len(chapter_ids) >= 6:
+                break
+
+        wrong_filters = [WrongAnswerV2.key_point.ilike(f"%{variant}%") for variant in topic_variants]
+        for row in db.query(WrongAnswerV2.chapter_id).filter(
+            WrongAnswerV2.chapter_id.isnot(None),
+            or_(*wrong_filters),
+        ).limit(8).all():
+            chapter_id_text = str(row[0] or "").strip()
+            if not chapter_id_text or chapter_id_text in seen_chapter_ids:
+                continue
+            seen_chapter_ids.add(chapter_id_text)
+            chapter_ids.append(chapter_id_text)
+            if len(chapter_ids) >= 6:
+                break
+
+    overrides: Dict[str, Dict[str, Any]] = {}
+    for tool_name in selected_tools:
+        if tool_name not in _TOPIC_QUERY_TOOLS:
+            continue
+        override: Dict[str, Any] = {}
+        if tool_name in {"get_learning_sessions", "get_wrong_answers", "get_study_history"}:
+            override["query"] = topic
+        if chapter_ids:
+            override["chapter_ids"] = chapter_ids
+        if tool_name in {"get_learning_sessions", "get_wrong_answers", "get_study_history", "get_knowledge_mastery"}:
+            override["limit"] = 8
+        overrides[tool_name] = override
+    return overrides
+
+
+def _extend_tools_for_topic_query(
+    db: Session,
+    message: str,
+    selected_tools: List[str],
+    *,
+    requested_tools_explicit: bool,
+) -> List[str]:
+    del db
+    if requested_tools_explicit:
+        return list(selected_tools)
+    topic = _extract_topic_hint(message)
+    if not topic:
+        return list(selected_tools)
+    return list(dict.fromkeys(list(selected_tools) + _TOPIC_RECOMMENDED_TOOLS))
+
+
+def _merge_tool_overrides(*override_sets: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    for override_set in override_sets:
+        for tool_name, override in (override_set or {}).items():
+            merged[tool_name] = {
+                **merged.get(tool_name, {}),
+                **dict(override or {}),
+            }
+    return merged
+
+
+def _attach_runtime_context_to_tool_overrides(
+    tool_overrides: Dict[str, Dict[str, Any]],
+    request_analysis: Dict[str, Any],
+    selected_tools: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    focus_tools = {
+        tool_name
+        for focus in request_analysis.get("focuses") or []
+        for tool_name in (focus.get("tools") or [])
+    }
+    candidate_tools = list(dict.fromkeys(list(selected_tools) + list(focus_tools) + list(tool_overrides.keys())))
+    attached: Dict[str, Dict[str, Any]] = {}
+    for tool_name in candidate_tools:
+        related_focuses = _tool_focuses(request_analysis, tool_name)
+        reason = " / ".join(item["title"] for item in related_focuses if item.get("title"))
+        attached[tool_name] = {
+            **dict(tool_overrides.get(tool_name, {})),
+            "__runtime": {
+                "goal": request_analysis.get("goal"),
+                "output_mode": request_analysis.get("output_mode"),
+                "time_horizon": request_analysis.get("time_horizon"),
+                "message_excerpt": request_analysis.get("message_excerpt"),
+                "focuses": related_focuses,
+                "reason": reason or _tool_label(tool_name),
+            },
+        }
+    return attached
+
+
 def _resolve_session_for_payload(db: Session, payload: AgentChatRequest) -> AgentSession:
     _require_actor_identity(payload.user_id, payload.device_id)
     if payload.session_id:
@@ -2716,6 +3133,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
     session = _resolve_session_for_payload(db, payload)
     llm_options = _session_model_options(session)
     trace_id = payload.client_request_id or uuid4().hex
+    llm_budget = AgentLlmBudget(trace_id=trace_id)
     logger.info("[AGENT_SESSION] chat turn session_id=%s trace_id=%s", session.id, trace_id)
     reserved_request = False
 
@@ -2767,12 +3185,22 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
         initial_selected_tools,
         requested_tools_explicit=bool(payload.requested_tools),
     )
-    auto_tool_overrides = _derive_topic_tool_overrides(db, payload.message, initial_selected_tools)
-    effective_tool_overrides = _merge_tool_overrides(auto_tool_overrides, payload.tool_overrides)
     request_analysis = build_request_analysis(
         payload.message,
         initial_selected_tools,
         requested_tools_explicit=bool(payload.requested_tools),
+    )
+    intent_tool_overrides = _derive_intent_tool_overrides(request_analysis, initial_selected_tools)
+    topic_tool_overrides = _derive_topic_tool_overrides(db, payload.message, initial_selected_tools)
+    effective_tool_overrides = _merge_tool_overrides(
+        intent_tool_overrides,
+        topic_tool_overrides,
+        payload.tool_overrides,
+    )
+    execution_tool_overrides = _attach_runtime_context_to_tool_overrides(
+        effective_tool_overrides,
+        request_analysis,
+        initial_selected_tools,
     )
     user_message.content_structured = {
         "requested_tools": payload.requested_tools,
@@ -2800,7 +3228,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
             user_message=user_message,
             trace_id=trace_id,
             tool_names=current_tool_names,
-            tool_overrides=effective_tool_overrides,
+            tool_overrides=execution_tool_overrides,
             tool_calls=tool_calls,
             tool_results=tool_results,
             tool_run_snapshots=tool_run_snapshots,
@@ -2815,6 +3243,11 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
             selected_tools,
             requested_tools_explicit=bool(payload.requested_tools),
         )
+        execution_tool_overrides = _attach_runtime_context_to_tool_overrides(
+            effective_tool_overrides,
+            request_analysis,
+            selected_tools,
+        )
         source_cards = build_source_cards(selected_tools, tool_results)
         draft_plan = build_plan_bundle(request_analysis, source_cards, assistant_status="pending")
         planner_decision = await _decide_follow_up_tools(
@@ -2824,6 +3257,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
             source_cards=source_cards,
             draft_plan=draft_plan,
             iteration=iteration,
+            llm_budget=llm_budget,
             preferred_provider=llm_options["preferred_provider"],
             preferred_model=llm_options["preferred_model"],
         )
@@ -2863,6 +3297,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
         tool_results=tool_results,
         source_cards=source_cards,
         draft_plan=draft_plan,
+        llm_budget=llm_budget,
         preferred_provider=llm_options["preferred_provider"],
         preferred_model=llm_options["preferred_model"],
     )
@@ -2880,6 +3315,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
         plan_bundle=draft_plan,
         planning_trace=planning_trace,
         stage="prepared",
+        llm_budget=llm_budget,
     )
     turn_state = AgentTurnState(
         session_id=session.id,
@@ -2933,6 +3369,7 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
         planning_trace=planning_trace,
         stage="prepared",
         context_usage=context_usage,
+        llm_budget=llm_budget,
     )
     turn_state.execution_state = initial_execution_state
     user_message.content_structured = {
@@ -2959,17 +3396,19 @@ async def prepare_chat_turn(db: Session, payload: AgentChatRequest) -> PreparedC
         source_cards=source_cards,
         draft_plan=draft_plan,
         action_suggestions=action_suggestions,
+        llm_budget=llm_budget,
     )
 
 
 async def stream_chat_turn(prepared_turn: PreparedChatTurn) -> AsyncIterator[str]:
     llm_options = _session_model_options(prepared_turn.session)
-    async for chunk in get_ai_client().generate_content_stream(
-        prepared_turn.context["compiled_prompt"],
+    async for chunk in _agent_llm_generate_content_stream(
+        get_ai_client(),
+        llm_budget=prepared_turn.llm_budget,
+        prompt=prepared_turn.context["compiled_prompt"],
         max_tokens=1800,
         temperature=0.3,
         timeout=90,
-        use_heavy=False,
         preferred_provider=llm_options["preferred_provider"],
         preferred_model=llm_options["preferred_model"],
     ):
@@ -3005,6 +3444,7 @@ def finalize_chat_turn(
         stage="completed" if assistant_status == "completed" else "error",
         error_message=error_message,
         context_usage=prepared_turn.context_usage,
+        llm_budget=prepared_turn.llm_budget,
     )
 
     assistant_message = AgentMessage(
@@ -3115,15 +3555,20 @@ async def run_chat(db: Session, payload: AgentChatRequest) -> AgentChatResponse:
     started = perf_counter()
 
     try:
-        assistant_text = await get_ai_client().generate_content(
-            prepared_turn.context["compiled_prompt"],
+        assistant_text = await _agent_llm_generate_content(
+            get_ai_client(),
+            llm_budget=prepared_turn.llm_budget,
+            prompt=prepared_turn.context["compiled_prompt"],
             max_tokens=1800,
             temperature=0.3,
             timeout=90,
-            use_heavy=False,
             preferred_provider=llm_options["preferred_provider"],
             preferred_model=llm_options["preferred_model"],
         )
+    except AgentLlmRateLimitError:
+        db.rollback()
+        _release_chat_request(prepared_turn.session.id, prepared_turn.trace_id)
+        raise
     except Exception as exc:
         error_message = str(exc)[:500]
         assistant_status = "error"

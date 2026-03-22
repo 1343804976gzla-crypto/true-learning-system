@@ -200,6 +200,7 @@ class PoolManager:
         use_heavy: bool,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        fallback_to_pool: bool = True,
     ) -> Tuple[List[PoolEntry], str]:
         direct_entry = self.resolve_preferred(preferred_provider, preferred_model)
         if direct_entry is None:
@@ -207,6 +208,8 @@ class PoolManager:
 
         pool = [direct_entry]
         pool_name = f"Preferred({direct_entry[2]})"
+        if not fallback_to_pool:
+            return pool, pool_name
 
         try:
             fallback_pool, fallback_name = self.resolve_pool(use_heavy)

@@ -441,6 +441,27 @@ def test_agent_session_routes_work():
     assert messages_response.json()["total"] == 0
 
 
+def test_agent_session_forces_deepseek_even_if_other_provider_is_requested():
+    client = TestClient(app)
+    device_id = f"agent-force-deepseek-{uuid4().hex}"
+
+    create_response = client.post(
+        "/api/agent/sessions",
+        json={
+            "device_id": device_id,
+            "title": "Force DeepSeek",
+            "agent_type": "tutor",
+            "provider": "qingyun",
+            "model": "claude-sonnet-4-6",
+        },
+    )
+
+    assert create_response.status_code == 200
+    session = create_response.json()
+    assert session["provider"] == "deepseek"
+    assert session["model"] == "deepseek-chat"
+
+
 def test_agent_session_routes_require_identity_and_isolate_devices():
     _skip_multi_actor_expectations()
     client = TestClient(app)
@@ -501,6 +522,33 @@ def test_agent_session_routes_require_identity_and_isolate_devices():
         },
     )
     assert hijack_response.status_code == 404
+
+
+def test_agent_chat_returns_429_when_single_task_llm_budget_is_exhausted(monkeypatch):
+    from services import agent_runtime
+
+    class _ZeroBudget(agent_runtime.AgentLlmBudget):
+        def __init__(self, trace_id: str):
+            super().__init__(trace_id=trace_id, max_calls=0, min_interval_seconds=0.0)
+
+    monkeypatch.setattr(agent_runtime, "AgentLlmBudget", _ZeroBudget)
+    monkeypatch.setattr(agent_runtime, "get_ai_client", lambda: _FakeAIClient())
+
+    client = TestClient(app)
+    device_id = f"agent-llm-budget-{uuid4().hex}"
+    _seed_agent_learning_data(device_id)
+
+    response = client.post(
+        "/api/agent/chat",
+        json={
+            "device_id": device_id,
+            "message": "根据我的错题和进度，给我一个今晚的复习建议。",
+            "agent_type": "tutor",
+        },
+    )
+
+    assert response.status_code == 429
+    assert "LLM 调用次数已达上限" in response.json()["detail"]
 
 
 def test_agent_task_create_list_and_detail():

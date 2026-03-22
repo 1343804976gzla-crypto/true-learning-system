@@ -170,11 +170,13 @@ class AIClient:
         use_heavy: bool,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        fallback_to_pool: bool = True,
     ) -> tuple[List[PoolEntry], str]:
         pool, pool_name = self.pools.compose_pool(
             use_heavy=use_heavy,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
+            fallback_to_pool=fallback_to_pool,
         )
         filtered_pool = self._filter_unhealthy_pool(
             pool,
@@ -192,6 +194,7 @@ class AIClient:
         use_heavy: bool = False,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        fallback_to_pool: bool = True,
         audit_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate text content. use_heavy=True routes to Heavy pool."""
@@ -199,6 +202,7 @@ class AIClient:
             use_heavy=use_heavy,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
+            fallback_to_pool=fallback_to_pool,
         )
         messages = [{"role": "user", "content": prompt}]
         call_context = audit_context or create_llm_call_context(
@@ -232,6 +236,7 @@ class AIClient:
         use_heavy: bool = False,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        fallback_to_pool: bool = True,
         audit_context: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[str]:
         """Stream text content with pool fallback."""
@@ -239,6 +244,7 @@ class AIClient:
             use_heavy=use_heavy,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
+            fallback_to_pool=fallback_to_pool,
         )
         messages = [{"role": "user", "content": prompt}]
         call_context = audit_context or create_llm_call_context(
@@ -282,6 +288,7 @@ class AIClient:
             use_heavy=use_heavy,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
+            fallback_to_pool=fallback_to_pool,
             audit_context=derive_llm_call_context(
                 call_context,
                 call_kind="content",
@@ -308,6 +315,7 @@ class AIClient:
         use_heavy: bool = False,
         preferred_provider: Optional[str] = None,
         preferred_model: Optional[str] = None,
+        fallback_to_pool: bool = True,
         audit_context: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """Generate JSON with two-prompt retry and Fast pool fallback."""
@@ -331,6 +339,7 @@ class AIClient:
             use_heavy=use_heavy,
             preferred_provider=preferred_provider,
             preferred_model=preferred_model,
+            fallback_to_pool=fallback_to_pool,
             audit_context=audit_context,
             create_context_fn=create_llm_call_context,
             derive_context_fn=derive_llm_call_context,

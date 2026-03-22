@@ -41,10 +41,16 @@ DEFAULT_REVIEW_TIME_BUDGET_MINUTES = 40
 QUESTIONS_PER_REVIEW_UNIT = 10
 UNIT_TARGET_CHARS = 900
 UNIT_MAX_CHARS = 1350
+GENERATION_SOURCE_TEXT_MAX_CHARS = 12000
+GENERATION_BLUEPRINT_MAX_ITEMS = 16
 OPEN_TASK_STATUSES = {"pending", "in_progress", "awaiting_choice"}
 _TASK_QUESTION_LOCKS: dict[tuple[str, int], asyncio.Lock] = {}
 _TASK_QUESTION_LOCKS_GUARD = threading.Lock()
 _SQLITE_LOCK_RETRY_ATTEMPTS = 3
+GENERATION_SCOPE_UNIT_BUDGET_CHARS = 2400
+GENERATION_SCOPE_BLUEPRINT_BLOCK_LIMIT = 12
+GENERATION_POLISH_TRIGGER_NOISE_SCORE = 6
+GENERATION_POLISH_SOURCE_MAX_CHARS = 12000
 MEDICAL_TERM_PATTERN = re.compile(
     r"[\u4e00-\u9fff]{2,10}(?:反馈|调节|机制|激素|受体|通路|效应|系统|细胞|因子|蛋白|激酶|抑制|激活|分泌|代谢|转运|信号|功能|作用|特点|意义|原因|结果|过程|阶段|分类|区别|联系|反应|吸收|消化|循环|通气|排卵|凝固)"
 )
@@ -242,9 +248,17 @@ def _clean_fragment(value: str) -> str:
 
 def _clean_concept_candidate(value: str) -> str:
     text = _clean_fragment(value)
+    text = re.sub(r"^(?:的|其|它|他|她|该|此|这|那)+", "", text).strip()
+    text = re.sub(r"^(?:它是个|它是|这是个|这是|属于|是一种|是一类|是个|是种|是类)", "", text).strip()
+    text = re.sub(r"^(?:如果|但是|不过|所以|因此|然后|那么|一下|这个时候|这个|那个)\s*", "", text).strip()
     text = re.sub(r"^(?:这个|那个|该|本|上述|这种|这一|此类|这类|这些|那些)", "", text).strip()
     text = re.sub(r"^(?:有关|关于|对于|一种|一个|一些)", "", text).strip()
+    text = re.sub(r"^(?:和|与|及|并|而|并且|或者|其中|以及)\s*", "", text).strip()
+    text = re.sub(r"^(.{2,18}?)(?:就是|会|可|能|使|可使|会使|激活|抑制|促进|增强|减弱).*$", r"\1", text).strip()
+    text = re.sub(r"^([\u4e00-\u9fffA-Za-z]{2,16}?)(?:会使|可使|能使|使|通过|借助|依赖|导致|引起|维持|促进|抑制|增强|减弱).*$", r"\1", text).strip()
+    text = re.sub(r"(?:的核心机制|的核心内涵|的答题抓手|的关键环节|核心要点|相关内容)$", "", text).strip()
     text = re.sub(r"(?:的内容|这个部分|这一部分|这一节|这个章节|这个东西)$", "", text).strip()
+    text = re.sub(r"(?:与相关概念|与相近概念|和相关概念|和相近概念)$", "", text).strip()
     text = re.sub(r"^(?:第[一二三四五六七八九十百]+个|第\d+个)", "", text).strip()
     text = text.strip("，,。；;：:、 ")
     if len(text) < 2:
@@ -261,6 +275,16 @@ def _clean_concept_candidate(value: str) -> str:
 def _is_weak_concept(value: str) -> bool:
     text = str(value or "").strip("，,。；;：:、 ")
     if not text:
+        return True
+    if text.startswith("请") and len(text) <= 4:
+        return True
+    if re.match(r"^[的其它他她该此这那]", text):
+        return True
+    if re.match(r"^(?:如果|但是|不过|所以|因此|然后|那么|一下|这个时候|这个|那个|我们的|你的|我的)", text):
+        return True
+    if any(marker in text for marker in ("就是", "可以了", "答题抓手", "关键环节", "核心内涵")):
+        return True
+    if any(marker in text for marker in ("才是", "绝对不", "一直加强", "相关概念", "辩证作用", "识别")):
         return True
     if text in GENERIC_FRAGMENT_WORDS or text in GENERIC_CHAPTER_TITLES:
         return True
@@ -600,6 +624,95 @@ def build_review_units(cleaned_text: str, *, chapter_title: str) -> list[ReviewU
     return units
 
 
+def _task_unit_source_text(task: ChapterReviewTask) -> str:
+    return clean_review_content(task.unit.cleaned_text or task.unit.raw_text or task.unit.excerpt or task.unit.unit_title)
+
+
+def _task_chapter_source_text(task: ChapterReviewTask) -> str:
+    return clean_review_content(
+        task.review_chapter.cleaned_content
+        or task.review_chapter.merged_raw_content
+        or task.unit.cleaned_text
+        or task.unit.raw_text
+        or task.unit.excerpt
+        or task.review_chapter.chapter_title
+    )
+
+
+def _build_generation_scope_text(
+    *,
+    unit_source_text: str,
+    chapter_source_text: str,
+    blueprint: list[dict[str, Any]],
+    max_chars: int = GENERATION_SOURCE_TEXT_MAX_CHARS,
+) -> str:
+    unit_clean = clean_review_content(unit_source_text)
+    chapter_clean = clean_review_content(chapter_source_text)
+    if not chapter_clean:
+        return unit_clean
+    if len(chapter_clean) <= max_chars:
+        return chapter_clean
+
+    selected_blocks: list[str] = []
+    seen_keys: set[str] = set()
+    total_chars = 0
+
+    def add_block(text: str, *, required: bool = False) -> None:
+        nonlocal total_chars
+        cleaned = clean_review_content(text)
+        if not cleaned:
+            return
+        key = _normalize_match_key(cleaned[:200]) or _normalize_match_key(cleaned)
+        if key and key in seen_keys:
+            return
+
+        join_cost = 2 if selected_blocks else 0
+        remaining = max_chars - total_chars - join_cost
+        if remaining <= 0:
+            return
+        if len(cleaned) > remaining:
+            if not required and remaining < 140:
+                return
+            trimmed = cleaned[:remaining].rstrip()
+            sentence_cut = max(trimmed.rfind("。"), trimmed.rfind("；"), trimmed.rfind("！"), trimmed.rfind("？"))
+            if sentence_cut >= 48:
+                cleaned = trimmed[: sentence_cut + 1]
+            else:
+                cleaned = trimmed.rstrip("，,；; ") + "…"
+        if not cleaned:
+            return
+        if key:
+            seen_keys.add(key)
+        selected_blocks.append(cleaned)
+        total_chars += len(cleaned) + join_cost
+
+    unit_segments = _extract_segments(unit_clean) or ([unit_clean] if unit_clean else [])
+    for segment in unit_segments:
+        add_block(segment, required=not selected_blocks)
+        if total_chars >= GENERATION_SCOPE_UNIT_BUDGET_CHARS:
+            break
+
+    for item in blueprint[:GENERATION_SCOPE_BLUEPRINT_BLOCK_LIMIT]:
+        add_block(str(item.get("supporting_text") or item.get("source_excerpt") or ""))
+
+    chapter_segments = _extract_segments(chapter_clean)
+    if chapter_segments:
+        add_block(chapter_segments[0])
+        if len(chapter_segments) > 2:
+            add_block(chapter_segments[len(chapter_segments) // 2])
+        if len(chapter_segments) > 1:
+            add_block(chapter_segments[-1])
+    for segment in chapter_segments:
+        add_block(segment)
+        if total_chars >= max_chars or len(selected_blocks) >= 16:
+            break
+
+    scoped = "\n\n".join(block for block in selected_blocks if block).strip()
+    if scoped:
+        return scoped
+    return _trim_text(chapter_clean, max_length=max_chars)
+
+
 def _append_merged_content(existing: str, addition: str, *, upload_date: date) -> str:
     incoming = str(addition or "").strip()
     if not incoming:
@@ -827,7 +940,7 @@ def serialize_task_detail(task: ChapterReviewTask) -> Dict[str, Any]:
         or getattr(task.review_chapter, "content_version", 0)
         or 1
     )
-    payload["source_content"] = task.unit.raw_text or task.unit.cleaned_text or ""
+    payload["source_content"] = _task_chapter_source_text(task)
     payload["questions"] = [
         {
             "id": int(question.id),
@@ -895,6 +1008,48 @@ def _create_task_for_unit(
     return task
 
 
+def _task_has_saved_progress(task: ChapterReviewTask) -> bool:
+    if int(task.answered_count or 0) > 0:
+        return True
+    return any(str(question.user_answer or "").strip() for question in list(task.questions or []))
+
+
+def _refresh_stale_open_tasks(
+    db: Session,
+    *,
+    open_tasks: list[ChapterReviewTask],
+    review_date: date,
+) -> None:
+    refreshed = False
+    now = datetime.now()
+    for task in open_tasks:
+        if task.status != "pending":
+            continue
+        if not task.scheduled_for or task.scheduled_for >= review_date:
+            continue
+        if _task_has_saved_progress(task):
+            continue
+        last_updated = task.updated_at.date() if task.updated_at else None
+        if last_updated is not None and last_updated >= review_date:
+            continue
+        for question in list(task.questions or []):
+            db.delete(question)
+        task.resume_position = 0
+        task.answered_count = 0
+        task.ai_recommended_status = None
+        task.user_selected_status = None
+        task.grading_score = None
+        task.started_at = None
+        task.graded_at = None
+        task.completed_at = None
+        task.updated_at = now
+        refreshed = True
+    if refreshed:
+        db.flush()
+        for task in open_tasks:
+            db.refresh(task)
+
+
 def ensure_daily_review_plan(
     db: Session,
     *,
@@ -919,6 +1074,7 @@ def ensure_daily_review_plan(
         .order_by(ChapterReviewTask.status.desc(), ChapterReviewTask.scheduled_for.asc(), ChapterReviewTask.id.asc())
         .all()
     )
+    _refresh_stale_open_tasks(db, open_tasks=open_tasks, review_date=review_date)
 
     open_by_unit = {int(task.unit_id): task for task in open_tasks}
     selected_tasks: list[ChapterReviewTask] = list(open_tasks)
@@ -1051,7 +1207,7 @@ def _pick_supporting_sentences(paragraph: str, concept: str, *, limit: int = 3) 
 def _build_reference_answer_from_segment(paragraph: str, concept: str) -> str:
     key_points = _build_key_points_from_segment(paragraph, concept)
     focus = concept or "该知识点"
-    if key_points:
+    if key_points and all(not _is_weak_concept(point) for point in key_points[:3]):
         answer = f"{focus}的核心要点包括：{'；'.join(point.rstrip('。；; ') for point in key_points[:3])}。"
         return _trim_text(answer, max_length=180)
 
@@ -1064,27 +1220,34 @@ def _build_reference_answer_from_segment(paragraph: str, concept: str) -> str:
 
 
 def _build_key_points_from_segment(paragraph: str, concept: str) -> list[str]:
+    def _distill_clause(sentence: str) -> str:
+        cleaned = _polish_source_sentence(sentence)
+        if not cleaned:
+            return ""
+        clauses = [item.strip() for item in re.split(r"[，,；;：:]", cleaned) if item and item.strip()]
+        distilled: list[str] = []
+        for clause in clauses or [cleaned]:
+            clause = re.sub(r"^(?:如果|但是|不过|所以|因此|然后|那么|一下|这个时候|这个|那个|我们的|你的|我的)\s*", "", clause).strip()
+            clause = re.sub(r"^(?:它是个|它是|这是个|这是|是个|是种|是类|属于)\s*", "", clause).strip()
+            clause = clause.strip("，,。；;：:、 ")
+            if not clause or len(clause) < 4:
+                continue
+            if _is_weak_concept(clause):
+                continue
+            distilled.append(_trim_text(clause, max_length=24))
+        return distilled[0] if distilled else ""
+
     points: list[str] = []
     for sentence in _pick_supporting_sentences(paragraph, concept, limit=4):
-        cleaned = _polish_source_sentence(sentence)
+        cleaned = _distill_clause(sentence)
         if len(cleaned) < 4:
-            continue
-        if "，" in cleaned and len(cleaned) > 28:
-            cleaned = cleaned.split("，", 1)[0]
-        cleaned = _trim_text(cleaned, max_length=28)
-        if any(token in cleaned for token in ("，", "；", "。")):
             continue
         if cleaned and cleaned not in points:
             points.append(cleaned)
     if len(points) < 2:
         for sentence in _split_sentences(paragraph):
-            cleaned = _polish_source_sentence(sentence)
+            cleaned = _distill_clause(sentence)
             if len(cleaned) < 4:
-                continue
-            if "，" in cleaned and len(cleaned) > 28:
-                cleaned = cleaned.split("，", 1)[0]
-            cleaned = _trim_text(cleaned, max_length=28)
-            if any(token in cleaned for token in ("，", "；", "。")):
                 continue
             if cleaned and cleaned not in points:
                 points.append(cleaned)
@@ -1215,6 +1378,10 @@ def _prompt_has_weak_focus(prompt: str) -> bool:
     text = _clean_fragment(prompt).rstrip("？?")
     if not text:
         return True
+    if re.match(r"^请围绕(?:会|能|可|是|有|把|让)", text):
+        return True
+    if any(token in text for token in ("答题抓手", "关键环节", "核心内涵")) and any(token in text for token in ("它是个", "一下", "我们的前馈")):
+        return True
     if any(text.startswith(prefix) for prefix in WEAK_CONCEPT_PREFIXES):
         return True
     patterns = (
@@ -1264,9 +1431,9 @@ def _build_prompt_variants(concept: str, paragraph: str) -> list[str]:
     focus = concept or "该知识点"
     variants = [
         _choose_fallback_prompt(focus, paragraph),
-        f"请围绕{focus}归纳最容易失分的关键要点。",
-        f"请结合原文说明{focus}的核心内涵与答题抓手。",
-        f"请概括{focus}与本节重点内容的联系，并指出作答顺序。",
+        f"请概括{focus}的核心要点，并说明常见失分点。",
+        f"请结合原文分析{focus}与本节主线知识点的联系。",
+        f"请说明{focus}在本节知识结构中的定位和作答重点。",
     ]
     if any(token in paragraph for token in ("机制", "反馈", "调节", "激活", "抑制")):
         variants.append(f"请说明{focus}的调节方向、关键环节及最终结果。")
@@ -1294,6 +1461,8 @@ def _extract_prompt_focus(prompt: str) -> str:
         if not match:
             continue
         focus = _clean_concept_candidate(match.group("focus"))
+        focus = re.sub(r"^(?:请|简述|概述|概括|分析|说明|理解|如何理解|请说明|请概括|请结合原文说明|请结合原文分析)+", "", focus).strip()
+        focus = re.sub(r"(?:及其|才是|绝对不|的识别|在机体中的|在本节知识结构中的定位)$", "", focus).strip()
         if focus:
             return focus
     english_patterns = (
@@ -1344,6 +1513,8 @@ def _resolve_review_summary(summary: str, *, source_text: str, chapter_title: st
 
 def _normalize_review_concept_name(value: Any) -> str:
     text = _clean_concept_candidate(str(value or ""))
+    text = re.sub(r"^(?:请|简述|概述|概括|分析|说明|理解|如何理解|围绕|结合原文说明|结合原文分析)+", "", text).strip()
+    text = re.sub(r"(?:及其|才是|绝对不|的识别|在机体中的|在本节知识结构中的定位)$", "", text).strip()
     text = re.sub(r"(?:相关要点|关键点|核心内容|重点内容|原理要点)$", "", text).strip()
     return text
 
@@ -1573,8 +1744,9 @@ async def _ai_refine_review_concept_blueprint(
 3. prompt_focus 可以比 concept_name 更具体，但仍需是书面化考点。
 4. question_axis 只能是 definition / mechanism / comparison / significance / features 之一。
 5. expected_key_points 保留 2-4 条，都是可判分的内容要点。
-6. source_excerpt 必须摘自原文关键句，便于定位。
-7. 只返回 JSON。
+6. 尽量覆盖整章里不同的核心知识点，避免把多个名额浪费在同一知识点的近义重复表达上。
+7. source_excerpt 必须摘自原文关键句，便于定位。
+8. 只返回 JSON。
 """
     schema = {
         "concepts": [
@@ -1594,8 +1766,8 @@ async def _ai_refine_review_concept_blueprint(
         schema,
         max_tokens=2400,
         temperature=0.15,
-        timeout=35,
-        use_heavy=False,
+        timeout=70,
+        use_heavy=True,
     )
     return list(result.get("concepts") or [])[:limit]
 
@@ -1609,42 +1781,50 @@ async def _build_review_generation_context(
 ) -> dict[str, Any]:
     chapter = db.query(Chapter).filter(Chapter.id == task.review_chapter.chapter_id).first()
     chapter_title = task.review_chapter.chapter_title
+    unit_source_text = clean_review_content(source_text)
+    chapter_source_text = _task_chapter_source_text(task)
+    polished_summary = ""
+    polished_notes: list[dict[str, Any]] = []
+    concept_limit = min(
+        GENERATION_BLUEPRINT_MAX_ITEMS,
+        max(int(task.question_count or QUESTIONS_PER_REVIEW_UNIT) + 4, 10),
+    )
     chapter_concepts = _chapter_concept_candidates(
         chapter,
-        source_text=source_text,
+        source_text=chapter_source_text,
         summary=summary,
         chapter_title=chapter_title,
     )
     local_blueprint = _build_local_review_concept_blueprint(
-        source_text=source_text,
+        source_text=chapter_source_text,
         summary=summary,
         chapter_title=chapter_title,
         concept_candidates=chapter_concepts,
-        limit=6,
+        limit=concept_limit,
     )
     if not local_blueprint:
-        fallback_candidates = _extract_focus_candidates(source_text, limit=12)
+        fallback_candidates = _extract_focus_candidates(chapter_source_text, limit=max(concept_limit * 2, 12))
         chapter_focus = _chapter_focus_from_unit_title(chapter_title)
         if chapter_focus and chapter_focus not in fallback_candidates:
             fallback_candidates.insert(0, chapter_focus)
         local_blueprint = _build_local_review_concept_blueprint(
-            source_text=source_text,
+            source_text=chapter_source_text,
             summary=summary,
             chapter_title=chapter_title,
             concept_candidates=fallback_candidates,
-            limit=6,
+            limit=concept_limit,
         )
 
     ai_blueprint: list[dict[str, Any]] = []
     try:
         ai_blueprint = await asyncio.wait_for(
             _ai_refine_review_concept_blueprint(
-                source_text=source_text,
+                source_text=chapter_source_text,
                 summary=summary,
                 chapter_title=chapter_title,
                 chapter_concepts=chapter_concepts,
                 fallback_blueprint=local_blueprint,
-                limit=6,
+                limit=concept_limit,
             ),
             timeout=22,
         )
@@ -1653,17 +1833,66 @@ async def _build_review_generation_context(
 
     concept_blueprint = _normalize_review_concept_blueprint(
         ai_blueprint,
-        source_text=source_text,
+        source_text=chapter_source_text,
         chapter_title=chapter_title,
         summary=summary,
         fallback_blueprint=local_blueprint,
-        limit=6,
+        limit=concept_limit,
     )
+    if _material_needs_polish(chapter_source_text):
+        try:
+            polished_result = await asyncio.wait_for(
+                _ai_polish_review_source(
+                    chapter_title=chapter_title,
+                    summary=summary,
+                    chapter_concepts=chapter_concepts,
+                    source_text=chapter_source_text,
+                ),
+                timeout=36,
+            )
+            polished_summary = _trim_text(
+                _polish_source_sentence(str(polished_result.get("summary") or "")),
+                max_length=180,
+            )
+            for item in list(polished_result.get("notes") or []):
+                if not isinstance(item, dict):
+                    continue
+                concept_name = _normalize_review_concept_name(item.get("concept_name"))
+                note = _trim_text(_polish_source_sentence(str(item.get("note") or "")), max_length=140)
+                source_excerpt = _trim_text(_polish_source_sentence(str(item.get("source_excerpt") or "")), max_length=120)
+                if not concept_name or _is_weak_concept(concept_name) or not note:
+                    continue
+                polished_notes.append(
+                    {
+                        "concept_name": concept_name,
+                        "note": note,
+                        "source_excerpt": source_excerpt,
+                    }
+                )
+                if len(polished_notes) >= concept_limit:
+                    break
+        except Exception:
+            polished_summary = ""
+            polished_notes = []
+
+    raw_generation_source_text = _build_generation_scope_text(
+        unit_source_text=unit_source_text,
+        chapter_source_text=chapter_source_text,
+        blueprint=concept_blueprint or local_blueprint,
+    )
+    polished_note_text = _format_polished_material_notes(polished_notes)
+    generation_source_text = raw_generation_source_text
+    if polished_note_text:
+        generation_source_text = f"书面化复习笔记：\n{polished_note_text}\n\n原文关键材料：\n{raw_generation_source_text}".strip()
     return {
         "chapter_title": chapter_title,
-        "summary": summary,
+        "summary": polished_summary or summary,
         "chapter_concepts": chapter_concepts[:16],
         "concept_blueprint": concept_blueprint,
+        "unit_source_text": unit_source_text,
+        "chapter_source_text": chapter_source_text,
+        "generation_source_text": generation_source_text,
+        "polished_notes": polished_notes,
     }
 
 
@@ -1687,13 +1916,108 @@ def _build_blueprint_text(blueprint: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _material_needs_polish(source_text: str) -> bool:
+    raw_text = str(source_text or "")
+    text = clean_review_content(source_text)
+    if not text:
+        return False
+    raw_sample = raw_text[:2600]
+    sample = text[:2600]
+    if len(re.findall(r"(?:我们的|这个时候|你看|对吧|按理来说|一般来讲|所以|那么)", raw_sample)) >= 4:
+        return True
+    if _spoken_noise_score(sample) >= GENERATION_POLISH_TRIGGER_NOISE_SCORE:
+        return True
+    if len(re.findall(r"(?:我们的|这个时候|你看|对吧|按理来说|一般来讲|所以|那么)", sample)) >= 6:
+        return True
+    suspicious_sentences = 0
+    for sentence in _split_sentences(sample):
+        stripped = sentence.strip()
+        if len(stripped) < 10:
+            suspicious_sentences += 1
+            continue
+        if re.match(r"^(?:如果|但是|不过|所以|那么|一下|这个时候|我们的|你看|对吧)", stripped):
+            suspicious_sentences += 1
+            continue
+        if stripped.startswith("它是") or stripped.startswith("这是"):
+            suspicious_sentences += 1
+            continue
+    return suspicious_sentences >= 4
+
+
+def _format_polished_material_notes(notes: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for index, item in enumerate(notes, start=1):
+        concept_name = str(item.get("concept_name") or "").strip() or f"要点 {index}"
+        note = str(item.get("note") or "").strip()
+        source_excerpt = str(item.get("source_excerpt") or "").strip()
+        if not note:
+            continue
+        lines.append(f"{index}. {concept_name}：{note}")
+        if source_excerpt:
+            lines.append(f"   原文定位：{source_excerpt}")
+    return "\n".join(lines)
+
+
+async def _ai_polish_review_source(
+    *,
+    chapter_title: str,
+    summary: str,
+    chapter_concepts: list[str],
+    source_text: str,
+) -> dict[str, Any]:
+    prompt = f"""你是医学课程讲义编辑。请把下面夹杂课堂口语、ASR 残句和重复表达的原始材料，整理成适合出题的书面化复习笔记。
+【章节】{chapter_title}
+【已有摘要】{summary or "无"}
+【候选知识点】{", ".join(chapter_concepts[:18]) or "无"}
+【原始材料】
+{_trim_text(source_text, max_length=GENERATION_POLISH_SOURCE_MAX_CHARS)}
+
+要求：
+1. 只保留原文中明确出现并能直接支持出题的医学事实，不得引入材料外知识。
+2. `summary` 输出 80-180 字的书面化摘要。
+3. `notes` 输出 6-12 条结构化笔记。每条都要包含：
+   - `concept_name`：明确知识点名称，不能是“它是个正反馈”“这个时候”这种碎片
+   - `note`：60-120 字书面化表述，尽量去掉课堂口语、重复和残句
+   - `source_excerpt`：对应的原文关键句，便于回看定位
+4. 优先覆盖不同知识点，避免多条笔记围绕同一小句反复改写。
+5. 只返回 JSON。"""
+    schema = {
+        "summary": "书面化摘要",
+        "notes": [
+            {
+                "concept_name": "知识点名称",
+                "note": "书面化复习笔记",
+                "source_excerpt": "原文关键句",
+            }
+        ],
+    }
+    return await get_ai_client().generate_json(
+        prompt,
+        schema,
+        max_tokens=2600,
+        temperature=0.1,
+        timeout=80,
+        use_heavy=True,
+    )
+
+
 def _build_generation_material(unit: ChapterReviewUnit, *, summary: str, chapter_title: str) -> dict[str, Any]:
-    source_text = clean_review_content(unit.cleaned_text or unit.raw_text or unit.excerpt or unit.unit_title)
-    resolved_summary = _resolve_review_summary(summary, source_text=source_text, chapter_title=chapter_title)
     context = _review_generation_context_data()
+    unit_source_text = clean_review_content(
+        context.get("unit_source_text") or unit.cleaned_text or unit.raw_text or unit.excerpt or unit.unit_title
+    )
+    chapter_source_text = clean_review_content(context.get("chapter_source_text") or unit_source_text)
+    source_text = clean_review_content(context.get("generation_source_text") or chapter_source_text or unit_source_text)
+    polished_notes = list(context.get("polished_notes") or [])
+    resolved_chapter_title = str(context.get("chapter_title") or chapter_title or unit.unit_title).strip() or unit.unit_title
+    resolved_summary = _resolve_review_summary(
+        str(context.get("summary") or summary or ""),
+        source_text=chapter_source_text or source_text,
+        chapter_title=resolved_chapter_title,
+    )
     concept_blueprint = list(context.get("concept_blueprint") or [])
     chapter_concepts = [str(item) for item in list(context.get("chapter_concepts") or []) if str(item).strip()]
-    chapter_focus = _chapter_focus_from_unit_title(chapter_title or unit.unit_title)
+    chapter_focus = _chapter_focus_from_unit_title(resolved_chapter_title or unit.unit_title)
     if chapter_focus and chapter_focus not in chapter_concepts:
         chapter_concepts.insert(0, chapter_focus)
     focus_candidates: list[str] = []
@@ -1702,44 +2026,61 @@ def _build_generation_material(unit: ChapterReviewUnit, *, summary: str, chapter
             cleaned = _normalize_review_concept_name(candidate)
             if cleaned and cleaned not in focus_candidates:
                 focus_candidates.append(cleaned)
+    for item in polished_notes:
+        cleaned = _normalize_review_concept_name(item.get("concept_name"))
+        if cleaned and cleaned not in focus_candidates:
+            focus_candidates.append(cleaned)
     for candidate in chapter_concepts:
         cleaned = _normalize_review_concept_name(candidate)
         if cleaned and cleaned not in focus_candidates:
             focus_candidates.append(cleaned)
-    for text in (resolved_summary, chapter_title, source_text):
+    for text in (resolved_summary, resolved_chapter_title, chapter_source_text, unit_source_text):
         for candidate in _extract_focus_candidates(text, limit=12):
             cleaned = _clean_concept_candidate(candidate)
             if cleaned and cleaned not in focus_candidates:
                 focus_candidates.append(cleaned)
-            if len(focus_candidates) >= 12:
+            if len(focus_candidates) >= 16:
                 break
-        if len(focus_candidates) >= 12:
+        if len(focus_candidates) >= 16:
             break
     if chapter_focus and chapter_focus not in focus_candidates:
         focus_candidates.insert(0, chapter_focus)
 
     digest_sentences: list[str] = []
-    primary_focus = focus_candidates[0] if focus_candidates else chapter_focus
-    for paragraph in _extract_segments(source_text):
-        for sentence in _pick_supporting_sentences(paragraph, primary_focus, limit=2):
-            cleaned = _polish_source_sentence(sentence)
-            if len(cleaned) < 12 or _spoken_noise_score(cleaned) > 1 or cleaned in digest_sentences:
-                continue
-            digest_sentences.append(cleaned)
-            if len(digest_sentences) >= 6 or len("；".join(digest_sentences)) >= 420:
+    for item in polished_notes:
+        note = _trim_text(_polish_source_sentence(str(item.get("note") or "")), max_length=140)
+        if note and note not in digest_sentences:
+            digest_sentences.append(note)
+        if len(digest_sentences) >= 8 or len("；".join(digest_sentences)) >= 520:
+            break
+    digest_paragraphs = _extract_segments(chapter_source_text or source_text)
+    digest_focuses = focus_candidates[:4] or ([chapter_focus] if chapter_focus else [])
+    for focus in digest_focuses:
+        for paragraph in digest_paragraphs:
+            for sentence in _pick_supporting_sentences(paragraph, focus, limit=2):
+                cleaned = _polish_source_sentence(sentence)
+                if len(cleaned) < 12 or _spoken_noise_score(cleaned) > 1 or cleaned in digest_sentences:
+                    continue
+                digest_sentences.append(cleaned)
+                if len(digest_sentences) >= 8 or len("；".join(digest_sentences)) >= 520:
+                    break
+            if len(digest_sentences) >= 8 or len("；".join(digest_sentences)) >= 520:
                 break
-        if len(digest_sentences) >= 6 or len("；".join(digest_sentences)) >= 420:
+        if len(digest_sentences) >= 8 or len("；".join(digest_sentences)) >= 520:
             break
 
     return {
         "source_text": source_text,
+        "chapter_source_text": chapter_source_text,
+        "unit_source_text": unit_source_text,
         "summary": resolved_summary,
         "focuses": focus_candidates,
         "focus_line": "、".join(focus_candidates[:8]),
-        "digest": "；".join(digest_sentences[:6]),
+        "digest": "；".join(digest_sentences[:8]),
         "concept_blueprint": concept_blueprint,
         "blueprint_text": _build_blueprint_text(concept_blueprint),
         "chapter_concepts": chapter_concepts,
+        "chapter_title": resolved_chapter_title,
     }
 
 
@@ -1770,15 +2111,26 @@ def _pick_question_focus(prompt: str, source_excerpt: str, supporting_text: str,
 
 
 def _normalize_question_payload(item: dict[str, Any], *, unit: ChapterReviewUnit) -> dict[str, Any]:
-    source_text = clean_review_content(unit.cleaned_text or unit.raw_text or unit.excerpt or unit.unit_title)
-    supporting_text = source_text if len(source_text) >= 80 else f"{source_text} {unit.excerpt or ''}".strip()
-    source_excerpt = _trim_text(_clean_fragment(str(item.get("source_excerpt") or "")), max_length=120)
-    concept = _pick_question_focus(
-        str(item.get("prompt") or ""),
-        source_excerpt,
-        supporting_text,
-        unit.unit_title,
+    context = _review_generation_context_data()
+    source_text = clean_review_content(
+        context.get("chapter_source_text") or unit.cleaned_text or unit.raw_text or unit.excerpt or unit.unit_title
     )
+    generation_text = clean_review_content(context.get("generation_source_text") or source_text)
+    supporting_text = source_text if len(source_text) >= 80 else f"{source_text} {unit.excerpt or ''}".strip()
+    if generation_text:
+        supporting_text = generation_text if len(generation_text) >= 80 else supporting_text
+    source_excerpt = _trim_text(_clean_fragment(str(item.get("source_excerpt") or "")), max_length=120)
+    chapter_title = str(context.get("chapter_title") or unit.unit_title).strip() or unit.unit_title
+    explicit_focus = _normalize_review_concept_name(item.get("prompt_focus") or item.get("concept_name"))
+    if explicit_focus and not _is_weak_concept(explicit_focus):
+        concept = explicit_focus
+    else:
+        concept = _pick_question_focus(
+            str(item.get("prompt") or ""),
+            source_excerpt,
+            supporting_text,
+            chapter_title,
+        )
     paragraphs = _extract_segments(supporting_text) or [supporting_text]
     _, best_paragraph = _pick_best_paragraph(paragraphs, concept, used_indices=set())
     if not source_excerpt:
@@ -1822,18 +2174,34 @@ def _normalize_question_payload(item: dict[str, Any], *, unit: ChapterReviewUnit
     )
     payload = {
         "prompt": prompt,
+        "concept_name": str(item.get("concept_name") or explicit_focus or concept),
+        "prompt_focus": str(item.get("prompt_focus") or explicit_focus or concept),
         "reference_answer": reference_answer,
         "key_points": key_points[:4],
         "explanation": explanation,
         "source_excerpt": source_excerpt,
         "question_axis": question_axis,
+        "priority": int(item.get("priority") or 0),
     }
-    if _is_low_quality_question_payload(payload):
+    prompt_focus = _extract_prompt_focus(prompt)
+    structured_payload_ok = bool(
+        explicit_focus
+        and not _is_weak_concept(explicit_focus)
+        and (explicit_focus in payload["prompt"] or explicit_focus in payload["reference_answer"])
+        and prompt_focus
+        and not _is_weak_concept(prompt_focus)
+        and len(payload["reference_answer"]) >= 24
+        and len(payload["key_points"]) >= 2
+        and len(payload["source_excerpt"]) >= 12
+    )
+    if _is_low_quality_question_payload(payload) and not structured_payload_ok:
         repaired_paragraph = best_paragraph
-        repaired_focus = _pick_question_focus(payload["prompt"], source_excerpt, repaired_paragraph, unit.unit_title)
+        repaired_focus = _pick_question_focus(payload["prompt"], source_excerpt, repaired_paragraph, chapter_title)
         repaired_key_points = _build_key_points_from_segment(repaired_paragraph, repaired_focus)
         payload = {
             "prompt": _choose_fallback_prompt(repaired_focus, repaired_paragraph),
+            "concept_name": repaired_focus,
+            "prompt_focus": repaired_focus,
             "reference_answer": _build_reference_answer_from_segment(repaired_paragraph, repaired_focus),
             "key_points": repaired_key_points[:4],
             "explanation": _build_explanation_from_segment(repaired_paragraph, repaired_focus, repaired_key_points),
@@ -1841,6 +2209,7 @@ def _normalize_question_payload(item: dict[str, Any], *, unit: ChapterReviewUnit
             "question_axis": _review_question_axis_from_text(
                 " ".join([_choose_fallback_prompt(repaired_focus, repaired_paragraph), repaired_paragraph])
             ),
+            "priority": int(item.get("priority") or 0),
         }
     return payload
 
@@ -1905,6 +2274,9 @@ def _question_payload_quality_score(item: dict[str, Any]) -> int:
     focus = _extract_prompt_focus(prompt)
     if focus and not _is_weak_concept(focus):
         score += 20
+    explicit_focus = _normalize_review_concept_name(item.get("prompt_focus") or item.get("concept_name"))
+    if explicit_focus and not _is_weak_concept(explicit_focus):
+        score += 10
     score += min(len(key_points), 4) * 8
     if 60 <= len(reference_answer) <= 180:
         score += 20
@@ -1916,11 +2288,15 @@ def _question_payload_quality_score(item: dict[str, Any]) -> int:
         score += 12
     if 20 <= len(source_excerpt) <= 120:
         score += 12
+    score += min(max(int(item.get("priority") or 0), 0), 16)
     score += max(0, 15 - int(_sequence_ratio(prompt, reference_answer) * 20))
     return score
 
 
 def _question_focus_key(item: dict[str, Any]) -> str:
+    explicit_focus = _normalize_review_concept_name(item.get("prompt_focus") or item.get("concept_name"))
+    if explicit_focus:
+        return _normalize_match_key(explicit_focus)
     prompt = str(item.get("prompt") or "")
     focus = _extract_prompt_focus(prompt)
     if focus:
@@ -1956,6 +2332,16 @@ def _question_semantic_key(item: dict[str, Any]) -> str:
     return f"{prompt_key[:32]}|{axis}"
 
 
+def _question_source_key(item: dict[str, Any]) -> str:
+    excerpt = _clean_fragment(str(item.get("source_excerpt") or ""))
+    if excerpt:
+        return _normalize_match_key(excerpt[:48])
+    answer = _clean_fragment(str(item.get("reference_answer") or ""))
+    if answer:
+        return _normalize_match_key(answer[:48])
+    return ""
+
+
 def _question_payloads_are_redundant(left: dict[str, Any], right: dict[str, Any]) -> bool:
     left_focus = _question_focus_key(left)
     right_focus = _question_focus_key(right)
@@ -1964,6 +2350,8 @@ def _question_payloads_are_redundant(left: dict[str, Any], right: dict[str, Any]
     prompt_ratio = _sequence_ratio(str(left.get("prompt") or ""), str(right.get("prompt") or ""))
     answer_ratio = _sequence_ratio(str(left.get("reference_answer") or ""), str(right.get("reference_answer") or ""))
     excerpt_ratio = _sequence_ratio(str(left.get("source_excerpt") or ""), str(right.get("source_excerpt") or ""))
+    left_source = _question_source_key(left)
+    right_source = _question_source_key(right)
 
     if left_focus and right_focus and left_focus == right_focus and left_axis == right_axis:
         if prompt_ratio >= 0.7 or answer_ratio >= 0.78 or excerpt_ratio >= 0.78:
@@ -1972,6 +2360,9 @@ def _question_payloads_are_redundant(left: dict[str, Any], right: dict[str, Any]
         if prompt_ratio >= 0.84:
             return True
         if answer_ratio >= 0.9 and excerpt_ratio >= 0.72:
+            return True
+    if left_source and right_source and left_source == right_source:
+        if prompt_ratio >= 0.35 or answer_ratio >= 0.72 or excerpt_ratio >= 0.9:
             return True
     return False
 
@@ -1996,7 +2387,7 @@ def _prepare_questions_for_storage(
     unit: ChapterReviewUnit,
     question_count: int,
 ) -> list[dict[str, Any]]:
-    normalized_rows: list[tuple[int, str, str, str, dict[str, Any]]] = []
+    normalized_rows: list[tuple[int, int, str, str, str, str, dict[str, Any]]] = []
     seen_prompt_keys: set[str] = set()
     for item in raw_questions:
         normalized = _normalize_question_payload(item, unit=unit)
@@ -2006,34 +2397,118 @@ def _prepare_questions_for_storage(
         seen_prompt_keys.add(prompt_key)
         focus_key = _question_focus_key(normalized)
         semantic_key = _question_semantic_key(normalized)
+        source_key = _question_source_key(normalized)
         quality = _question_payload_quality_score(normalized)
-        normalized_rows.append((quality, focus_key, semantic_key, prompt_key, normalized))
+        priority = int(normalized.get("priority") or 0)
+        normalized_rows.append((priority, quality, focus_key, semantic_key, source_key, prompt_key, normalized))
 
-    normalized_rows.sort(key=lambda row: (row[0], len(row[1]), len(row[2]), row[3]), reverse=True)
+    normalized_rows.sort(key=lambda row: (row[0], row[1], len(row[2]), len(row[3]), row[5]), reverse=True)
 
     prepared: list[dict[str, Any]] = []
     seen_prompts: set[str] = set()
     used_focuses: set[str] = set()
     used_semantic_keys: set[str] = set()
-    for enforce_unique_focus, enforce_unique_semantic in ((True, True), (False, True), (False, False)):
-        for _, focus_key, semantic_key, prompt_key, normalized in normalized_rows:
+    used_source_keys: set[str] = set()
+
+    def try_add(
+        normalized: dict[str, Any],
+        *,
+        focus_key: str,
+        semantic_key: str,
+        source_key: str,
+        prompt_key: str,
+        enforce_unique_focus: bool,
+        enforce_unique_semantic: bool,
+        enforce_unique_source: bool,
+    ) -> bool:
+        if prompt_key in seen_prompts:
+            return False
+        if enforce_unique_focus and focus_key and focus_key in used_focuses:
+            return False
+        if enforce_unique_semantic and semantic_key and semantic_key in used_semantic_keys:
+            return False
+        if enforce_unique_source and source_key and source_key in used_source_keys:
+            return False
+        if any(_question_payloads_are_redundant(normalized, existing) for existing in prepared):
+            return False
+        seen_prompts.add(prompt_key)
+        if focus_key:
+            used_focuses.add(focus_key)
+        if semantic_key:
+            used_semantic_keys.add(semantic_key)
+        if source_key:
+            used_source_keys.add(source_key)
+        prepared.append(normalized)
+        return True
+
+    seeded_by_focus: dict[str, tuple[int, int, str, str, str, str, dict[str, Any]]] = {}
+    for row in normalized_rows:
+        _, _, focus_key, _, _, _, _ = row
+        if not focus_key or focus_key in seeded_by_focus:
+            continue
+        seeded_by_focus[focus_key] = row
+    diversity_seed_target = min(question_count, max(2, math.ceil(question_count * 0.6)))
+    for _, _, focus_key, semantic_key, source_key, prompt_key, normalized in seeded_by_focus.values():
+        try_add(
+            normalized,
+            focus_key=focus_key,
+            semantic_key=semantic_key,
+            source_key=source_key,
+            prompt_key=prompt_key,
+            enforce_unique_focus=True,
+            enforce_unique_semantic=True,
+            enforce_unique_source=True,
+        )
+        if len(prepared) >= diversity_seed_target:
+            break
+
+    for enforce_unique_focus, enforce_unique_semantic, enforce_unique_source in (
+        (True, True, True),
+        (False, True, True),
+        (False, False, True),
+        (False, False, False),
+    ):
+        for _, _, focus_key, semantic_key, source_key, prompt_key, normalized in normalized_rows:
             if prompt_key in seen_prompts:
                 continue
-            if enforce_unique_focus and focus_key and focus_key in used_focuses:
-                continue
-            if enforce_unique_semantic and semantic_key and semantic_key in used_semantic_keys:
-                continue
-            if any(_question_payloads_are_redundant(normalized, existing) for existing in prepared):
-                continue
-            seen_prompts.add(prompt_key)
-            if focus_key:
-                used_focuses.add(focus_key)
-            if semantic_key:
-                used_semantic_keys.add(semantic_key)
-            prepared.append(normalized)
+            try_add(
+                normalized,
+                focus_key=focus_key,
+                semantic_key=semantic_key,
+                source_key=source_key,
+                prompt_key=prompt_key,
+                enforce_unique_focus=enforce_unique_focus,
+                enforce_unique_semantic=enforce_unique_semantic,
+                enforce_unique_source=enforce_unique_source,
+            )
             if len(prepared) >= question_count:
                 return prepared
     return prepared
+
+
+def _filter_questions_against_existing(
+    questions: list[dict[str, Any]],
+    *,
+    existing_questions: list[ChapterReviewTaskQuestion],
+    unit: ChapterReviewUnit,
+    question_count: int,
+) -> list[dict[str, Any]]:
+    existing_payloads = [_task_question_payload(question) for question in existing_questions]
+    prepared_candidates = _prepare_questions_for_storage(
+        questions,
+        unit=unit,
+        question_count=max(question_count, len(questions)),
+    )
+    selected: list[dict[str, Any]] = []
+    for item in prepared_candidates:
+        if any(_question_payloads_are_redundant(item, existing) for existing in existing_payloads):
+            continue
+        if any(_question_payloads_are_redundant(item, existing) for existing in selected):
+            continue
+        selected.append(item)
+        if len(selected) >= question_count:
+            break
+    return selected
 
 
 def _question_batch_is_usable(questions: list[dict[str, Any]], *, question_count: int) -> bool:
@@ -2042,13 +2517,13 @@ def _question_batch_is_usable(questions: list[dict[str, Any]], *, question_count
     question_slice = questions[:question_count]
     low_quality_count = sum(1 for item in question_slice if _is_low_quality_question_payload(item))
     focus_keys, semantic_keys, max_focus_frequency = _question_batch_diversity_stats(question_slice)
-    required_focuses = 1 if question_count <= 4 else 2
-    required_semantic_keys = min(question_count, max(required_focuses, len(focus_keys) + 2))
+    required_focuses = 1 if question_count <= 4 else min(question_count, max(3, math.ceil(question_count * 0.5)))
+    required_semantic_keys = min(question_count, max(required_focuses + 2, math.ceil(question_count * 0.8)))
     return (
         low_quality_count == 0
         and len(focus_keys) >= required_focuses
         and len(semantic_keys) >= required_semantic_keys
-        and max_focus_frequency <= max(2, math.ceil(question_count * 0.35))
+        and max_focus_frequency <= max(2, math.ceil(question_count * 0.25))
     )
 
 
@@ -2058,13 +2533,13 @@ def _question_batch_is_serviceable(questions: list[dict[str, Any]], *, question_
     question_slice = questions[:question_count]
     low_quality_count = sum(1 for item in question_slice if _is_low_quality_question_payload(item))
     focus_keys, semantic_keys, max_focus_frequency = _question_batch_diversity_stats(question_slice)
-    required_focuses = 1 if question_count <= 4 else 2
-    required_semantic_keys = min(question_count, max(required_focuses, len(focus_keys) + 1))
+    required_focuses = 1 if question_count <= 4 else min(question_count, max(3, math.ceil(question_count * 0.4)))
+    required_semantic_keys = min(question_count, max(required_focuses + 1, math.ceil(question_count * 0.7)))
     return (
         low_quality_count <= max(1, question_count // 4)
         and len(focus_keys) >= required_focuses
         and len(semantic_keys) >= required_semantic_keys
-        and max_focus_frequency <= max(2, math.ceil(question_count * 0.4))
+        and max_focus_frequency <= max(2, math.ceil(question_count * 0.3))
     )
 
 
@@ -2119,6 +2594,8 @@ def _blueprint_axis_candidates(item: dict[str, Any]) -> list[str]:
 def _axis_templates_for_focus(focus: str) -> dict[str, list[str]]:
     relation_like = any(token in focus for token in ("关系", "区别", "影响", "作用", "意义", "目标", "双重", "联系"))
     comparison_like = ("与" in focus and len(focus) <= 24) or any(token in focus for token in ("区别", "异同", "比较"))
+    significance_focus = focus.endswith("意义") or focus.endswith("作用")
+    mechanism_focus = focus.endswith("机制")
     templates = {
         "definition": [
             f"请简述{focus}的定义及其核心要点。",
@@ -2155,6 +2632,16 @@ def _axis_templates_for_focus(focus: str) -> dict[str, list[str]]:
             f"请比较{focus}，并指出最关键的判别依据。",
             f"请结合原文说明{focus}时应抓住哪些区别点。",
         ]
+    if mechanism_focus:
+        templates["mechanism"] = [
+            f"请结合原文说明{focus}，并交代关键环节与最终结果。",
+            f"请概括{focus}的主线逻辑，并指出最容易漏掉的环节。",
+        ]
+    if significance_focus:
+        templates["significance"] = [
+            f"请结合原文分析{focus}，并说明为什么这是本节重点。",
+            f"请说明{focus}在本节中的关键价值和答题抓手。",
+        ]
     if focus.endswith("特点") or focus.endswith("特征") or "典型实例" in focus or "常见生理过程" in focus:
         templates["features"] = [
             f"请归纳{focus}，并说明答题时应覆盖哪些要点。",
@@ -2186,14 +2673,112 @@ def _questions_from_concept_blueprint(
         questions.append(
             {
                 "prompt": prompt,
+                "concept_name": str(item.get("concept_name") or ""),
+                "prompt_focus": str(item.get("prompt_focus") or item.get("concept_name") or ""),
                 "reference_answer": str(item.get("reference_answer") or ""),
                 "key_points": list(item.get("expected_key_points") or item.get("key_points") or []),
                 "explanation": str(item.get("explanation_hint") or item.get("explanation") or ""),
                 "source_excerpt": str(item.get("source_excerpt") or ""),
+                "supporting_text": str(item.get("supporting_text") or ""),
                 "question_axis": chosen_axis,
             }
         )
     return questions[:question_count]
+
+
+def _build_question_seed_candidates(
+    unit: ChapterReviewUnit,
+    *,
+    summary: str,
+    question_count: int,
+    chapter_title: str,
+) -> list[dict[str, Any]]:
+    material = _build_generation_material(unit, summary=summary, chapter_title=chapter_title or unit.unit_title)
+    seed_candidates = _questions_from_concept_blueprint(
+        list(material.get("concept_blueprint") or []),
+        question_count=question_count,
+    )
+    if not seed_candidates:
+        seed_candidates = _fallback_questions_from_text(
+            unit,
+            question_count=question_count,
+            summary=summary,
+            chapter_title=chapter_title or unit.unit_title,
+        )
+    return _prepare_questions_for_storage(
+        seed_candidates,
+        unit=unit,
+        question_count=question_count,
+    )
+
+
+def _compact_question_plan(seed_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    plan: list[dict[str, Any]] = []
+    for index, item in enumerate(seed_candidates, start=1):
+        plan.append(
+            {
+                "position": index,
+                "concept_name": str(item.get("concept_name") or item.get("prompt_focus") or ""),
+                "prompt_focus": str(item.get("prompt_focus") or item.get("concept_name") or ""),
+                "question_axis": _question_axis_from_payload(item),
+                "prompt_outline": str(item.get("prompt") or ""),
+                "source_excerpt": str(item.get("source_excerpt") or ""),
+                "expected_key_points": list(item.get("key_points") or [])[:4],
+                "reference_answer_outline": str(item.get("reference_answer") or ""),
+            }
+        )
+    return plan
+
+
+def _merge_question_payloads_with_plan(
+    raw_items: list[dict[str, Any]],
+    *,
+    seed_plan: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not seed_plan:
+        return list(raw_items or [])
+
+    merged_by_position: dict[int, dict[str, Any]] = {}
+    used_positions: set[int] = set()
+
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            position = int(item.get("position") or 0)
+        except (TypeError, ValueError):
+            position = 0
+        if 1 <= position <= len(seed_plan):
+            base = dict(seed_plan[position - 1])
+            base.update({key: value for key, value in item.items() if value not in (None, "", [], {})})
+            merged_by_position[position] = base
+            used_positions.add(position)
+
+    unassigned: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            position = int(item.get("position") or 0)
+        except (TypeError, ValueError):
+            position = 0
+        if position <= 0 or position not in used_positions:
+            unassigned.append(item)
+    unassigned_iter = iter(unassigned)
+    merged_items: list[dict[str, Any]] = []
+    for position, seed_item in enumerate(seed_plan, start=1):
+        base = dict(seed_item)
+        payload = merged_by_position.get(position)
+        if payload is None:
+            try:
+                payload = next(unassigned_iter)
+            except StopIteration:
+                payload = {}
+        if payload:
+            base.update({key: value for key, value in payload.items() if value not in (None, "", [], {})})
+        base["position"] = position
+        merged_items.append(base)
+    return merged_items
 
 
 def _fallback_questions_from_text(
@@ -2339,9 +2924,16 @@ def _build_emergency_question_set(
 
 async def _ai_generate_questions(unit: ChapterReviewUnit, summary: str, *, question_count: int) -> list[dict[str, Any]]:
     material = _build_generation_material(unit, summary=summary, chapter_title=unit.unit_title)
+    available_focuses = max(len(material.get("concept_blueprint") or []), len(material.get("focuses") or []), 1)
+    distinct_focus_target = min(
+        question_count,
+        max(3 if question_count <= 5 else 4, min(available_focuses, math.ceil(question_count * 0.6))),
+    )
+    max_per_focus = 1 if distinct_focus_target >= max(question_count - 2, 1) else 2
     prompt = f"""你是医学考研辅导名师。请严格基于给定复习材料，生成 {question_count} 道高质量复习题。
 
-【章节】{unit.unit_title}
+【章节】{material["chapter_title"]}
+【当前复习单元】{unit.unit_title}
 【章节摘要】{material["summary"] or "无"}
 【章节知识点候选】{", ".join(material.get("chapter_concepts") or []) or "无"}
 【知识点命题蓝图】
@@ -2354,7 +2946,7 @@ async def _ai_generate_questions(unit: ChapterReviewUnit, summary: str, *, quest
 要求：
 1. 每道题都必须可以从复习材料直接回答，不要引入材料外知识。
 2. 题目必须优先围绕“知识点命题蓝图”中的知识点设计，每题都要明确对应一个知识点，不要直接把口语化原文短句当成考点。
-3. 题目以简答题为主，聚焦定义、机制、鉴别点、流程、因果关系，尽量覆盖不同考点，不要围绕同一句话反复换壳出题。
+3. 题目以简答题为主，聚焦定义、机制、鉴别点、流程、因果关系。至少覆盖 {distinct_focus_target} 个不同知识点，同一知识点最多 {max_per_focus} 题，不要围绕同一句话或同一原文定位反复换壳出题。
 4. 题目措辞要精炼专业，不要直接复制原文作为题干。
 5. 参考答案必须简洁准确，长度控制在 60-180 字，用专业术语组织语言。
 6. key_points 保留 2-4 个关键得分点，每个要点用一句话概括核心知识。
@@ -2393,9 +2985,15 @@ async def _ai_refine_questions(unit: ChapterReviewUnit, summary: str, questions:
     if not questions:
         return []
     material = _build_generation_material(unit, summary=summary, chapter_title=unit.unit_title)
+    available_focuses = max(len(material.get("concept_blueprint") or []), len(material.get("focuses") or []), 1)
+    distinct_focus_target = min(
+        len(questions),
+        max(3 if len(questions) <= 5 else 4, min(available_focuses, math.ceil(len(questions) * 0.6))),
+    )
     prompt = f"""你是医学考研命题编辑。请在不引入原文外知识的前提下，对下面这批复习题做一次精修。
 
-【章节】{unit.unit_title}
+【章节】{material["chapter_title"]}
+【当前复习单元】{unit.unit_title}
 【章节摘要】{material["summary"] or "无"}
 【章节知识点候选】{", ".join(material.get("chapter_concepts") or []) or "无"}
 【知识点命题蓝图】
@@ -2412,11 +3010,12 @@ async def _ai_refine_questions(unit: ChapterReviewUnit, summary: str, questions:
 1. 保留原题考点，但把题干改写成完整、自然、专业的简答题，并确保题目真正对应某个明确知识点。
 2. 禁止出现“那么/所以/对吧/这就/那你”等口语残句开头。
 3. 禁止让题干围绕口语碎片、代词、课堂过渡语命题，优先改成围绕“知识点命题蓝图”的明确知识点。
-4. reference_answer 控制在 60-180 字，必须可直接由原文支持。
-5. key_points 保留 2-4 条，每条都是可判分的要点，不要直接抄长句。
-6. explanation 控制在 80-200 字，要解释考点、因果逻辑和易错点。
-7. source_excerpt 需摘自原文关键句，方便回看定位。
-8. 只返回 JSON。
+4. 精修后整套题至少覆盖 {distinct_focus_target} 个不同知识点，尽量降低重复；如果两题考同一知识点，题干角度必须明显不同。
+5. reference_answer 控制在 60-180 字，必须可直接由原文支持。
+6. key_points 保留 2-4 条，每条都是可判分的要点，不要直接抄长句。
+7. explanation 控制在 80-200 字，要解释考点、因果逻辑和易错点。
+8. source_excerpt 需摘自原文关键句，方便回看定位。
+9. 只返回 JSON。
 """
     schema = {
         "questions": [
@@ -2546,6 +3145,297 @@ async def _ai_rewrite_question_explanations(
     return rewritten_questions
 
 
+async def _ai_generate_questions_v2(
+    unit: ChapterReviewUnit,
+    summary: str,
+    *,
+    question_count: int,
+) -> list[dict[str, Any]]:
+    material = _build_generation_material(unit, summary=summary, chapter_title=unit.unit_title)
+    seed_candidates = _build_question_seed_candidates(
+        unit,
+        summary=summary,
+        question_count=question_count,
+        chapter_title=material["chapter_title"],
+    )
+    question_plan = _compact_question_plan(seed_candidates)
+    prompt = f"""你是医学考研主观题命题编辑。请严格基于给定复习材料和命题计划，逐题生成 {len(question_plan)} 道高质量复习题。
+【章节】{material["chapter_title"]}
+【当前复习单元】{unit.unit_title}
+【章节摘要】{material["summary"] or "无"}
+【章节知识点候选】{", ".join(material.get("chapter_concepts") or []) or "无"}
+【知识点命题蓝图】
+{material.get("blueprint_text") or "无"}
+【全章重点摘录】{material["digest"] or "无"}
+【必须覆盖的命题计划】
+{json.dumps(question_plan, ensure_ascii=False, indent=2)}
+
+【复习材料】
+{material["source_text"]}
+
+要求：
+1. 必须严格按命题计划逐题输出，questions 里的第 N 项必须对应计划里的 position=N，不能漏题、并题或改成同一知识点的重复题。
+2. 每题都必须保留 concept_name、prompt_focus、question_axis，并与计划一致或更具体；不得围绕同一个 source_excerpt 反复换壳出题。
+3. 题目必须书面化、专业化，优先考定义、机制、比较、意义、特点，不要直接照抄原文做题干。
+4. reference_answer 控制在 70-190 字，key_points 保留 2-4 条可判分要点。
+5. explanation 先给 90-170 字解析初稿，说明考点、因果逻辑和常见失分点，后续系统还会单独重写解析。
+6. source_excerpt 必须引用最能支撑该题的原文关键句，便于回看定位。
+7. 禁止引入材料外知识，禁止使用课堂口语、代词、过渡语作为考点。
+8. 只返回 JSON。"""
+
+    schema = {
+        "questions": [
+            {
+                "position": 1,
+                "concept_name": "知识点名称",
+                "prompt_focus": "更具体的命题焦点",
+                "question_axis": "mechanism",
+                "prompt": "题目",
+                "reference_answer": "参考答案",
+                "key_points": ["得分点1", "得分点2"],
+                "explanation": "解析初稿",
+                "source_excerpt": "原文关键句",
+            }
+        ]
+    }
+
+    result = await get_ai_client().generate_json(
+        prompt,
+        schema,
+        max_tokens=min(4800, 300 * max(len(question_plan), 1) + 900),
+        temperature=0.25,
+        timeout=150,
+        use_heavy=True,
+    )
+    return _merge_question_payloads_with_plan(
+        list(result.get("questions") or []),
+        seed_plan=question_plan,
+    )[:question_count]
+
+
+async def _ai_refine_questions_v2(
+    unit: ChapterReviewUnit,
+    summary: str,
+    questions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not questions:
+        return []
+    material = _build_generation_material(unit, summary=summary, chapter_title=unit.unit_title)
+    prepared_candidates = _prepare_questions_for_storage(
+        questions,
+        unit=unit,
+        question_count=len(questions),
+    )
+    question_plan = _compact_question_plan(prepared_candidates)
+    candidate_payload = []
+    for position, item in enumerate(prepared_candidates, start=1):
+        candidate_payload.append(
+            {
+                "position": position,
+                "concept_name": str(item.get("concept_name") or ""),
+                "prompt_focus": str(item.get("prompt_focus") or ""),
+                "question_axis": _question_axis_from_payload(item),
+                "prompt": str(item.get("prompt") or ""),
+                "reference_answer": str(item.get("reference_answer") or ""),
+                "key_points": list(item.get("key_points") or [])[:4],
+                "explanation": str(item.get("explanation") or ""),
+                "source_excerpt": str(item.get("source_excerpt") or ""),
+            }
+        )
+
+    prompt = f"""你是医学考研命题质检编辑。请在不引入材料外知识的前提下，对下面这批候选题做去重、筛选和精修。
+【章节】{material["chapter_title"]}
+【当前复习单元】{unit.unit_title}
+【章节摘要】{material["summary"] or "无"}
+【知识点命题蓝图】
+{material.get("blueprint_text") or "无"}
+【应优先保持的命题计划】
+{json.dumps(question_plan, ensure_ascii=False, indent=2)}
+【待精修候选题】
+{json.dumps(candidate_payload, ensure_ascii=False, indent=2)}
+
+【复习材料】
+{material["source_text"]}
+
+要求：
+1. 按原 position 返回精修结果，不要漏题，不要把多个 position 改成同一知识点的换壳题。
+2. concept_name、prompt_focus、question_axis 必须保留，并与原候选一致或更具体。
+3. 优先消除同一知识点、同一 axis、同一 source_excerpt 的重复题；题干要更书面化、更像真正的医学简答题。
+4. reference_answer、key_points、source_excerpt 必须能被原文直接支撑。
+5. explanation 只给解析初稿，重点解释考点、作答逻辑和常见失分点。
+6. 只返回 JSON。"""
+
+    schema = {
+        "questions": [
+            {
+                "position": 1,
+                "concept_name": "知识点名称",
+                "prompt_focus": "命题焦点",
+                "question_axis": "definition",
+                "prompt": "精修后的题目",
+                "reference_answer": "精修后的参考答案",
+                "key_points": ["要点1", "要点2"],
+                "explanation": "解析初稿",
+                "source_excerpt": "原文关键句",
+            }
+        ]
+    }
+    result = await get_ai_client().generate_json(
+        prompt,
+        schema,
+        max_tokens=min(3600, 210 * max(len(candidate_payload), 1) + 800),
+        temperature=0.15,
+        timeout=120,
+        use_heavy=True,
+    )
+    return _merge_question_payloads_with_plan(
+        list(result.get("questions") or []),
+        seed_plan=question_plan,
+    )[: len(questions)]
+
+
+async def _ai_rewrite_question_explanations_v2(
+    unit: ChapterReviewUnit,
+    summary: str,
+    questions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not questions:
+        return []
+    material = _build_generation_material(unit, summary=summary, chapter_title=unit.unit_title)
+    rewrite_payload = []
+    for index, item in enumerate(questions, start=1):
+        rewrite_payload.append(
+            {
+                "position": index,
+                "concept_name": str(item.get("concept_name") or item.get("prompt_focus") or ""),
+                "prompt_focus": str(item.get("prompt_focus") or item.get("concept_name") or ""),
+                "question_axis": _question_axis_from_payload(item),
+                "prompt": str(item.get("prompt") or ""),
+                "reference_answer": str(item.get("reference_answer") or ""),
+                "key_points": list(item.get("key_points") or [])[:4],
+                "source_excerpt": str(item.get("source_excerpt") or ""),
+                "explanation": str(item.get("explanation") or ""),
+            }
+        )
+
+    prompt = f"""你是医学考研主观题解析编辑。请只重写下面每道题的 explanation，其他字段不要改，也不要引入原文之外的知识。
+【章节】{material["chapter_title"]}
+【当前复习单元】{unit.unit_title}
+【章节摘要】{material["summary"] or "无"}
+【知识点命题蓝图】
+{material.get("blueprint_text") or "无"}
+【待重写题目】
+{json.dumps(rewrite_payload, ensure_ascii=False, indent=2)}
+
+【复习材料】
+{material["source_text"]}
+
+要求：
+1. 每条 explanation 控制在 120-240 字，必须像真实的医学考试解析，而不是模板话。
+2. 开头先点明本题真正考查的知识点或判断轴线。
+3. 中间解释为什么参考答案要这样组织，尽量写清因果逻辑、机制链、判断标准或比较抓手。
+4. 必须点出至少一个易错点、失分点或常见混淆点。
+5. 结尾给一句可执行的作答抓手，例如“先写什么，再写什么”。
+6. 禁止空话，禁止大段照抄 reference_answer 或 source_excerpt。
+7. 只返回 JSON。"""
+    schema = {
+        "questions": [
+            {
+                "position": 1,
+                "explanation": "重写后的解析",
+            }
+        ]
+    }
+    result = await get_ai_client().generate_json(
+        prompt,
+        schema,
+        max_tokens=min(3600, 170 * max(len(rewrite_payload), 1) + 600),
+        temperature=0.15,
+        timeout=80,
+        use_heavy=True,
+    )
+    rewritten_by_position: dict[int, str] = {}
+    for item in list(result.get("questions") or []):
+        try:
+            position = int(item.get("position") or 0)
+        except (TypeError, ValueError):
+            continue
+        if position <= 0:
+            continue
+        explanation = _trim_text(_polish_source_sentence(str(item.get("explanation") or "")), max_length=240)
+        if explanation:
+            rewritten_by_position[position] = explanation
+
+    rewritten_questions: list[dict[str, Any]] = []
+    chapter_source_text = clean_review_content(material.get("chapter_source_text") or material.get("source_text") or "")
+    paragraphs = _extract_segments(chapter_source_text or material.get("source_text") or "") or [chapter_source_text or material.get("source_text") or ""]
+    for index, item in enumerate(questions, start=1):
+        rewritten = dict(item)
+        explanation = rewritten_by_position.get(index, str(rewritten.get("explanation") or ""))
+        focus = _pick_question_focus(
+            str(rewritten.get("prompt") or ""),
+            str(rewritten.get("source_excerpt") or ""),
+            chapter_source_text or material.get("source_text") or "",
+            material["chapter_title"],
+        )
+        _, best_paragraph = _pick_best_paragraph(paragraphs, focus, used_indices=set())
+        key_points = [
+            _trim_text(_polish_source_sentence(point), max_length=28)
+            for point in list(rewritten.get("key_points") or [])
+            if _polish_source_sentence(point)
+        ]
+        key_points = [point for point in key_points if point and not _key_point_is_low_quality(point)]
+        if len(key_points) < 2:
+            key_points = _build_key_points_from_segment(best_paragraph, focus)
+        if _explanation_is_low_quality(
+            explanation,
+            prompt=str(rewritten.get("prompt") or ""),
+            reference_answer=str(rewritten.get("reference_answer") or ""),
+            key_points=key_points,
+            source_excerpt=str(rewritten.get("source_excerpt") or ""),
+        ):
+            explanation = _build_explanation_from_segment(best_paragraph, focus, key_points)
+        rewritten["explanation"] = explanation
+        rewritten_questions.append(rewritten)
+    return rewritten_questions
+
+
+_DEFAULT_AI_GENERATE_QUESTIONS = _ai_generate_questions
+_DEFAULT_AI_REFINE_QUESTIONS = _ai_refine_questions
+_DEFAULT_AI_REWRITE_QUESTION_EXPLANATIONS = _ai_rewrite_question_explanations
+
+
+async def _generate_questions_pipeline(
+    unit: ChapterReviewUnit,
+    summary: str,
+    *,
+    question_count: int,
+) -> list[dict[str, Any]]:
+    if _ai_generate_questions is not _DEFAULT_AI_GENERATE_QUESTIONS:
+        return await _ai_generate_questions(unit, summary, question_count=question_count)
+    return await _ai_generate_questions_v2(unit, summary, question_count=question_count)
+
+
+async def _refine_questions_pipeline(
+    unit: ChapterReviewUnit,
+    summary: str,
+    questions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if _ai_refine_questions is not _DEFAULT_AI_REFINE_QUESTIONS:
+        return await _ai_refine_questions(unit, summary, questions)
+    return await _ai_refine_questions_v2(unit, summary, questions)
+
+
+async def _rewrite_question_explanations_pipeline(
+    unit: ChapterReviewUnit,
+    summary: str,
+    questions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if _ai_rewrite_question_explanations is not _DEFAULT_AI_REWRITE_QUESTION_EXPLANATIONS:
+        return await _ai_rewrite_question_explanations(unit, summary, questions)
+    return await _ai_rewrite_question_explanations_v2(unit, summary, questions)
+
+
 def _is_low_quality_question(q: ChapterReviewTaskQuestion) -> bool:
     """
     检测低质量题目（旧版 fallback 生成的垃圾题）。
@@ -2599,6 +3489,42 @@ def _is_low_quality_question(q: ChapterReviewTaskQuestion) -> bool:
     return False
 
 
+def _task_question_payload(question: ChapterReviewTaskQuestion) -> dict[str, Any]:
+    return {
+        "prompt": question.prompt or "",
+        "reference_answer": question.reference_answer or "",
+        "key_points": list(question.key_points or []),
+        "explanation": question.explanation or "",
+        "source_excerpt": question.source_excerpt or "",
+    }
+
+
+def _redundant_unanswered_questions(questions: list[ChapterReviewTaskQuestion]) -> list[ChapterReviewTaskQuestion]:
+    answered_payloads = [
+        _task_question_payload(question)
+        for question in questions
+        if str(question.user_answer or "").strip()
+    ]
+    unanswered = [question for question in questions if not str(question.user_answer or "").strip()]
+    ranked = sorted(
+        unanswered,
+        key=lambda question: (
+            _question_payload_quality_score(_task_question_payload(question)),
+            -int(question.position or 0),
+        ),
+        reverse=True,
+    )
+    kept_payloads = list(answered_payloads)
+    redundant: list[ChapterReviewTaskQuestion] = []
+    for question in ranked:
+        payload = _task_question_payload(question)
+        if any(_question_payloads_are_redundant(payload, existing) for existing in kept_payloads):
+            redundant.append(question)
+            continue
+        kept_payloads.append(payload)
+    return redundant
+
+
 async def _ensure_task_questions_once(db: Session, *, actor_key: str, task_id: int) -> ChapterReviewTask:
     """
     确保复习任务有题目。完整流程：
@@ -2635,15 +3561,27 @@ async def _ensure_task_questions_once(db: Session, *, actor_key: str, task_id: i
     # ── 质量检测：如果已有题目但全是低质量，删掉重新生成 ──
     if task.questions:
         low_quality_count = sum(1 for q in task.questions if _is_low_quality_question(q))
-        if low_quality_count == 0 and len(task.questions) >= question_count:
+        redundant_questions = _redundant_unanswered_questions(list(task.questions))
+        if low_quality_count == 0 and not redundant_questions and len(task.questions) >= question_count:
             return task  # 题目质量和数量都满足，直接返回
-        # 有低质量题目 → 只删除未作答的低质量题（保护用户已作答的数据）
-        if low_quality_count > 0:
-            to_delete = [
+        # 有低质量或重复题目 → 只删除未作答的问题（保护用户已作答的数据）
+        if low_quality_count > 0 or redundant_questions:
+            to_delete = list(redundant_questions)
+            to_delete.extend(
                 q
                 for q in task.questions
                 if _is_low_quality_question(q) and not (q.user_answer or "").strip()
-            ]
+            )
+            deduped_to_delete: list[ChapterReviewTaskQuestion] = []
+            seen_ids: set[int] = set()
+            for question in to_delete:
+                question_id = int(question.id or 0)
+                if question_id and question_id in seen_ids:
+                    continue
+                if question_id:
+                    seen_ids.add(question_id)
+                deduped_to_delete.append(question)
+            to_delete = deduped_to_delete
             if not to_delete and len(task.questions) >= question_count:
                 return task  # 用户已经答过了，而且数量已足够，不动
             for q in to_delete:
@@ -2681,12 +3619,13 @@ async def _ensure_task_questions_once(db: Session, *, actor_key: str, task_id: i
     )
     try:
         generation_source = "fallback" if prefer_local_generation else "ai"
+        existing_questions_snapshot = list(task.questions)
         ai_candidates: list[dict[str, Any]] = []
         if not prefer_local_generation:
             try:
                 ai_candidates = _prepare_questions_for_storage(
                     await asyncio.wait_for(
-                        _ai_generate_questions(task.unit, summary, question_count=candidate_count),
+                        _generate_questions_pipeline(task.unit, summary, question_count=candidate_count),
                         timeout=22,
                     ),
                     unit=task.unit,
@@ -2695,7 +3634,7 @@ async def _ensure_task_questions_once(db: Session, *, actor_key: str, task_id: i
                 try:
                     refined = _prepare_questions_for_storage(
                         await asyncio.wait_for(
-                            _ai_refine_questions(task.unit, summary, ai_candidates),
+                            _refine_questions_pipeline(task.unit, summary, ai_candidates),
                             timeout=10,
                         ),
                         unit=task.unit,
@@ -2731,7 +3670,7 @@ async def _ensure_task_questions_once(db: Session, *, actor_key: str, task_id: i
             try:
                 refined_combined = _prepare_questions_for_storage(
                     await asyncio.wait_for(
-                        _ai_refine_questions(task.unit, summary, combined_candidates),
+                        _refine_questions_pipeline(task.unit, summary, combined_candidates),
                         timeout=10,
                     ),
                     unit=task.unit,
@@ -2771,17 +3710,29 @@ async def _ensure_task_questions_once(db: Session, *, actor_key: str, task_id: i
             unit=task.unit,
             question_count=need_count,
         )
+        prepared_generated = _filter_questions_against_existing(
+            prepared_generated,
+            existing_questions=existing_questions_snapshot,
+            unit=task.unit,
+            question_count=need_count,
+        )
         prepared_generated = _supplement_question_candidates(
             task.unit,
             questions=prepared_generated,
-            question_count=need_count,
+            question_count=max(need_count * 2, need_count + len(existing_questions_snapshot)),
             summary=summary,
             chapter_title=task.review_chapter.chapter_title,
+        )
+        prepared_generated = _filter_questions_against_existing(
+            prepared_generated,
+            existing_questions=existing_questions_snapshot,
+            unit=task.unit,
+            question_count=need_count,
         )
         try:
             rewritten_generated = _prepare_questions_for_storage(
                 await asyncio.wait_for(
-                    _ai_rewrite_question_explanations(task.unit, summary, prepared_generated),
+                    _rewrite_question_explanations_pipeline(task.unit, summary, prepared_generated),
                     timeout=18,
                 ),
                 unit=task.unit,
@@ -2792,7 +3743,13 @@ async def _ensure_task_questions_once(db: Session, *, actor_key: str, task_id: i
                 questions=rewritten_generated,
                 question_count=need_count,
                 summary=summary,
-                chapter_title=task.review_chapter.chapter_title,
+                    chapter_title=task.review_chapter.chapter_title,
+                )
+            rewritten_generated = _filter_questions_against_existing(
+                rewritten_generated,
+                existing_questions=existing_questions_snapshot,
+                unit=task.unit,
+                question_count=need_count,
             )
             if len(rewritten_generated) >= len(prepared_generated):
                 prepared_generated = rewritten_generated
@@ -3175,7 +4132,7 @@ def complete_task_with_status(
 
 
 def _serialize_pdf_task_block(task: ChapterReviewTask) -> Dict[str, Any]:
-    source_text = clean_review_content(task.unit.cleaned_text or task.unit.raw_text or task.unit.excerpt or task.unit.unit_title)
+    source_text = _task_chapter_source_text(task)
     return {
         "chapter_title": task.review_chapter.chapter_title,
         "book": task.review_chapter.book,
@@ -3187,6 +4144,7 @@ def _serialize_pdf_task_block(task: ChapterReviewTask) -> Dict[str, Any]:
             chapter_title=task.review_chapter.chapter_title,
         ),
         "excerpt": task.unit.excerpt or "",
+        "source_content": source_text,
         "questions": [
             {
                 "position": int(question.position),
@@ -3440,7 +4398,7 @@ def build_review_pdf(
         [[Paragraph(line, summary_line_style)] for line in [
             f"日期：{review_date.strftime('%Y-%m-%d')}    任务：{len(blocks)} 个    题量：{total_questions} 题    预计时长：{time_budget_minutes} 分钟",
             f"学科：{books}    章节：{chapter_titles or '未命名章节'}",
-            "打印建议：先做题单，再对照附页中的参考答案、得分点、解析和原文定位进行复盘。",
+            "打印建议：先做题单，再对照附页中的参考答案、得分点、解析、原文定位与整章原文附录进行复盘。",
         ]],
         colWidths=[usable_width],
     )
@@ -3531,6 +4489,35 @@ def build_review_pdf(
                 HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CBD5E1"), spaceBefore=0, spaceAfter=4),
             ])
             story.append(KeepTogether(appendix_block))
+
+    chapter_appendix_blocks: list[dict[str, Any]] = []
+    seen_chapter_versions: set[tuple[str, str]] = set()
+    for block in blocks:
+        chapter_key = (
+            str(block.get("chapter_title") or ""),
+            _normalize_match_key(str(block.get("source_content") or "")),
+        )
+        if chapter_key in seen_chapter_versions:
+            continue
+        seen_chapter_versions.add(chapter_key)
+        chapter_appendix_blocks.append(block)
+
+    if chapter_appendix_blocks:
+        story.extend([
+            PageBreak(),
+            Paragraph("整章原文附录", appendix_title_style),
+            Paragraph("附录保留整章原文，避免只看到切片后的局部内容。做题后可回看整章逻辑链和知识点分布。", subtitle_style),
+        ])
+        for chapter_index, block in enumerate(chapter_appendix_blocks, start=1):
+            story.append(Paragraph(f"章节 {chapter_index} · {xml_escape(block['chapter_title'])}", appendix_task_style))
+            story.append(Paragraph(f"学科：{xml_escape(block['book'] or '未标注')}", task_meta_style))
+            if block.get("summary"):
+                story.append(Paragraph(f"提要：{_paragraphize_pdf_text(block['summary'])}", appendix_item_style))
+            story.append(Paragraph(f"整章原文：{_paragraphize_pdf_text(block.get('source_content') or block.get('excerpt') or '')}", appendix_source_style))
+            story.extend([
+                Spacer(1, 2 * mm),
+                HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CBD5E1"), spaceBefore=0, spaceAfter=4),
+            ])
 
     doc.build(story)
     return buffer.getvalue()

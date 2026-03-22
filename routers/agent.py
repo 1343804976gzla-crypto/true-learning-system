@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from database.domains import get_agent_db
 from services.agent_actions import (
     AgentActionNotFoundError,
+    AgentWriteActionsDisabledError,
+    agent_write_actions_disabled_message,
     execute_agent_action,
     list_session_actions,
     list_task_actions,
@@ -32,6 +34,7 @@ from services.agent_runtime import (
     AgentDuplicateRequestInProgressError,
     AgentDuplicateResponseAvailableError,
     AgentIdentityRequiredError,
+    AgentLlmRateLimitError,
     AgentSessionNotFoundError,
     create_session,
     finalize_chat_turn,
@@ -87,10 +90,14 @@ def _agent_error_response(exc: Exception) -> HTTPException:
         return HTTPException(status_code=404, detail="会话不存在")
     if isinstance(exc, AgentActionNotFoundError):
         return HTTPException(status_code=404, detail="动作记录不存在")
+    if isinstance(exc, AgentWriteActionsDisabledError):
+        return HTTPException(status_code=403, detail=agent_write_actions_disabled_message())
     if isinstance(exc, AgentTaskNotFoundError):
         return HTTPException(status_code=404, detail="任务不存在")
     if isinstance(exc, AgentDuplicateRequestInProgressError) or str(exc) == AGENT_DUPLICATE_REQUEST_IN_PROGRESS:
         return HTTPException(status_code=409, detail="同一请求仍在处理中，请稍后刷新会话")
+    if isinstance(exc, AgentLlmRateLimitError):
+        return HTTPException(status_code=429, detail=str(exc))
     return HTTPException(status_code=400, detail=str(exc))
 
 

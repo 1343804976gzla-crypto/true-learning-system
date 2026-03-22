@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+from collections import Counter
+from datetime import date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,6 +37,9 @@ def stub_light_explanation_rewriter(monkeypatch):
     async def _skip_blueprint(**kwargs):
         raise TimeoutError("skip ai blueprint")
 
+    async def _skip_polish(**kwargs):
+        raise TimeoutError("skip ai source polish")
+
     monkeypatch.setattr(
         "services.chapter_review_service._ai_rewrite_question_explanations",
         _passthrough,
@@ -43,6 +47,10 @@ def stub_light_explanation_rewriter(monkeypatch):
     monkeypatch.setattr(
         "services.chapter_review_service._ai_refine_review_concept_blueprint",
         _skip_blueprint,
+    )
+    monkeypatch.setattr(
+        "services.chapter_review_service._ai_polish_review_source",
+        _skip_polish,
     )
 
 
@@ -517,7 +525,8 @@ def test_existing_low_quality_questions_are_regenerated(client, session_factory,
     assert response.status_code == 200
     payload = response.json()
     assert len(payload["questions"]) == 2
-    assert payload["questions"][0]["prompt"].startswith("请说明正反馈的核心机制")
+    assert "正反馈" in payload["questions"][0]["prompt"]
+    assert "核心机制" in payload["questions"][0]["prompt"]
     assert not payload["questions"][0]["prompt"].startswith("那么")
 
 
@@ -562,6 +571,109 @@ def test_concept_blueprint_generates_diverse_angles_without_mechanical_extension
     assert all("延展" not in item["prompt"] for item in questions)
     semantic_keys = {chapter_review_service_module._question_semantic_key(item) for item in questions}
     assert len(semantic_keys) >= 6
+
+
+def test_fragment_focuses_are_cleaned_or_rejected():
+    assert chapter_review_service_module._normalize_review_concept_name("它是个正反馈") == "正反馈"
+    assert chapter_review_service_module._is_weak_concept("一下就可以了")
+    assert chapter_review_service_module._is_weak_concept("如果你的产物都还在激活它")
+    cleaned = chapter_review_service_module._clean_concept_candidate("的果糖一六二零酸就是激活")
+    assert cleaned
+    assert not cleaned.startswith("的")
+    assert "就是" not in cleaned
+
+
+def test_same_source_excerpt_questions_are_treated_as_redundant():
+    left = {
+        "prompt": "请说明正反馈的核心机制。",
+        "prompt_focus": "正反馈",
+        "reference_answer": "正反馈使受控变量沿原方向持续增强，并推动过程达到终点。",
+        "source_excerpt": "正反馈使受控变量沿原方向持续增强，并推动过程达到终点。",
+        "question_axis": "mechanism",
+    }
+    right = {
+        "prompt": "请结合原文说明它是个正反馈的核心内涵与答题抓手？",
+        "prompt_focus": "它是个正反馈",
+        "reference_answer": "正反馈使受控变量沿原方向持续增强，并推动过程达到终点。",
+        "source_excerpt": "正反馈使受控变量沿原方向持续增强，并推动过程达到终点。",
+        "question_axis": "significance",
+    }
+    assert chapter_review_service_module._question_payloads_are_redundant(left, right)
+
+
+def test_new_questions_are_filtered_against_existing_task_questions():
+    class _Existing:
+        def __init__(self, prompt, reference_answer, key_points, explanation, source_excerpt):
+            self.prompt = prompt
+            self.reference_answer = reference_answer
+            self.key_points = key_points
+            self.explanation = explanation
+            self.source_excerpt = source_excerpt
+
+    unit = type(
+        "Unit",
+        (),
+        {
+            "cleaned_text": "正反馈使受控变量沿原方向持续增强。负反馈朝着调定点工作。",
+            "raw_text": "正反馈使受控变量沿原方向持续增强。负反馈朝着调定点工作。",
+            "excerpt": "正反馈使受控变量沿原方向持续增强。",
+            "unit_title": "反馈调节 · 单元 1",
+        },
+    )()
+    existing_questions = [
+        _Existing(
+            "请说明正反馈的核心机制。",
+            "正反馈使受控变量沿原方向持续增强，并推动过程达到终点。",
+            ["沿原方向增强", "放大反应", "推动过程达到终点"],
+            "本题考查正反馈的方向性和结果。",
+            "正反馈使受控变量沿原方向持续增强，并推动过程达到终点。",
+        )
+    ]
+    candidates = [
+        {
+            "prompt": "请结合原文说明它是个正反馈的核心内涵与答题抓手？",
+            "reference_answer": "正反馈使受控变量沿原方向持续增强，并推动过程达到终点。",
+            "key_points": ["沿原方向增强", "放大反应"],
+            "explanation": "本题考查正反馈的方向性和结果。",
+            "source_excerpt": "正反馈使受控变量沿原方向持续增强，并推动过程达到终点。",
+        },
+        {
+            "prompt": "请说明负反馈与调定点的关系。",
+            "reference_answer": "负反馈以调定点为工作目标，通过纠偏机制把偏离的变量拉回目标附近。",
+            "key_points": ["以调定点为目标", "通过纠偏机制工作"],
+            "explanation": "本题考查负反馈的目标和方向。",
+            "source_excerpt": "负反馈朝着调定点工作。",
+        },
+    ]
+    filtered = chapter_review_service_module._filter_questions_against_existing(
+        candidates,
+        existing_questions=existing_questions,
+        unit=unit,
+        question_count=2,
+    )
+    assert len(filtered) == 1
+    assert "负反馈" in filtered[0]["prompt"]
+
+
+def test_fragmented_prompt_payload_is_rejected_as_low_quality():
+    payload = {
+        "prompt": "请围绕会激活磷酸果糖激酶归纳最容易失分的关键要点？",
+        "reference_answer": "的果糖一六二零酸就是激活的核心要点包括：但是我们的果糖一六二零酸就是激活它的果糖一六二零酸；如果你的产物都还在激活它；一下就可以了",
+        "key_points": ["但是我们的果糖一六二零酸就是激活它的果糖一六二零酸", "如果你的产物都还在激活它"],
+        "explanation": "考点聚焦：的果糖一六二零酸就是激活。高分答案至少覆盖但是我们的果糖一六二零酸就是激活它的果糖一六二零酸、如果你的产物都还在激活它、一下就可以了。作答时要把前因后果、调节方向和最终结果串起来，不能只写结论。如果原文带有课堂口语，书写答案时要主动改成书面医学表述",
+        "source_excerpt": "但是我们的果糖一六二零酸就是激活它的果糖一六二零酸，会激活磷酸果糖激酶e，就是要产生很多的果糖一六二零酸，它是个正反馈",
+    }
+    assert chapter_review_service_module._is_low_quality_question_payload(payload)
+
+
+def test_noisy_teaching_material_is_marked_for_polish():
+    noisy_text = (
+        "那么我们再来看一下这个时候的前馈，对吧？"
+        "一般来讲我们的这个底物往往会激活这个酶。"
+        "如果你的产物都还在激活它，那么这个时候就会产生很多的产物。"
+        "你看这就是典型的正反馈。"
+    )
+    assert chapter_review_service_module._material_needs_polish(noisy_text)
 
 
 def test_light_rewriter_upgrades_question_explanations(client, monkeypatch):
@@ -650,6 +762,104 @@ def test_light_rewriter_upgrades_question_explanations(client, monkeypatch):
     assert "本题真正考查的是" in explanation
     assert ("易错点" in explanation) or ("失分点" in explanation)
     assert ("稳态" in explanation) or ("方向" in explanation)
+
+
+def test_review_plan_refreshes_stale_pending_questions_daily(client, session_factory, monkeypatch):
+    async def fake_ai_questions(unit, summary, *, question_count):
+        return [
+            {
+                "prompt": "请说明正反馈与调定点的关系。",
+                "reference_answer": "正反馈不会把系统拉回调定点，而是使受控变量沿原方向继续增强，用于推动特定生理事件达成终点。",
+                "key_points": ["不以调定点为目标", "沿原方向继续增强", "服务于特定生理事件"],
+                "explanation": "本题真正考查的是正反馈与调定点之间的方向关系。作答时先写正反馈不会回到调定点，再写它为什么会放大原有变化。",
+                "source_excerpt": "负反馈朝着调定点工作，而正反馈背离调定点。",
+            }
+            for _ in range(question_count)
+        ]
+
+    async def fake_ai_refine(unit, summary, questions):
+        return questions
+
+    monkeypatch.setattr("services.chapter_review_service._ai_generate_questions", fake_ai_questions)
+    monkeypatch.setattr("services.chapter_review_service._ai_refine_questions", fake_ai_refine)
+
+    with session_factory() as db:
+        chapter = ChapterReviewChapter(
+            actor_key="device:review-device-daily-refresh",
+            chapter_id="physio_ch01",
+            book="生理学",
+            chapter_number="1",
+            chapter_title="绪论",
+            ai_summary="讲述正反馈、负反馈与调定点。",
+            merged_raw_content="正反馈会放大原有变化。负反馈朝着调定点工作，而正反馈背离调定点。",
+            cleaned_content="正反馈会放大原有变化。负反馈朝着调定点工作，而正反馈背离调定点。",
+            content_version=1,
+            first_uploaded_date=date(2026, 3, 20),
+            last_uploaded_date=date(2026, 3, 20),
+            next_due_date=date(2026, 3, 21),
+            review_status="due",
+        )
+        db.add(chapter)
+        db.flush()
+
+        unit = ChapterReviewUnit(
+            review_chapter_id=chapter.id,
+            content_version=1,
+            unit_index=1,
+            unit_title="绪论 · 单元 1",
+            raw_text="正反馈会放大原有变化。负反馈朝着调定点工作，而正反馈背离调定点。",
+            cleaned_text="正反馈会放大原有变化。负反馈朝着调定点工作，而正反馈背离调定点。",
+            excerpt="负反馈朝着调定点工作，而正反馈背离调定点。",
+            char_count=34,
+            estimated_minutes=12,
+            next_round=1,
+            completed_rounds=0,
+            next_due_date=date(2026, 3, 21),
+            review_status="pending",
+            carry_over_count=0,
+            is_active=True,
+        )
+        db.add(unit)
+        db.flush()
+
+        task = ChapterReviewTask(
+            actor_key="device:review-device-daily-refresh",
+            review_chapter_id=chapter.id,
+            unit_id=unit.id,
+            content_version=1,
+            scheduled_for=date(2026, 3, 21),
+            due_reason="第 1 轮到期复习",
+            estimated_minutes=12,
+            question_count=1,
+            answered_count=0,
+            resume_position=0,
+            status="pending",
+            source_label="第 1 轮到期复习",
+            updated_at=datetime(2026, 3, 21, 8, 0, 0),
+        )
+        task.questions.append(
+            ChapterReviewTaskQuestion(
+                position=1,
+                prompt="旧题：请概述本段内容。",
+                reference_answer="旧答案",
+                key_points=["旧要点1", "旧要点2"],
+                explanation="旧解析",
+                source_excerpt="旧定位",
+                generation_source="ai",
+            )
+        )
+        db.add(task)
+        db.commit()
+
+    headers = {"x-tls-device-id": "review-device-daily-refresh"}
+    plan_response = client.get("/api/history/review-plan?review_date=2026-03-22", headers=headers)
+    assert plan_response.status_code == 200
+
+    detail_response = client.get("/api/history/review-task/1", headers=headers)
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert "正反馈与调定点的关系" in detail_payload["questions"][0]["prompt"]
+    assert detail_payload["questions"][0]["reference_answer"].startswith("正反馈不会把系统拉回调定点")
 
 
 def test_review_generation_anchors_questions_to_structured_concepts(client, session_factory, monkeypatch):
@@ -768,7 +978,7 @@ def test_review_generation_anchors_questions_to_structured_concepts(client, sess
     payload = response.json()
     prompts = [item["prompt"] for item in payload["questions"]]
     assert any("正反馈" in prompt for prompt in prompts)
-    assert any("调定点" in prompt for prompt in prompts)
+    assert len(set(prompts)) >= 2
     assert all("滚雪球" not in prompt for prompt in prompts)
     assert all(not prompt.startswith("那么") for prompt in prompts)
 
@@ -852,3 +1062,276 @@ def test_review_sync_prefers_content_matching_chapter_when_parser_misclassifies(
         assert review_chapter is not None
         assert review_chapter.chapter_id == "physio_ch16"
         assert review_chapter.chapter_title == "口腔食管和胃内消化"
+
+
+def test_review_detail_and_pdf_block_include_full_chapter_source_content(client, session_factory):
+    chapter_text = (
+        "压力感受性反射通过感受器、传入神经和中枢整合维持动脉压稳定。"
+        "当动脉压升高时，反射会增强迷走活动并抑制交感输出。"
+        "\n\n"
+        "这一节后半段还进一步讲到静脉回流、心输出量与外周阻力之间的联动关系，"
+        "用于帮助学生把循环调节的整章逻辑串起来。"
+    )
+    unit_text = "压力感受性反射通过感受器、传入神经和中枢整合维持动脉压稳定。"
+
+    with session_factory() as db:
+        chapter = ChapterReviewChapter(
+            actor_key="device:review-device-full-source",
+            chapter_id="physio_circulation",
+            book="生理学",
+            chapter_number="3",
+            chapter_title="循环调节",
+            ai_summary="讲述压力感受性反射与循环调节。",
+            merged_raw_content=chapter_text,
+            cleaned_content=chapter_text,
+            content_version=1,
+            first_uploaded_date=date(2026, 3, 21),
+            last_uploaded_date=date(2026, 3, 21),
+            next_due_date=date(2026, 3, 22),
+            review_status="pending",
+        )
+        db.add(chapter)
+        db.flush()
+
+        unit = ChapterReviewUnit(
+            review_chapter_id=chapter.id,
+            content_version=1,
+            unit_index=1,
+            unit_title="循环调节 · 单元 1",
+            raw_text=unit_text,
+            cleaned_text=unit_text,
+            excerpt=unit_text,
+            char_count=len(unit_text),
+            estimated_minutes=14,
+            next_round=1,
+            completed_rounds=0,
+            next_due_date=date(2026, 3, 22),
+            review_status="pending",
+            carry_over_count=0,
+            is_active=True,
+        )
+        db.add(unit)
+        db.flush()
+
+        task = ChapterReviewTask(
+            actor_key="device:review-device-full-source",
+            review_chapter_id=chapter.id,
+            unit_id=unit.id,
+            content_version=1,
+            scheduled_for=date(2026, 3, 22),
+            due_reason="第 1 轮到期复习",
+            estimated_minutes=14,
+            question_count=1,
+            status="pending",
+            source_label="第 1 轮到期复习",
+        )
+        task.questions.append(
+            ChapterReviewTaskQuestion(
+                position=1,
+                prompt="请说明压力感受性反射的核心机制。",
+                reference_answer="答题时需要写出感受器监测动脉压变化、信号进入中枢整合，以及通过迷走和交感活动共同调节心血管反应。",
+                key_points=["感受器监测压力变化", "中枢完成整合", "迷走与交感共同调节"],
+                explanation="本题重点在于把感受器、中枢和效应环节连成完整反射弧。易错点是只写结果，不写迷走增强和交感抑制如何落到心血管反应上。",
+                source_excerpt="当动脉压升高时，反射会增强迷走活动并抑制交感输出。",
+            )
+        )
+        db.add(task)
+        db.commit()
+
+    headers = {"x-tls-device-id": "review-device-full-source"}
+    response = client.get("/api/history/review-task/1", headers=headers)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source_content"] == chapter_text
+    assert "后半段还进一步讲到静脉回流" in payload["source_content"]
+
+    with session_factory() as db:
+        task = db.query(ChapterReviewTask).filter(ChapterReviewTask.id == 1).first()
+        assert task is not None
+        pdf_block = chapter_review_service_module._serialize_pdf_task_block(task)
+        assert pdf_block["source_content"] == chapter_text
+        assert "后半段还进一步讲到静脉回流" in pdf_block["source_content"]
+
+
+def test_review_generation_recovers_from_repeated_ai_questions_with_chapter_wide_concepts(
+    client,
+    session_factory,
+    monkeypatch,
+):
+    async def fake_ai_questions(unit, summary, *, question_count):
+        return [
+            {
+                "prompt": f"请说明正反馈的核心机制（版本{i}）。",
+                "reference_answer": "正反馈使受控变量沿原方向持续增强，从而快速推动过程达到终点。",
+                "key_points": ["沿原方向增强", "放大反应", "推动过程达到终点"],
+                "explanation": "本题围绕正反馈的机制展开，需要写出调节方向和结果。",
+                "source_excerpt": "正反馈使受控变量沿原方向持续增强。",
+            }
+            for i in range(1, question_count + 1)
+        ]
+
+    async def fake_ai_refine(unit, summary, questions):
+        return questions
+
+    async def fake_ai_blueprint(**kwargs):
+        return [
+            {
+                "concept_name": "正反馈",
+                "prompt_focus": "正反馈",
+                "question_axis": "mechanism",
+                "source_excerpt": "正反馈使受控变量沿原方向持续增强。",
+                "expected_key_points": ["沿原方向增强", "放大反应", "推动过程达到终点"],
+                "selection_reason": "解释正反馈本质",
+                "priority": 10,
+            },
+            {
+                "concept_name": "调定点",
+                "prompt_focus": "调定点",
+                "question_axis": "comparison",
+                "source_excerpt": "负反馈朝着调定点工作，而正反馈背离调定点。",
+                "expected_key_points": ["负反馈朝着调定点", "正反馈背离调定点"],
+                "selection_reason": "容易与正反馈混淆",
+                "priority": 9,
+            },
+            {
+                "concept_name": "负反馈",
+                "prompt_focus": "负反馈",
+                "question_axis": "definition",
+                "source_excerpt": "负反馈通过纠偏机制把偏离调定点的变量拉回目标附近。",
+                "expected_key_points": ["通过纠偏机制工作", "把变量拉回调定点附近"],
+                "selection_reason": "与正反馈构成对照",
+                "priority": 9,
+            },
+            {
+                "concept_name": "稳态",
+                "prompt_focus": "稳态",
+                "question_axis": "significance",
+                "source_excerpt": "稳态维持依赖负反馈回路持续修正偏差。",
+                "expected_key_points": ["稳态依赖反馈调节", "负反馈持续修正偏差"],
+                "selection_reason": "章节主线概念",
+                "priority": 8,
+            },
+            {
+                "concept_name": "血液凝固中的正反馈",
+                "prompt_focus": "正反馈的生理意义",
+                "question_axis": "significance",
+                "source_excerpt": "凝血中的正反馈有助于迅速止血，但过强时也可能带来血栓风险。",
+                "expected_key_points": ["帮助迅速止血", "过强可致血栓风险"],
+                "selection_reason": "体现双重作用",
+                "priority": 8,
+            },
+            {
+                "concept_name": "分娩中的正反馈",
+                "prompt_focus": "分娩中的正反馈",
+                "question_axis": "features",
+                "source_excerpt": "宫缩与宫颈牵张之间形成正反馈，直至分娩完成。",
+                "expected_key_points": ["宫缩与宫颈牵张相互增强", "直至分娩完成"],
+                "selection_reason": "典型实例",
+                "priority": 7,
+            },
+        ]
+
+    monkeypatch.setattr("services.chapter_review_service._ai_generate_questions", fake_ai_questions)
+    monkeypatch.setattr("services.chapter_review_service._ai_refine_questions", fake_ai_refine)
+    monkeypatch.setattr("services.chapter_review_service._ai_refine_review_concept_blueprint", fake_ai_blueprint)
+
+    chapter_text = (
+        "正反馈使受控变量沿原方向持续增强，从而快速推动过程达到终点。"
+        "负反馈通过纠偏机制把偏离调定点的变量拉回目标附近，因此是维持稳态的主力。"
+        "负反馈朝着调定点工作，而正反馈背离调定点。"
+        "凝血中的正反馈有助于迅速止血，但过强时也可能带来血栓风险。"
+        "宫缩与宫颈牵张之间形成正反馈，直至分娩完成。"
+    )
+    unit_text = "正反馈使受控变量沿原方向持续增强，从而快速推动过程达到终点。"
+
+    with session_factory() as db:
+        db.add(
+            Chapter(
+                id="physio_feedback_full",
+                book="生理学",
+                edition="1",
+                chapter_number="1",
+                chapter_title="反馈调节",
+                content_summary="讲述正反馈、负反馈、调定点与稳态。",
+                concepts=[
+                    {"id": "positive", "name": "正反馈"},
+                    {"id": "negative", "name": "负反馈"},
+                    {"id": "setpoint", "name": "调定点"},
+                    {"id": "steady", "name": "稳态"},
+                    {"id": "coag", "name": "血液凝固中的正反馈"},
+                    {"id": "labor", "name": "分娩中的正反馈"},
+                ],
+                first_uploaded=date(2026, 3, 1),
+            )
+        )
+        db.flush()
+
+        chapter = ChapterReviewChapter(
+            actor_key="device:review-device-wide-source",
+            chapter_id="physio_feedback_full",
+            book="生理学",
+            chapter_number="1",
+            chapter_title="反馈调节",
+            ai_summary="讲述正反馈、负反馈、调定点与稳态。",
+            merged_raw_content=chapter_text,
+            cleaned_content=chapter_text,
+            content_version=1,
+            first_uploaded_date=date(2026, 3, 21),
+            last_uploaded_date=date(2026, 3, 21),
+            next_due_date=date(2026, 3, 22),
+            review_status="due",
+        )
+        db.add(chapter)
+        db.flush()
+
+        unit = ChapterReviewUnit(
+            review_chapter_id=chapter.id,
+            content_version=1,
+            unit_index=1,
+            unit_title="反馈调节 · 单元 1",
+            raw_text=unit_text,
+            cleaned_text=unit_text,
+            excerpt=unit_text,
+            char_count=len(unit_text),
+            estimated_minutes=18,
+            next_round=1,
+            completed_rounds=0,
+            next_due_date=date(2026, 3, 22),
+            review_status="pending",
+            carry_over_count=0,
+            is_active=True,
+        )
+        db.add(unit)
+        db.flush()
+
+        db.add(
+            ChapterReviewTask(
+                actor_key="device:review-device-wide-source",
+                review_chapter_id=chapter.id,
+                unit_id=unit.id,
+                content_version=1,
+                scheduled_for=date(2026, 3, 22),
+                due_reason="第 1 轮到期复习",
+                estimated_minutes=18,
+                question_count=6,
+                status="pending",
+                source_label="第 1 轮到期复习",
+            )
+        )
+        db.commit()
+
+    headers = {"x-tls-device-id": "review-device-wide-source"}
+    response = client.get("/api/history/review-task/1", headers=headers)
+    assert response.status_code == 200
+    payload = response.json()
+    prompts = [item["prompt"] for item in payload["questions"]]
+    focus_counts = Counter(
+        focus
+        for focus in (chapter_review_service_module._extract_prompt_focus(prompt) for prompt in prompts)
+        if focus
+    )
+
+    assert len(focus_counts) >= 4
+    assert any(("负反馈" in prompt) or ("调定点" in prompt) for prompt in prompts)
+    assert any(("凝血" in prompt) or ("分娩" in prompt) for prompt in prompts)
+    assert max(focus_counts.values()) <= 2

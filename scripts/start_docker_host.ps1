@@ -42,6 +42,42 @@ function Start-DockerDesktopIfNeeded {
     Wait-DockerReady
 }
 
+function Get-TailscaleAccessInfo {
+    $tailscaleCmd = Get-Command tailscale -ErrorAction SilentlyContinue
+    if (-not $tailscaleCmd) {
+        return $null
+    }
+
+    try {
+        $statusJson = & $tailscaleCmd.Source status --json 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $statusJson) {
+            return $null
+        }
+
+        $status = $statusJson | ConvertFrom-Json
+        if (-not $status.Self) {
+            return $null
+        }
+
+        $dnsName = [string]$status.Self.DNSName
+        if ($dnsName.EndsWith(".")) {
+            $dnsName = $dnsName.TrimEnd(".")
+        }
+
+        $tailscaleIps = @($status.Self.TailscaleIPs)
+        $ipv4 = $tailscaleIps | Where-Object { $_ -match '^\d+\.' } | Select-Object -First 1
+        $ipv6 = $tailscaleIps | Where-Object { $_ -like "*:*" } | Select-Object -First 1
+
+        return [pscustomobject]@{
+            DNSName = $dnsName
+            IPv4    = $ipv4
+            IPv6    = $ipv6
+        }
+    } catch {
+        return $null
+    }
+}
+
 function Ensure-DataVolumeSeeded {
     $volumeExists = docker volume ls --format "{{.Name}}" | Where-Object { $_ -eq $volumeName }
     if (-not $volumeExists) {
@@ -69,14 +105,28 @@ function Ensure-DataVolumeSeeded {
 
 function Show-Urls {
     $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+        Where-Object {
+            $_.IPAddress -notlike "127.*" -and
+            $_.IPAddress -notlike "169.254.*" -and
+            $_.InterfaceAlias -ne "Tailscale" -and
+            $_.InterfaceAlias -notlike "vEthernet*"
+        } |
         Select-Object -ExpandProperty IPAddress -Unique
+    $tailscaleInfo = Get-TailscaleAccessInfo
 
     Write-Host ""
     Write-Host "Docker app is running."
     Write-Host "Local URL: http://localhost:$Port"
     foreach ($ip in $ips) {
         Write-Host "LAN URL:   http://$ip`:$Port"
+    }
+    if ($tailscaleInfo) {
+        if ($tailscaleInfo.DNSName) {
+            Write-Host "Tailnet URL: http://$($tailscaleInfo.DNSName):$Port"
+        }
+        if ($tailscaleInfo.IPv4) {
+            Write-Host "Tailnet IP:  http://$($tailscaleInfo.IPv4):$Port"
+        }
     }
     Write-Host ""
 }

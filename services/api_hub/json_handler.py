@@ -32,6 +32,7 @@ async def parse_json_with_repair(
     generate_content_fn: Callable,
     preferred_provider: Optional[str] = None,
     preferred_model: Optional[str] = None,
+    fallback_to_pool: bool = True,
     audit_context: Optional[Dict[str, Any]] = None,
     derive_context_fn: Optional[Callable] = None,
 ) -> Dict:
@@ -76,8 +77,8 @@ async def parse_json_with_repair(
             temperature=0.0,
             timeout=min(timeout, 120),
             use_heavy=False,
-            preferred_provider=None,
-            preferred_model=None,
+            preferred_provider=preferred_provider if not fallback_to_pool else None,
+            preferred_model=preferred_model if not fallback_to_pool else None,
             phase="json_repair",
             metadata={
                 "schema_keys": sorted(str(key) for key in schema.keys())[:40],
@@ -90,8 +91,9 @@ async def parse_json_with_repair(
         temperature=0.0,
         timeout=min(timeout, 120),
         use_heavy=False,
-        preferred_provider=None,
-        preferred_model=None,
+        preferred_provider=preferred_provider if not fallback_to_pool else None,
+        preferred_model=preferred_model if not fallback_to_pool else None,
+        fallback_to_pool=fallback_to_pool,
         audit_context=repair_audit,
     )
     repaired = strip_code_fence(repaired)
@@ -115,6 +117,7 @@ async def generate_json(
     use_heavy: bool = False,
     preferred_provider: Optional[str] = None,
     preferred_model: Optional[str] = None,
+    fallback_to_pool: bool = True,
     audit_context: Optional[Dict[str, Any]] = None,
     create_context_fn: Optional[Callable] = None,
     derive_context_fn: Optional[Callable] = None,
@@ -194,6 +197,7 @@ async def generate_json(
             use_heavy=use_heavy,
             preferred_provider=attempt_preferred_provider,
             preferred_model=attempt_preferred_model,
+            fallback_to_pool=fallback_to_pool,
             audit_context=prompt_audit,
         )
 
@@ -219,8 +223,9 @@ async def generate_json(
                 max_tokens,
                 repair_remaining,
                 generate_content_fn=generate_content_fn,
-                preferred_provider=None,
-                preferred_model=None,
+                preferred_provider=attempt_preferred_provider,
+                preferred_model=attempt_preferred_model,
+                fallback_to_pool=fallback_to_pool,
                 audit_context=parse_audit,
                 derive_context_fn=derive_context_fn,
             )
@@ -234,7 +239,7 @@ async def generate_json(
 
     # Heavy task JSON failure → try Fast pool fallback
     remaining = deadline - _time.time()
-    if remaining > 15 and use_heavy and fast_pool:
+    if remaining > 15 and use_heavy and fallback_to_pool and fast_pool:
         fast_prompt = (
             f"{retry_prompt}\n\n"
             "你现在处于快速兜底模式：\n"
@@ -298,6 +303,7 @@ async def generate_json(
                 generate_content_fn=generate_content_fn,
                 preferred_provider=None,
                 preferred_model=None,
+                fallback_to_pool=True,
                 audit_context=fast_parse_audit,
                 derive_context_fn=derive_context_fn,
             )

@@ -1,0 +1,774 @@
+{
+  "active_db": "C:\\Users\\35456\\true-learning-system\\data\\learning.db",
+  "source_db": "C:\\Users\\35456\\true-learning-system\\data\\learning.cleanup-backup-20260318_181742.db",
+  "backup_path": "C:\\Users\\35456\\true-learning-system\\data\\learning.db.chapter-repair-backup-20260320_170922",
+  "generated_at": "2026-03-20T17:09:22",
+  "before_clean_catalog_count": 3,
+  "after_clean_catalog_count": 127,
+  "source_canonical_count": 127,
+  "inserted_canonical_rows": 127,
+  "remapped_chapter_ids": {
+    "agent-topic-chat-7911400d99f943b8856ca549b8dc4a78-chapter-a": "physio_ch04",
+    "agent-topic-chat-7911400d99f943b8856ca549b8dc4a78-chapter-b": "physio_ch10",
+    "chapter-0688f8ddcbba4371a8a5ba602e1c63b3": "internal_ch01",
+    "agent-wrong-summary-81bd47da658a4f5fa685bf4647d0f674-chapter-a": "internal_ch01",
+    "agent-wrong-summary-81bd47da658a4f5fa685bf4647d0f674-chapter-b": "internal_ch02",
+    "agent-history-fallback-d2f49f6458ce4960ab2b6a4f2416d699-chapter": "physio_ch12",
+    "tracking-upload-fb205cb0e6514b0aa3643d5d319595f3-chapter": "physio_ch12",
+    "topic-acc2c2b1ae634cc4a263ec5a1314fbbc-a": "physio_ch04",
+    "topic-71e5d714ee2b4ed096f1074008e070e5-b": "physio_ch10",
+    "agent-topic-chat-1708d27144c5420591706b39677f5531-chapter-a": "physio_ch04",
+    "agent-topic-chat-1708d27144c5420591706b39677f5531-chapter-b": "physio_ch10",
+    "agent-mastery-ba8d9347ba574610af49cbf26c502b73-chapter": "internal_ch01",
+    "agent-placeholder-c2a1456ccab54f0392a4153b05b9ab3e-chapter": "internal_ch01",
+    "agent-mastery-fb4fd5fe30694ead9a5fc48c2f4dc27d-chapter": "internal_ch01",
+    "agent-mastery-9494cc768f09447cb1e41fc97dcc895d-chapter": "internal_ch01",
+    "agent-placeholder-138ba07d1de5429e95673e5dd1caef41-chapter": "internal_ch01",
+    "agent-mastery-7f6d0114715a490197a67f82970dbc6b-chapter": "internal_ch01",
+    "agent-placeholder-8bb950894946464a986c9ab2e7e528bd-chapter": "internal_ch01",
+    "chapter-e4339a4e8b7a4036aea55a17b6aa8885": "internal_ch01",
+    "agent-wrong-summary-acb2dce46925477b97c3b7dc10d539a5-chapter-a": "internal_ch01",
+    "agent-wrong-summary-acb2dce46925477b97c3b7dc10d539a5-chapter-b": "internal_ch02",
+    "agent-history-fallback-80c2d4740149458295cdbb0e4c79d55e-chapter": "physio_ch12",
+    "tracking-upload-06d9cbdbc1b149448e62f975658950d8-chapter": "physio_ch12",
+    "topic-8dd08e0675e444c197a96feadab76d25-a": "physio_ch04",
+    "topic-e1acdfed531242e4acea078e885935f7-b": "physio_ch10",
+    "agent-topic-chat-575b5cb5af7143a78717775a866c67a8-chapter-a": "physio_ch04",
+    "agent-topic-chat-575b5cb5af7143a78717775a866c67a8-chapter-b": "physio_ch10",
+    "agent-mastery-eb779bc4fe944159804045619cd28baa-chapter": "internal_ch01",
+    "agent-placeholder-7c115508057c4801a34f5497d0e8fd78-chapter": "internal_ch01",
+    "topic-2fefb3573ad0451d9264fe1dceefa325-a": "physio_ch04",
+    "topic-2c308d773aa34d8aaa53caa6e8fc8030-b": "physio_ch10",
+    "agent-topic-chat-b92c824f78c54961a345ab5f2b435612-chapter-a": "physio_ch04",
+    "agent-topic-chat-b92c824f78c54961a345ab5f2b435612-chapter-b": "physio_ch10",
+    "chapter-a78951ec7d1d45a4bb24627087bbbef2": "internal_ch01",
+    "agent-wrong-summary-bdd94d444d4e41eb88f31b14d499022c-chapter-a": "internal_ch01",
+    "agent-wrong-summary-bdd94d444d4e41eb88f31b14d499022c-chapter-b": "internal_ch02",
+    "agent-history-fallback-8adf723b93b4466f9a549bc1945527e3-chapter": "physio_ch12",
+    "tracking-upload-87aef9cfff66444aa6fc76c1b65e6704-chapter": "physio_ch12",
+    "agent-mastery-b7f24f0e55294b6e96d475a434fd1d7b-chapter": "internal_ch01",
+    "agent-placeholder-6e256ed5ee3d497380672b90eddcc4d5-chapter": "internal_ch01",
+    "chapter-9c6317b2afd74b07b8c001a3d6f52de9": "internal_ch01",
+    "agent-wrong-summary-7cc7288077a8421b84c67006cd07a929-chapter-a": "internal_ch01",
+    "agent-wrong-summary-7cc7288077a8421b84c67006cd07a929-chapter-b": "internal_ch02",
+    "agent-history-fallback-0d18b6269e9542fdab24564219ccfc6b-chapter": "physio_ch12",
+    "tracking-upload-57e2dde84ea144aebb6cbdc8bb149758-chapter": "physio_ch12",
+    "agent-mastery-6e28291b4f2b4a3d9100dd0a3e978543-chapter": "internal_ch01",
+    "agent-placeholder-84754e4d17b241518b371dad62f1e1e2-chapter": "internal_ch01",
+    "chapter-0207e48e514f465eb063d80156b9981f": "internal_ch01",
+    "agent-wrong-summary-f34dbef27328439fb7d6a2217cbe526a-chapter-a": "internal_ch01",
+    "agent-wrong-summary-f34dbef27328439fb7d6a2217cbe526a-chapter-b": "internal_ch02",
+    "agent-history-fallback-e9945bf51b7a4bc492ac66fa7fd9ca3d-chapter": "physio_ch12",
+    "tracking-upload-536afad3783c4b5882b95042418659c0-chapter": "physio_ch12",
+    "agent-mastery-a5df1c70b50b44b8adf732a58c1a729b-chapter": "internal_ch01",
+    "agent-placeholder-64ea091857804ba9afd0fe569ed1a5bf-chapter": "internal_ch01",
+    "history-chapter": "surgery_ch12",
+    "history-chapter-ui": "surgery_ch12",
+    "history-chapter-9c0ed19b4ffa47cfaa718fa6069daaa2": "surgery_ch12",
+    "history-chapter-30f7606efb0749fdb973353b16e53966": "surgery_ch12",
+    "history-chapter-d18ef286ba65436ca825cd2e550596de": "surgery_ch12",
+    "history-chapter-950efe68f19a407b998f49e2cf8bf742": "surgery_ch12",
+    "history-chapter-58e088d4bf544bad929ee738478cec39": "surgery_ch12",
+    "history-chapter-f40ff64babf84ba289429aa00a3d04cf": "surgery_ch12",
+    "internal_medicine_ch11": "internal_ch32",
+    "internal_medicine_ch12": "internal_ch07",
+    "history-chapter-f1d5c2e9f48443bd9a90ad95be77e7a7": "surgery_ch12",
+    "history-chapter-2f60f3cd06ae4ef8a9e3e9e8514b28c1": "surgery_ch12",
+    "pathology_ch1": "patho_ch01",
+    "chapter-e681a7a3ca4c4b91a6746ebf9d1f2616": "internal_ch01",
+    "agent-wrong-summary-a6032262091142a284a9e59bf848d090-chapter-a": "internal_ch01",
+    "agent-wrong-summary-a6032262091142a284a9e59bf848d090-chapter-b": "internal_ch02",
+    "agent-history-fallback-5473f5eed84144b5ab57df258fee7a1b-chapter": "physio_ch12",
+    "tracking-upload-af9a0a9a156945e7b063961862c734d6-chapter": "physio_ch12",
+    "agent-mastery-3f679e86d9404b29b899966464e2bf05-chapter": "internal_ch01",
+    "agent-placeholder-db5b7669812248658eb7e28726e809fa-chapter": "internal_ch01",
+    "backfill-faa541b1de2f4c2498c769cc2849a243-chapter": "physio_ch01",
+    "history-chapter-b9287371d9a54895a335ddf4ae77449d": "surgery_ch12",
+    "chapter-2e76a68cf8b0411abe9c3275ef3ec449": "internal_ch01",
+    "agent-wrong-summary-1db5637da63c4f4db6929ffca7ac3351-chapter-a": "internal_ch01",
+    "agent-wrong-summary-1db5637da63c4f4db6929ffca7ac3351-chapter-b": "internal_ch02",
+    "agent-history-fallback-bab5c6afcad04b35984209fbe6283270-chapter": "physio_ch12",
+    "tracking-upload-9a102b89cb2040f8a817158e99c10309-chapter": "physio_ch12",
+    "agent-mastery-ac2af35510be4bd9a8b5fd68f28c4c87-chapter": "internal_ch01",
+    "agent-placeholder-3ec18ece37174dfb85ef78cdf533c1a3-chapter": "internal_ch01",
+    "backfill-5e43f338f3e847e6bb8e735c16cfe4d6-chapter": "physio_ch01",
+    "history-chapter-e114fe4372b7416ea05da64aea0e00c4": "surgery_ch12",
+    "chapter-673b46ddb713478c9199923efd5c6872": "internal_ch01",
+    "agent-wrong-summary-8c4b77a821a14ba6b6cfdabbe820046e-chapter-a": "internal_ch01",
+    "agent-wrong-summary-8c4b77a821a14ba6b6cfdabbe820046e-chapter-b": "internal_ch02",
+    "agent-history-fallback-265a8942005544adbad1aa2918e9234d-chapter": "physio_ch12",
+    "tracking-upload-a9e79e14fd114e5bb61cbaa6dbe07b26-chapter": "physio_ch12",
+    "agent-mastery-c062f14e823f465694be01bc94fbcf3a-chapter": "internal_ch01",
+    "agent-placeholder-5514a443b31141549af462c0787abe1b-chapter": "internal_ch01",
+    "chapter-1d118fb2debd40358e4592f66d155dcb": "internal_ch01",
+    "agent-wrong-summary-d0dcc42453494f29886b2a07e2166921-chapter-a": "internal_ch01",
+    "agent-wrong-summary-d0dcc42453494f29886b2a07e2166921-chapter-b": "internal_ch02",
+    "agent-history-fallback-c094ee52f4454e12b8b4fbc796352c4c-chapter": "physio_ch12",
+    "tracking-upload-013b0511946a4c259630ae60453f7ac4-chapter": "physio_ch12",
+    "agent-mastery-81b0d006817947dfa4f059023c473e53-chapter": "internal_ch01",
+    "agent-placeholder-934dc3b3fd034351a93f2f1088f84cbd-chapter": "internal_ch01",
+    "backfill-02c987cc19c040f9b2f0bcd725cbc5ad-chapter": "physio_ch01",
+    "backfill-2eff70f4e20e46369e41702ac9cad9f1-chapter": "physio_ch01",
+    "history-chapter-1914ee51b5e44f0f8996d31f1143f7f4": "surgery_ch12",
+    "history-chapter-4aaa1f9f667245fb9b9a8d332bf5fe38": "surgery_ch12"
+  },
+  "table_update_counts": {
+    "concept_mastery": 74,
+    "quiz_sessions": 0,
+    "wrong_answers_v2": 0,
+    "learning_sessions": 2,
+    "batch_exam_states": 1
+  },
+  "unmatched_noncanonical_rows": [
+    {
+      "id": "seed-chapter-4070fbae446b429986e34c0ec9ffc485",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-21e20936165445ee8832b942607bc66a",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-a16a52029047415f8dbe17c695159475",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-23c68dded8064bd4b8beee6daf7399f1",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-6648dfdf2153449581d2c2e1707dbf76",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-40626608526243b8adb4fc16355e2b08",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-d4add091fc684d8a911af2f31b491742",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-a43407d4f5b848419fee7204f4ec6540",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-72f8aae5560d4ce3bafdc0c8e3132653",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "0",
+      "book": "Uncategorized",
+      "chapter_number": "0",
+      "chapter_title": "Placeholder"
+    },
+    {
+      "id": "seed-chapter-2e188e472d874881989d218fa4d6d893",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-829cfaef6da54ef7b762f98526b9897f",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-6cdfb731f1d34e198211d7bcf9fdf227",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-6ea52120cb1f4944af359d36c96e3e5e",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-32abd71916b840189f184561e6b4fc0b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-841542bf4a3e44518becb3e3da5e55d6",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-1f6af52e5cc54f459c13ba58d5bb3d8c",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-dd4ec7d1eafb4b818deabeb5fcdb66a5",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-3968f4858c3f44b285782b586936ae8a",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-e372c1c9a9f742cc87628effbbd16e64",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-e8b20e15741543a0a5a5f59e6e7136db",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-b890ed80f8984b32ac3bcb6dcc12110f",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-646111baa51340cb9f8b850463c7614b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-e58f8598704d443e8ff1e9d520be3877",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-2e872c3b9ddd490699601986451187db",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-9c052809474f405c9876d11eb49fd6e2",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-b1d7aabb30184026a8abc9a38a94a6f7",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-e1e029ea197c4784aa314049a46aa06c",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-f0f04cc917c44e7d830a32f0533ae5c2",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-1222a2a85be24f3cb8d206ed90845c04",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-54d1c836c21845608d13f94319dd093b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-7e5c86cbb46d4ffb9daface17e856be1",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-82904ce8280d491a93426f2d13a9856d",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-4e2bfedf3e884608bcbbc92b863bb272",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-00544c4a52534e6d99db116ca7aaf1c4",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-6019a46842794835a4ee78f24cfee521",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-276ea2e5f0854d1cb56119c18b90a7f8",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-0f1a68bb632e473d96d483c7ea909bf2",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-3e1c5430757b451888f242cbe7ca4518",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-1262af84396842b680792cbefcfb1d19",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-ebdec9cc00c2452c9ca931ee8e5fed92",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-ed13bd9e0a1343778e0f16e874d14822",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-b4df0226b88b4d5fae0d54603d9fed9f",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-09bdbf133711422b8c358b43ab8d92d2",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-fc185ca1aea64c2d8b23343536dc423d",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-59ebe0577df9434eb1008e9fa269d425",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-344c56173079495084336b48174cf857",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-2b0db56a5aa34467a494c2b356a47114",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-7d568edc2baa475089b1d6e831ad10db",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-540308d881f24349a810d18ba06feb61",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-83f203a1be604f81aa9a0f556f4fbbf7",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-4b03972194a44d879dea18666393c32d",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-a0cbf4f61b7d4104b5df6b0926d4bafb",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-ce4dd99c0cd94546ab300452e9bfab01",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-441fb690866f40628b802615f24505aa",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-e3ca8865af1543818ca18b62495b86b7",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-06935edb73e84c348a6c54b522f1c0a4",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-f26d7d9d2bbc496d93051bd5515dd923",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-8f5c5e3a496c426a8e1dd4e52017ca57",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-7f8f82c096f742f39a059703bf11fc8e",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-26cd9c77617040cb901d1a6da168110a",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-ed80545c2be847e1b64b79b2b542a544",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-5f2c2644b40d41cf821e3950412dbd5b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-60238416960c4b589db5d3ac026be047",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-9f8fd1248b9341928d20ef8e3e75771f",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-155aa1654e894696b20391ef37921a4b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-d3fb25e81d0447cca8690351545bc080",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-f6fb23cbbcf8488eb355ec98c5ae744e",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-3a1c7b99199641eba04d5ceafcbb42ae",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-940e9847d694441fbd46e44e4bdf2140",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-f3b2119e20b74a4088280d273553901f",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-589c1d1fdfd349cb88814357920f0cd4",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-98e658cc614843bd833d7be625dd26ed",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-869286f5190040eba111a5d31160a522",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-37cc301480284c98a9e527fe25a1eaec",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-1582dfe7ce3f4c559863310a9dad549b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-905e39583d364a6cac415fff63868076",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-77609953167a447c9e329feb03ed19d7",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-64d0917b40f84a83add6b18e09f4407b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-82a5ebb941844ba987922513b246fc43",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-44ca7cc5679e471f87296b0e3322a523",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-b9f63678616742c9aeac17b86ce0afeb",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-7973addbc044492c885d5814a4c7c70e",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-fec5c74a609049d08a47f2a867dba2ff",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-88b738d43efc40058909ae10dfc180ff",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-af2f54d67de1459e8145bacbbf2eb8e1",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-a0c9800e192b43b5b39433f1ffc64caa",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-0e20ea1571694da9850d532eba716832",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-3b1e3d6a84b049849cb6abd65257367b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-8021c914f20949dba08b19ab55139b4b",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-5e8dc0adc3564ead84b8f1987acac2a9",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-5dedfbda5854466f919fc52a718dc97f",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-b229c2856e3244c1a03f86ff1c1bd966",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-4b0e0821a70546f7bc86921bf096ca4c",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-2c8d450dd4574a22ae3b72cd966e67cd",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-2b3aa78bf1ad4ff88ee3a0af2fd5e475",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-1377761091c641d081a671ba41d65a73",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-3350222ced6844c78762678e65eb2a1f",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-28a06b49ef134e9986853822f23ef023",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    },
+    {
+      "id": "seed-chapter-fa9b91d4489441318852e492dcb4ceb1",
+      "book": "Seed Book",
+      "chapter_number": "1",
+      "chapter_title": "Seed Chapter"
+    }
+  ],
+  "catalog_subject_summary": {
+    "内科学": {
+      "sections": 9,
+      "items": 113,
+      "core_items": 62,
+      "mindmap_items": 0,
+      "notes_items": 51,
+      "canonical_candidates": 59
+    },
+    "医学人文": {
+      "sections": 1,
+      "items": 1,
+      "core_items": 0,
+      "mindmap_items": 0,
+      "notes_items": 1,
+      "canonical_candidates": 0
+    },
+    "外科学": {
+      "sections": 9,
+      "items": 135,
+      "core_items": 35,
+      "mindmap_items": 0,
+      "notes_items": 100,
+      "canonical_candidates": 34
+    },
+    "生物化学": {
+      "sections": 18,
+      "items": 44,
+      "core_items": 6,
+      "mindmap_items": 0,
+      "notes_items": 38,
+      "canonical_candidates": 6
+    },
+    "生理学": {
+      "sections": 16,
+      "items": 56,
+      "core_items": 53,
+      "mindmap_items": 0,
+      "notes_items": 3,
+      "canonical_candidates": 53
+    },
+    "病理学": {
+      "sections": 6,
+      "items": 39,
+      "core_items": 24,
+      "mindmap_items": 0,
+      "notes_items": 15,
+      "canonical_candidates": 24
+    }
+  }
+}

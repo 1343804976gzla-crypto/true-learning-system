@@ -4,6 +4,20 @@ title True Learning System Server
 
 cd /d "C:\Users\35456\true-learning-system"
 
+if /I "%TLS_FORCE_LOCAL%"=="1" goto local_mode
+
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:18000/health' -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"
+if %errorlevel% equ 0 (
+    echo [Info] Docker shared instance detected on http://localhost:18000
+    echo [Info] Opening shared instance to avoid split local data...
+    start http://localhost:18000/wrong-answers
+    echo.
+    echo Set TLS_FORCE_LOCAL=1 before running this script if you intentionally need the local 8000 instance.
+    pause
+    exit /b 0
+)
+
+:local_mode
 echo [1/3] Checking port 8000...
 netstat -ano | findstr ":8000" >nul
 if %errorlevel% equ 0 (
@@ -32,5 +46,6 @@ start http://localhost:8000/wrong-answers
 echo.
 echo Server started: http://localhost:8000/wrong-answers
 echo Set TLS_RELOAD=1 before running this script if you need hot reload.
+echo Set TLS_FORCE_LOCAL=1 before running this script if you intentionally need the local 8000 instance.
 pause
 endlocal
