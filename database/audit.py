@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from sqlalchemy import Column, DateTime, Index, Integer, MetaData, String, Table, Text, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Mapper, Session
@@ -61,44 +62,6 @@ AUDIT_INDEX_DDLS = [
     "CREATE INDEX IF NOT EXISTS ix_audit_change_log_created_at ON audit_change_log(created_at)",
 ]
 
-AUDIT_INSERT_SQL = """
-INSERT INTO audit_change_log (
-    domain_name,
-    entity_type,
-    entity_id,
-    public_id,
-    action,
-    actor_key,
-    user_id,
-    device_id,
-    request_id,
-    trace_id,
-    source,
-    origin_event_type,
-    origin_public_id,
-    before_json,
-    after_json,
-    changed_fields
-) VALUES (
-    :domain_name,
-    :entity_type,
-    :entity_id,
-    :public_id,
-    :action,
-    :actor_key,
-    :user_id,
-    :device_id,
-    :request_id,
-    :trace_id,
-    :source,
-    :origin_event_type,
-    :origin_public_id,
-    :before_json,
-    :after_json,
-    :changed_fields
-)
-"""
-
 _METADATA_DOMAIN_MAP = {
     ContentBase.metadata: "content",
     RuntimeBase.metadata: "runtime",
@@ -116,6 +79,36 @@ _DOMAIN_ENGINE_MAP = {
     "legacy": legacy_engine,
     "shadow": core_engine,
 }
+
+AUDIT_METADATA = MetaData()
+AUDIT_CHANGE_LOG_TABLE = Table(
+    "audit_change_log",
+    AUDIT_METADATA,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("domain_name", String(64), nullable=False),
+    Column("entity_type", String(128), nullable=False),
+    Column("entity_id", String(128), nullable=False),
+    Column("public_id", String(128), nullable=True),
+    Column("action", String(32), nullable=False),
+    Column("actor_key", String(255), nullable=True),
+    Column("user_id", String(128), nullable=True),
+    Column("device_id", String(255), nullable=True),
+    Column("request_id", String(128), nullable=True),
+    Column("trace_id", String(128), nullable=True),
+    Column("source", String(64), nullable=True),
+    Column("origin_event_type", String(128), nullable=True),
+    Column("origin_public_id", String(128), nullable=True),
+    Column("before_json", Text, nullable=True),
+    Column("after_json", Text, nullable=True),
+    Column("changed_fields", Text, nullable=True),
+    Column("created_at", DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+)
+Index("ix_audit_change_log_domain", AUDIT_CHANGE_LOG_TABLE.c.domain_name)
+Index("ix_audit_change_log_entity", AUDIT_CHANGE_LOG_TABLE.c.entity_type, AUDIT_CHANGE_LOG_TABLE.c.entity_id)
+Index("ix_audit_change_log_trace", AUDIT_CHANGE_LOG_TABLE.c.trace_id)
+Index("ix_audit_change_log_request", AUDIT_CHANGE_LOG_TABLE.c.request_id)
+Index("ix_audit_change_log_created_at", AUDIT_CHANGE_LOG_TABLE.c.created_at)
+AUDIT_INSERT_STATEMENT = AUDIT_CHANGE_LOG_TABLE.insert()
 
 
 @dataclass(frozen=True)
@@ -140,10 +133,7 @@ def ensure_audit_tables(*, include_shadow: bool = False) -> None:
     for target in audit_targets():
         if target.name == "shadow" and not include_shadow:
             continue
-        with target.engine.begin() as connection:
-            connection.exec_driver_sql(AUDIT_CHANGE_LOG_DDL)
-            for ddl in AUDIT_INDEX_DDLS:
-                connection.exec_driver_sql(ddl)
+        AUDIT_METADATA.create_all(bind=target.engine, checkfirst=True)
 
 
 def _truncate_text(value: str, *, limit: int = 2000) -> str:
@@ -381,7 +371,7 @@ def log_audit_change(
     connection_context, should_close = _resolve_connection(db, target=target, domain_name=resolved_domain)
     if should_close:
         with connection_context as connection:
-            connection.exec_driver_sql(AUDIT_INSERT_SQL, payload)
+            connection.execute(AUDIT_INSERT_STATEMENT, payload)
         return
 
-    connection_context.exec_driver_sql(AUDIT_INSERT_SQL, payload)
+    connection_context.execute(AUDIT_INSERT_STATEMENT, payload)

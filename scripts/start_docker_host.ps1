@@ -136,9 +136,11 @@ try {
     Start-DockerDesktopIfNeeded
     Ensure-DataVolumeSeeded
     $env:TLS_PORT = "$Port"
-    docker compose up -d
+    $env:TLS_APP_BIND_HOST = "0.0.0.0"
+    Write-Host "Rebuilding and starting app container..."
+    docker compose up -d --build app
     if ($LASTEXITCODE -ne 0) {
-        throw "docker compose up -d failed."
+        throw "docker compose up -d --build app failed."
     }
     Show-Urls
 } finally {

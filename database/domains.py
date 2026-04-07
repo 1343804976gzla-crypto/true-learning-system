@@ -11,14 +11,16 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+_SQLITE_ENGINE_CACHE: dict[str, Engine] = {}
+SCHEMA_AUTO_CREATE_ENV = "DB_AUTO_CREATE_SCHEMA"
 
 
-def _normalize_database_url(value: str, *, default_relative_path: str | None = None) -> str:
+def normalize_database_url(value: str, *, default_relative_path: str | None = None) -> str:
     candidate = (value or "").strip()
     if not candidate and default_relative_path:
         candidate = default_relative_path
 
-    if candidate.startswith("sqlite:///"):
+    if "://" in candidate:
         return candidate
 
     if not candidate:
@@ -35,8 +37,8 @@ def _resolve_database_url(*env_names: str, default_relative_path: str) -> str:
     for env_name in env_names:
         value = (os.getenv(env_name) or "").strip()
         if value:
-            return _normalize_database_url(value)
-    return _normalize_database_url("", default_relative_path=default_relative_path)
+            return normalize_database_url(value)
+    return normalize_database_url("", default_relative_path=default_relative_path)
 
 
 def get_sqlite_path(database_url: str) -> Path | None:
@@ -45,7 +47,18 @@ def get_sqlite_path(database_url: str) -> Path | None:
     return Path(database_url.replace("sqlite:///", "", 1)).resolve()
 
 
+def schema_auto_create_enabled() -> bool:
+    value = (os.getenv(SCHEMA_AUTO_CREATE_ENV) or "").strip().lower()
+    if not value:
+        return True
+    return value in {"1", "true", "yes", "on"}
+
+
 def _create_sqlite_engine(database_url: str) -> Engine:
+    cached = _SQLITE_ENGINE_CACHE.get(database_url)
+    if cached is not None:
+        return cached
+
     engine = create_engine(
         database_url,
         connect_args={"check_same_thread": False, "timeout": 30},
@@ -63,29 +76,43 @@ def _create_sqlite_engine(database_url: str) -> Engine:
         except Exception:
             pass
 
+    _SQLITE_ENGINE_CACHE[database_url] = engine
     return engine
 
 
+def _create_engine_for_url(database_url: str) -> Engine:
+    if get_sqlite_path(database_url) is not None or database_url.startswith("sqlite://"):
+        return _create_sqlite_engine(database_url)
+
+    return create_engine(
+        database_url,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        echo=False,
+    )
+
+
 CORE_DATABASE_URL = _resolve_database_url(
+    "DATABASE_URL",
     "DATABASE_PATH",
     "CORE_DATABASE_PATH",
     "CORE_DATABASE_URL",
     default_relative_path="data/learning.db",
 )
-CONTENT_DATABASE_URL = _normalize_database_url(
+CONTENT_DATABASE_URL = normalize_database_url(
     os.getenv("CONTENT_DATABASE_PATH") or os.getenv("CONTENT_DATABASE_URL") or CORE_DATABASE_URL
 )
-LEGACY_DATABASE_URL = _normalize_database_url(
+LEGACY_DATABASE_URL = normalize_database_url(
     os.getenv("LEGACY_DATABASE_PATH") or os.getenv("LEGACY_DATABASE_URL") or CORE_DATABASE_URL
 )
 
-AGENT_DATABASE_URL = _normalize_database_url(
+AGENT_DATABASE_URL = normalize_database_url(
     os.getenv("AGENT_DATABASE_PATH") or os.getenv("AGENT_DATABASE_URL") or CORE_DATABASE_URL
 )
-RUNTIME_DATABASE_URL = _normalize_database_url(
+RUNTIME_DATABASE_URL = normalize_database_url(
     os.getenv("RUNTIME_DATABASE_PATH") or os.getenv("RUNTIME_DATABASE_URL") or CORE_DATABASE_URL
 )
-REVIEW_DATABASE_URL = _normalize_database_url(
+REVIEW_DATABASE_URL = normalize_database_url(
     os.getenv("REVIEW_DATABASE_PATH") or os.getenv("REVIEW_DATABASE_URL") or CORE_DATABASE_URL
 )
 
@@ -96,12 +123,12 @@ AgentBase = declarative_base()
 RuntimeBase = declarative_base()
 ReviewBase = declarative_base()
 
-core_engine = _create_sqlite_engine(CORE_DATABASE_URL)
-content_engine = _create_sqlite_engine(CONTENT_DATABASE_URL)
-legacy_engine = _create_sqlite_engine(LEGACY_DATABASE_URL)
-agent_engine = _create_sqlite_engine(AGENT_DATABASE_URL)
-runtime_engine = _create_sqlite_engine(RUNTIME_DATABASE_URL)
-review_engine = _create_sqlite_engine(REVIEW_DATABASE_URL)
+core_engine = _create_engine_for_url(CORE_DATABASE_URL)
+content_engine = _create_engine_for_url(CONTENT_DATABASE_URL)
+legacy_engine = _create_engine_for_url(LEGACY_DATABASE_URL)
+agent_engine = _create_engine_for_url(AGENT_DATABASE_URL)
+runtime_engine = _create_engine_for_url(RUNTIME_DATABASE_URL)
+review_engine = _create_engine_for_url(REVIEW_DATABASE_URL)
 
 CoreSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=core_engine)
 ContentSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=content_engine)

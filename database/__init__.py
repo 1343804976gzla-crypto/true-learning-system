@@ -30,8 +30,10 @@ from .domains import (
     get_db,
     get_review_db,
     get_sqlite_path,
+    normalize_database_url,
     review_engine,
     runtime_engine,
+    schema_auto_create_enabled,
 )
 
 __all__ = [
@@ -66,6 +68,8 @@ __all__ = [
     "get_db",
     "get_review_db",
     "get_sqlite_path",
+    "normalize_database_url",
     "review_engine",
     "runtime_engine",
+    "schema_auto_create_enabled",
 ]

@@ -1,0 +1,25 @@
+{
+	admin off
+}
+
+{$TLS_PUBLIC_HOSTNAME:localhost} {
+	encode zstd gzip
+
+	request_body {
+		max_size {$TLS_MAX_REQUEST_BODY:32MB}
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https:; connect-src 'self' https: wss:; img-src 'self' data: blob: https:; font-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
+	}
+
+	@https expression `{scheme} == "https"`
+	header @https Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	reverse_proxy app:8000
+}
