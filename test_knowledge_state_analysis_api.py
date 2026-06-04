@@ -185,6 +185,44 @@ def test_analyze_knowledge_state_ignores_attacker_scope_and_uses_actor_scope(cli
         assert profile.scope_key == DEFAULT_SCOPE_KEY
 
 
+def test_analyze_knowledge_state_offloads_sync_analysis_to_threadpool(client, session_factory, monkeypatch):
+    with session_factory() as db:
+        session = _completed_session("session-threadpool")
+        db.add(session)
+        db.commit()
+
+    calls = {"threadpool": 0, "analysis": 0}
+
+    async def fake_run_in_threadpool(func):
+        calls["threadpool"] += 1
+        return func()
+
+    def fake_analyze_completed_session(db, session_id, *, scope_key, llm_client):
+        calls["analysis"] += 1
+        assert session_id == "session-threadpool"
+        assert scope_key == DEFAULT_SCOPE_KEY
+        return {
+            "analysis_id": "event-1",
+            "popup_title": "Knowledge states updated",
+            "overall_summary": "Summary",
+            "overall_trend": "observed",
+            "cards": [],
+            "low_reliability_notes": [],
+            "fallback_used": True,
+        }
+
+    monkeypatch.setattr(tracking_module, "run_in_threadpool", fake_run_in_threadpool, raising=False)
+    monkeypatch.setattr(tracking_module, "analyze_completed_session", fake_analyze_completed_session)
+
+    response = client.post(
+        "/api/tracking/knowledge-state/analyze",
+        json={"session_id": "session-threadpool", "scope_key": "attacker-scope"},
+    )
+
+    assert response.status_code == 200
+    assert calls == {"threadpool": 1, "analysis": 1}
+
+
 def test_latest_knowledge_state_returns_403_for_mismatched_scope(client, session_factory):
     with session_factory() as db:
         db.add(

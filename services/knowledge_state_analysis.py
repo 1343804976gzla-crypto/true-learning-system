@@ -516,6 +516,18 @@ def _next_action_for_state(state: str) -> Dict[str, str]:
     return dict(NEXT_ACTION_BY_STATE[state])
 
 
+def _valid_llm_next_action(value: Any) -> Optional[Dict[str, str]]:
+    if not isinstance(value, dict):
+        return None
+    action_type = value.get("type")
+    label = value.get("label")
+    if not isinstance(action_type, str) or not action_type.strip():
+        return None
+    if not isinstance(label, str) or not label.strip():
+        return None
+    return {"type": action_type.strip(), "label": label.strip()}
+
+
 def _load_existing_event(
     db: Session,
     *,
@@ -682,8 +694,8 @@ def _validated_llm_cards(
             card["interesting_insight"] = str(raw_card["interesting_insight"])[:240]
         if isinstance(raw_card.get("evidence_summary"), list):
             card["evidence_summary"] = raw_card["evidence_summary"]
-        if current_state == fallback_state and isinstance(raw_card.get("next_action"), dict):
-            card["next_action"] = raw_card["next_action"]
+        if current_state == fallback_state:
+            card["next_action"] = _valid_llm_next_action(raw_card.get("next_action")) or _next_action_for_state(current_state)
         cards.append(card)
         seen.add(knowledge_point)
 

@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from api_contracts import KnowledgeStateAnalyzeResponse
 from database.domains import ContentBase, CoreBase, ReviewBase, RuntimeBase
 from learning_tracking_models import (
     KnowledgeStateEvent,
@@ -460,6 +461,69 @@ def test_analyze_completed_session_preserves_sure_wrong_guardrail_for_llm_master
         assert result["popup_title"] == "Model narrative title"
         assert result["cards"][0]["current_state"] == "Illusion of Competence"
         assert db.query(KnowledgeStateProfile).one().current_state == "Illusion of Competence"
+    finally:
+        _close_db(db, engine)
+
+
+def test_analyze_completed_session_rejects_malformed_llm_next_action_for_unchanged_state():
+    db, engine = _make_db()
+    try:
+        session = LearningSession(
+            id="session-llm-malformed-action",
+            user_id="u1",
+            device_id="d1",
+            session_type="detail_practice",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now() - timedelta(minutes=10),
+            completed_at=datetime.now(),
+            total_questions=2,
+            answered_questions=2,
+            correct_count=2,
+            wrong_count=0,
+            accuracy=1.0,
+        )
+        db.add(session)
+        for index in range(2):
+            db.add(
+                QuestionRecord(
+                    user_id="u1",
+                    device_id="d1",
+                    session_id=session.id,
+                    question_index=index,
+                    question_type="A1",
+                    difficulty="basic",
+                    question_text=f"Preload definition question {index}",
+                    options={"A": "Correct", "B": "Wrong"},
+                    correct_answer="A",
+                    user_answer="A",
+                    is_correct=True,
+                    confidence="sure",
+                    key_point="Preload definition",
+                    answered_at=datetime.now() + timedelta(seconds=index),
+                )
+            )
+        db.commit()
+        llm_client = FakeKnowledgeStateLLM(
+            {
+                "popup_title": "Model title",
+                "overall_summary": "Model summary",
+                "overall_trend": "observed",
+                "cards": [
+                    {
+                        "knowledge_point": "Preload definition",
+                        "current_state": "True Mastery",
+                        "next_action": {"type": "custom"},
+                    }
+                ],
+            }
+        )
+
+        result = analyze_completed_session(db, "session-llm-malformed-action", scope_key="u:u1", llm_client=llm_client)
+
+        action = result["cards"][0]["next_action"]
+        assert action["type"] == "advance"
+        assert action["label"]
+        KnowledgeStateAnalyzeResponse(**result)
     finally:
         _close_db(db, engine)
 

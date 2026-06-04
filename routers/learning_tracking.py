@@ -6,6 +6,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 from datetime import datetime, date, timedelta
@@ -1246,11 +1247,13 @@ async def analyze_knowledge_state(
 
     resolved_scope_key = build_storage_scope_key(user_id=session.user_id, device_id=session.device_id)
     try:
-        return analyze_completed_session(
-            db,
-            body.session_id,
-            scope_key=resolved_scope_key,
-            llm_client=ApiHubKnowledgeStateLlm(),
+        return await run_in_threadpool(
+            lambda: analyze_completed_session(
+                db,
+                body.session_id,
+                scope_key=resolved_scope_key,
+                llm_client=ApiHubKnowledgeStateLlm(),
+            )
         )
     except ValueError as exc:
         reason = str(exc)
