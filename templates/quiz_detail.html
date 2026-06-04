@@ -1251,8 +1251,8 @@
     }
 
     async function completeDetailTrackingSession(score, totalQuestions) {
-        if (typeof detailTrackingSessionId === 'undefined' || !detailTrackingSessionId) return;
-        if (typeof safeFetch !== 'function') return;
+        if (typeof detailTrackingSessionId === 'undefined' || !detailTrackingSessionId) return false;
+        if (typeof safeFetch !== 'function') return false;
         try {
             await safeFetch('/api/tracking/session/' + detailTrackingSessionId + '/complete', {
                 method: 'POST',
@@ -1263,16 +1263,18 @@
                 })
             }, '操作失败');
             console.log('[Tracking] 细节练习会话完成');
+            return true;
         } catch (error) {
             console.error('[Tracking] 完成细节练习会话失败:', error);
+            return false;
         }
     }
 
     const originalCompleteDetailTrackingSession = completeDetailTrackingSession;
     completeDetailTrackingSession = async function(score, totalQuestions) {
-        await originalCompleteDetailTrackingSession(score, totalQuestions);
+        const trackingCompleted = await originalCompleteDetailTrackingSession(score, totalQuestions);
         try {
-            if (typeof showKnowledgeStateAfterPractice === 'function' && detailTrackingSessionId) {
+            if (trackingCompleted && typeof showKnowledgeStateAfterPractice === 'function' && detailTrackingSessionId) {
                 await showKnowledgeStateAfterPractice(detailTrackingSessionId, {
                     trigger: 'detail_practice_completed'
                 });

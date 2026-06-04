@@ -3,6 +3,10 @@ from pathlib import Path
 
 def test_quiz_detail_loads_knowledge_state_popup_and_invokes_detail_session():
     content = Path("templates/quiz_detail.html").read_text(encoding="utf-8")
+    completion_function = content[
+        content.index("async function completeDetailTrackingSession"):
+        content.index("const originalCompleteDetailTrackingSession")
+    ]
     wrapper = content[
         content.index("const originalCompleteDetailTrackingSession"):
         content.index("async function generateVariationQuestions")
@@ -10,6 +14,10 @@ def test_quiz_detail_loads_knowledge_state_popup_and_invokes_detail_session():
 
     assert "/static/js/knowledge-state-popup.js" in content
     assert "showKnowledgeStateAfterPractice(detailTrackingSessionId" in content
+    assert "return true;" in completion_function
+    assert completion_function.count("return false;") >= 3
+    assert "const trackingCompleted = await originalCompleteDetailTrackingSession(score, totalQuestions);" in wrapper
+    assert "trackingCompleted &&" in wrapper
     assert "try {" in wrapper
     assert "catch (error)" in wrapper
     assert wrapper.index("catch (error)") < wrapper.index("bumpKnowledgePracticeCount(currentKnowledge)")
