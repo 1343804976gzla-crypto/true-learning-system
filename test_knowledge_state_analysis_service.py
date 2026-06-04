@@ -252,3 +252,68 @@ def test_analyze_completed_session_marks_missing_confidence_low_reliability():
         assert result["low_reliability_notes"]
     finally:
         _close_db(db, engine)
+
+
+def test_analyze_completed_session_uses_storage_scope_key_for_implicit_wrong_memory(monkeypatch):
+    monkeypatch.setenv("SINGLE_USER_MODE", "false")
+    db, engine = _make_db()
+    try:
+        session = LearningSession(
+            id="session-implicit-scope",
+            user_id="u1",
+            device_id="d1",
+            session_type="detail_practice",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now() - timedelta(minutes=10),
+            completed_at=datetime.now(),
+            total_questions=1,
+            answered_questions=1,
+            correct_count=0,
+            wrong_count=1,
+            accuracy=0.0,
+        )
+        db.add(session)
+        db.add(
+            QuestionRecord(
+                user_id="u1",
+                device_id="d1",
+                session_id=session.id,
+                question_index=0,
+                question_type="A1",
+                difficulty="basic",
+                question_text="Which receptor mediates the reflex?",
+                options={"A": "Baroreceptor", "B": "Chemoreceptor"},
+                correct_answer="A",
+                user_answer="B",
+                is_correct=False,
+                confidence="unsure",
+                key_point="Baroreflex receptor",
+                answered_at=datetime.now(),
+            )
+        )
+        db.add(
+            WrongAnswerV2(
+                user_id="u1",
+                device_id="d1",
+                scope_key="user:u1",
+                question_fingerprint="fp-implicit-scope",
+                question_text="Which receptor mediates the reflex?",
+                options={"A": "Baroreceptor", "B": "Chemoreceptor"},
+                correct_answer="A",
+                key_point="Baroreflex receptor",
+                error_count=3,
+                encounter_count=3,
+                retry_count=0,
+                severity_tag="stubborn",
+                mastery_status="active",
+            )
+        )
+        db.commit()
+
+        result = analyze_completed_session(db, "session-implicit-scope", llm_client=None)
+
+        assert result["cards"][0]["current_state"] == "Stubborn Error"
+        assert "stubborn_memory" in result["cards"][0]["guardrail_flags"]
+        assert db.query(KnowledgeStateProfile).one().scope_key == "user:u1"
+    finally:
+        _close_db(db, engine)

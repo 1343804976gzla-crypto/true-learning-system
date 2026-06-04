@@ -15,6 +15,7 @@ from learning_tracking_models import (
     QuestionRecord,
     WrongAnswerV2,
 )
+from services.data_identity import build_storage_scope_key
 from utils.data_contracts import normalize_confidence
 
 
@@ -176,10 +177,8 @@ def analyze_completed_session(
 def _resolve_scope_key(session: LearningSession, explicit_scope_key: Optional[str]) -> str:
     if explicit_scope_key:
         return explicit_scope_key
-    if session.user_id:
-        return f"u:{session.user_id}"
-    if session.device_id:
-        return f"d:{session.device_id}"
+    if session.user_id or session.device_id:
+        return build_storage_scope_key(user_id=session.user_id, device_id=session.device_id)
     return "anonymous"
 
 
