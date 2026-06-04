@@ -51,7 +51,7 @@ from services.data_identity import (
     build_storage_scope_key,
     resolve_request_actor_scope,
 )
-from services.knowledge_state_analysis import analyze_completed_session
+from services.knowledge_state_analysis import ApiHubKnowledgeStateLlm, analyze_completed_session
 
 logger = logging.getLogger(__name__)
 
@@ -1250,7 +1250,7 @@ async def analyze_knowledge_state(
             db,
             body.session_id,
             scope_key=resolved_scope_key,
-            llm_client=None,
+            llm_client=ApiHubKnowledgeStateLlm(),
         )
     except ValueError as exc:
         reason = str(exc)

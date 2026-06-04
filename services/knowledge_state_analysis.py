@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import inspect
+import asyncio
+import threading
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -43,6 +46,93 @@ NEXT_ACTION_BY_STATE = {
     STATE_STUBBORN: {"type": "redo_stubborn_errors", "label": "Break down the repeated wrong-answer pattern"},
     STATE_EXAM_TRANSFER: {"type": "exam_transfer_check", "label": "Practice exam-style transfer"},
 }
+
+
+class ApiHubKnowledgeStateLlm:
+    def analyze_knowledge_state(self, evidence_packet: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        try:
+            from services.api_hub.facade import get_ai_client
+        except Exception:
+            return None
+
+        try:
+            ai = get_ai_client()
+            if ai is None or not hasattr(ai, "generate_json"):
+                return None
+
+            prompt = (
+                "你是学习系统的知识状态分析助手。请基于下面的 evidence_packet 生成知识状态弹窗文案。\n"
+                "只输出 JSON，不要输出 Markdown、解释文字或代码块。\n"
+                "不要编造 evidence_packet 中不存在的做题证据、错题记忆或置信度。\n"
+                "必须解释每个知识点 previous_state -> current_state 的状态变化原因。\n"
+                "如果出现高自信答错（sure_wrong），current_state 不能是 True Mastery，"
+                "应保持或解释为 Illusion of Competence。\n\n"
+                f"evidence_packet:\n{json.dumps(evidence_packet, ensure_ascii=False)}"
+            )
+            schema = {
+                "type": "object",
+                "properties": {
+                    "popup_title": {"type": "string"},
+                    "overall_summary": {"type": "string"},
+                    "overall_trend": {"type": "string"},
+                    "cards": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "knowledge_point": {"type": "string"},
+                                "previous_state": {"type": ["string", "null"]},
+                                "current_state": {"type": "string"},
+                                "state_confidence": {"type": "string"},
+                                "transition": {"type": "string"},
+                                "interesting_insight": {"type": "string"},
+                                "evidence_summary": {"type": "array", "items": {"type": "string"}},
+                                "next_action": {"type": "object"},
+                            },
+                        },
+                    },
+                    "low_reliability_notes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["popup_title", "overall_summary", "overall_trend", "cards"],
+            }
+            result = ai.generate_json(
+                prompt,
+                schema,
+                max_tokens=2200,
+                temperature=0.35,
+                use_heavy=False,
+                timeout=45,
+            )
+            if inspect.isawaitable(result):
+                result = _run_awaitable(result)
+            return result if isinstance(result, dict) else None
+        except Exception:
+            return None
+
+
+def _run_awaitable(awaitable: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+
+    outcome: Dict[str, Any] = {}
+
+    def runner() -> None:
+        try:
+            outcome["result"] = asyncio.run(awaitable)
+        except Exception as exc:
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=runner)
+    thread.start()
+    thread.join()
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("result")
 
 
 def analyze_completed_session(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine
@@ -15,7 +17,7 @@ from learning_tracking_models import (
     SessionStatus,
     WrongAnswerV2,
 )
-from services.knowledge_state_analysis import analyze_completed_session
+from services.knowledge_state_analysis import ApiHubKnowledgeStateLlm, analyze_completed_session
 
 
 class FakeKnowledgeStateLLM:
@@ -399,6 +401,108 @@ def test_analyze_completed_session_recomputes_transition_and_action_for_llm_stat
         assert event.transition == "risk_regressed"
     finally:
         _close_db(db, engine)
+
+
+def test_analyze_completed_session_preserves_sure_wrong_guardrail_for_llm_mastery_override():
+    db, engine = _make_db()
+    try:
+        session = LearningSession(
+            id="session-llm-sure-wrong",
+            user_id="u1",
+            device_id="d1",
+            session_type="detail_practice",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now() - timedelta(minutes=10),
+            completed_at=datetime.now(),
+            total_questions=1,
+            answered_questions=1,
+            correct_count=0,
+            wrong_count=1,
+            accuracy=0.0,
+        )
+        db.add(session)
+        db.add(
+            QuestionRecord(
+                user_id="u1",
+                device_id="d1",
+                session_id=session.id,
+                question_index=0,
+                question_type="A1",
+                difficulty="basic",
+                question_text="Which ion drives resting membrane potential?",
+                options={"A": "K+", "B": "Na+"},
+                correct_answer="A",
+                user_answer="B",
+                is_correct=False,
+                confidence="sure",
+                key_point="Resting potential mechanism",
+                answered_at=datetime.now(),
+            )
+        )
+        db.commit()
+        llm_client = FakeKnowledgeStateLLM(
+            {
+                "popup_title": "Model narrative title",
+                "overall_summary": "Model summary",
+                "overall_trend": "model_trend",
+                "cards": [
+                    {
+                        "knowledge_point": "Resting potential mechanism",
+                        "current_state": "True Mastery",
+                    }
+                ],
+            }
+        )
+
+        result = analyze_completed_session(db, "session-llm-sure-wrong", scope_key="u:u1", llm_client=llm_client)
+
+        assert result["fallback_used"] is False
+        assert result["popup_title"] == "Model narrative title"
+        assert result["cards"][0]["current_state"] == "Illusion of Competence"
+        assert db.query(KnowledgeStateProfile).one().current_state == "Illusion of Competence"
+    finally:
+        _close_db(db, engine)
+
+
+def test_api_hub_knowledge_state_llm_calls_generate_json_with_production_options(monkeypatch):
+    calls = []
+
+    class FakeAiClient:
+        def generate_json(self, prompt, schema, **kwargs):
+            calls.append({"prompt": prompt, "schema": schema, "kwargs": kwargs})
+            return {"popup_title": "模型标题", "overall_summary": "摘要", "overall_trend": "observed", "cards": []}
+
+    facade_module = types.ModuleType("services.api_hub.facade")
+    facade_module.get_ai_client = lambda: FakeAiClient()
+    api_hub_module = types.ModuleType("services.api_hub")
+    monkeypatch.setitem(sys.modules, "services.api_hub", api_hub_module)
+    monkeypatch.setitem(sys.modules, "services.api_hub.facade", facade_module)
+
+    result = ApiHubKnowledgeStateLlm().analyze_knowledge_state({"knowledge_points": []})
+
+    assert result == {"popup_title": "模型标题", "overall_summary": "摘要", "overall_trend": "observed", "cards": []}
+    assert calls[0]["kwargs"]["timeout"] == 45
+    assert calls[0]["kwargs"]["use_heavy"] is False
+    assert calls[0]["kwargs"]["max_tokens"] == 2200
+    assert calls[0]["kwargs"]["temperature"] == 0.35
+    assert "只输出 JSON" in calls[0]["prompt"]
+    assert set(calls[0]["schema"]["required"]) >= {"popup_title", "overall_summary", "overall_trend", "cards"}
+
+
+def test_api_hub_knowledge_state_llm_resolves_async_generate_json(monkeypatch):
+    class FakeAiClient:
+        async def generate_json(self, prompt, schema, **kwargs):
+            return {"popup_title": "异步标题", "overall_summary": "摘要", "overall_trend": "observed", "cards": []}
+
+    facade_module = types.ModuleType("services.api_hub.facade")
+    facade_module.get_ai_client = lambda: FakeAiClient()
+    api_hub_module = types.ModuleType("services.api_hub")
+    monkeypatch.setitem(sys.modules, "services.api_hub", api_hub_module)
+    monkeypatch.setitem(sys.modules, "services.api_hub.facade", facade_module)
+
+    result = ApiHubKnowledgeStateLlm().analyze_knowledge_state({"knowledge_points": []})
+
+    assert result == {"popup_title": "异步标题", "overall_summary": "摘要", "overall_trend": "observed", "cards": []}
 
 
 def test_analyze_completed_session_is_idempotent_for_same_scope_session_and_point():
