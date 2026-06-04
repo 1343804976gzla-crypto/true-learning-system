@@ -126,7 +126,9 @@
   }
 
   function renderCard(card, index) {
-    var nextAction = card.next_action || "Continue practice";
+    var nextAction = card.next_action || {};
+    var nextActionLabel = typeof nextAction === "string" ? nextAction : (nextAction.label || "继续复盘");
+    var nextActionType = typeof nextAction === "object" ? nextAction.type || "" : "";
     return [
       '<article class="ks-card">',
       '<h3 class="ks-point">' + escapeHtml(card.knowledge_point || ("Knowledge point " + (index + 1))) + "</h3>",
@@ -138,7 +140,7 @@
       '<p class="ks-insight">' + escapeHtml(card.interesting_insight || "No additional insight available.") + "</p>",
       '<span class="ks-label">Evidence</span>',
       renderEvidence(card.evidence_summary),
-      '<button type="button" class="ks-next" data-knowledge-state-next="' + index + '">' + escapeHtml(nextAction) + "</button>",
+      '<button type="button" class="ks-next" data-knowledge-state-next="' + index + '" data-action="' + escapeHtml(nextActionType) + '">' + escapeHtml(nextActionLabel) + "</button>",
       "</article>"
     ].join("");
   }
