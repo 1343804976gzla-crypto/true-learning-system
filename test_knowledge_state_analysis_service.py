@@ -18,6 +18,14 @@ from learning_tracking_models import (
 from services.knowledge_state_analysis import analyze_completed_session
 
 
+class FakeKnowledgeStateLLM:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def analyze_knowledge_state(self, evidence_packet):
+        return self.payload
+
+
 def _make_db():
     engine = create_engine(
         "sqlite:///:memory:",
@@ -315,5 +323,195 @@ def test_analyze_completed_session_uses_storage_scope_key_for_implicit_wrong_mem
         assert result["cards"][0]["current_state"] == "Stubborn Error"
         assert "stubborn_memory" in result["cards"][0]["guardrail_flags"]
         assert db.query(KnowledgeStateProfile).one().scope_key == "user:u1"
+    finally:
+        _close_db(db, engine)
+
+
+def test_analyze_completed_session_recomputes_transition_and_action_for_llm_state_override():
+    db, engine = _make_db()
+    try:
+        db.add(
+            KnowledgeStateProfile(
+                scope_key="u:u1",
+                user_id="u1",
+                device_id="d1",
+                knowledge_point="Cardiac output regulation",
+                current_state="True Mastery",
+                state_confidence="medium",
+                last_transition="mastery_stabilized",
+                last_session_id="old-session",
+            )
+        )
+        session = LearningSession(
+            id="session-llm-override",
+            user_id="u1",
+            device_id="d1",
+            session_type="detail_practice",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now() - timedelta(minutes=10),
+            completed_at=datetime.now(),
+            total_questions=2,
+            answered_questions=2,
+            correct_count=2,
+            wrong_count=0,
+            accuracy=1.0,
+        )
+        db.add(session)
+        for index in range(2):
+            db.add(
+                QuestionRecord(
+                    user_id="u1",
+                    device_id="d1",
+                    session_id=session.id,
+                    question_index=index,
+                    question_type="A1",
+                    difficulty="basic",
+                    question_text=f"Cardiac output regulation question {index}",
+                    options={"A": "Correct", "B": "Wrong"},
+                    correct_answer="A",
+                    user_answer="A",
+                    is_correct=True,
+                    confidence="sure",
+                    key_point="Cardiac output regulation",
+                    answered_at=datetime.now() + timedelta(seconds=index),
+                )
+            )
+        db.commit()
+        llm_client = FakeKnowledgeStateLLM(
+            {
+                "cards": [
+                    {
+                        "knowledge_point": "Cardiac output regulation",
+                        "current_state": "Conscious Weakness",
+                    }
+                ]
+            }
+        )
+
+        result = analyze_completed_session(db, "session-llm-override", scope_key="u:u1", llm_client=llm_client)
+
+        card = result["cards"][0]
+        event = db.query(KnowledgeStateEvent).one()
+        assert card["current_state"] == "Conscious Weakness"
+        assert card["transition"] == "risk_regressed"
+        assert card["next_action"]["type"] != "advance"
+        assert event.current_state == "Conscious Weakness"
+        assert event.transition == "risk_regressed"
+    finally:
+        _close_db(db, engine)
+
+
+def test_analyze_completed_session_is_idempotent_for_same_scope_session_and_point():
+    db, engine = _make_db()
+    try:
+        session = LearningSession(
+            id="session-idempotent",
+            user_id="u1",
+            device_id="d1",
+            session_type="detail_practice",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now() - timedelta(minutes=10),
+            completed_at=datetime.now(),
+            total_questions=1,
+            answered_questions=1,
+            correct_count=0,
+            wrong_count=1,
+            accuracy=0.0,
+        )
+        db.add(session)
+        db.add(
+            QuestionRecord(
+                user_id="u1",
+                device_id="d1",
+                session_id=session.id,
+                question_index=0,
+                question_type="A1",
+                difficulty="basic",
+                question_text="Which ion drives resting membrane potential?",
+                options={"A": "K+", "B": "Na+"},
+                correct_answer="A",
+                user_answer="B",
+                is_correct=False,
+                confidence="sure",
+                key_point="Resting potential mechanism",
+                answered_at=datetime.now(),
+            )
+        )
+        db.commit()
+
+        first = analyze_completed_session(db, "session-idempotent", scope_key="u:u1", llm_client=None)
+        second = analyze_completed_session(db, "session-idempotent", scope_key="u:u1", llm_client=None)
+
+        assert db.query(KnowledgeStateEvent).count() == 1
+        assert first["cards"][0]["transition"] == "first_observed"
+        assert second["cards"][0]["transition"] == "first_observed"
+        assert db.query(KnowledgeStateProfile).one().last_transition == "first_observed"
+    finally:
+        _close_db(db, engine)
+
+
+def test_analyze_completed_session_uses_answered_record_over_null_answered_placeholder():
+    db, engine = _make_db()
+    try:
+        session = LearningSession(
+            id="session-null-ordering",
+            user_id="u1",
+            device_id="d1",
+            session_type="detail_practice",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now() - timedelta(minutes=10),
+            completed_at=datetime.now(),
+            total_questions=1,
+            answered_questions=1,
+            correct_count=1,
+            wrong_count=0,
+            accuracy=1.0,
+        )
+        db.add(session)
+        db.add(
+            QuestionRecord(
+                user_id="u1",
+                device_id="d1",
+                session_id=session.id,
+                question_index=0,
+                question_type="A1",
+                difficulty="basic",
+                question_text="What is preload?",
+                options={"A": "End diastolic stretch", "B": "Pressure after ejection"},
+                correct_answer="A",
+                user_answer="A",
+                is_correct=True,
+                confidence="sure",
+                key_point="Preload definition",
+                answered_at=datetime.now() - timedelta(minutes=1),
+            )
+        )
+        db.flush()
+        db.add(
+            QuestionRecord(
+                user_id="u1",
+                device_id="d1",
+                session_id=session.id,
+                question_index=0,
+                question_type="A1",
+                difficulty="basic",
+                question_text="Placeholder draft",
+                options={"A": "End diastolic stretch", "B": "Pressure after ejection"},
+                correct_answer="A",
+                user_answer=None,
+                is_correct=False,
+                confidence="sure",
+                key_point="Preload definition",
+                answered_at=None,
+            )
+        )
+        db.commit()
+
+        result = analyze_completed_session(db, "session-null-ordering", scope_key="u:u1", llm_client=None)
+
+        evidence = db.query(KnowledgeStateProfile).one().evidence_snapshot
+        assert result["cards"][0]["current_state"] == "True Mastery"
+        assert evidence["correct_count"] == 1
+        assert evidence["wrong_count"] == 0
     finally:
         _close_db(db, engine)

@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from learning_tracking_models import (
@@ -33,6 +33,15 @@ STATE_PRIORITY = {
     STATE_WEAKNESS: 3,
     STATE_LUCKY: 4,
     STATE_TRUE_MASTERY: 5,
+}
+
+NEXT_ACTION_BY_STATE = {
+    STATE_TRUE_MASTERY: {"type": "advance", "label": "Move to mixed transfer questions"},
+    STATE_ILLUSION: {"type": "concept_rebuild", "label": "Rebuild the concept before more drills"},
+    STATE_LUCKY: {"type": "explain_rule", "label": "Explain the rule in your own words"},
+    STATE_WEAKNESS: {"type": "concept_patch", "label": "Patch the concept and retry similar questions"},
+    STATE_STUBBORN: {"type": "redo_stubborn_errors", "label": "Break down the repeated wrong-answer pattern"},
+    STATE_EXAM_TRANSFER: {"type": "exam_transfer_check", "label": "Practice exam-style transfer"},
 }
 
 
@@ -130,6 +139,18 @@ def analyze_completed_session(
     evidence_by_point = {item["knowledge_point"]: item for item in evidence_points}
     for card in cards:
         point_evidence = evidence_by_point[card["knowledge_point"]]
+        existing_event = _load_existing_event(
+            db,
+            scope_key=resolved_scope_key,
+            session_id=session_id,
+            knowledge_point=card["knowledge_point"],
+        )
+        if existing_event is not None:
+            persisted_card = _card_from_existing_event(existing_event, fallback_card=card)
+            persisted_card["event_id"] = existing_event.id
+            persisted_cards.append(persisted_card)
+            continue
+
         profile = _upsert_profile(
             db,
             session=session,
@@ -189,7 +210,11 @@ def _latest_session_records(db: Session, session_id: str) -> List[QuestionRecord
             func.row_number()
             .over(
                 partition_by=(QuestionRecord.session_id, QuestionRecord.question_index),
-                order_by=(QuestionRecord.answered_at.desc(), QuestionRecord.id.desc()),
+                order_by=(
+                    case((QuestionRecord.answered_at.is_(None), 1), else_=0),
+                    QuestionRecord.answered_at.desc(),
+                    QuestionRecord.id.desc(),
+                ),
             )
             .label("row_number"),
         )
@@ -397,6 +422,47 @@ def _transition(previous_state: Optional[str], current_state: str) -> str:
     return "state_changed"
 
 
+def _next_action_for_state(state: str) -> Dict[str, str]:
+    return dict(NEXT_ACTION_BY_STATE[state])
+
+
+def _load_existing_event(
+    db: Session,
+    *,
+    scope_key: str,
+    session_id: str,
+    knowledge_point: str,
+) -> Optional[KnowledgeStateEvent]:
+    return (
+        db.query(KnowledgeStateEvent)
+        .filter(
+            KnowledgeStateEvent.scope_key == scope_key,
+            KnowledgeStateEvent.session_id == session_id,
+            KnowledgeStateEvent.knowledge_point == knowledge_point,
+        )
+        .order_by(KnowledgeStateEvent.id.asc())
+        .first()
+    )
+
+
+def _card_from_existing_event(
+    event: KnowledgeStateEvent,
+    *,
+    fallback_card: Dict[str, Any],
+) -> Dict[str, Any]:
+    llm_analysis = event.llm_analysis if isinstance(event.llm_analysis, dict) else {}
+    stored_card = llm_analysis.get("card") if isinstance(llm_analysis.get("card"), dict) else None
+    card = dict(stored_card or fallback_card)
+    card.setdefault("knowledge_point", event.knowledge_point)
+    card.setdefault("previous_state", event.previous_state)
+    card.setdefault("current_state", event.current_state)
+    card.setdefault("state_confidence", event.state_confidence)
+    card.setdefault("transition", event.transition)
+    card.setdefault("guardrail_flags", event.guardrail_flags or [])
+    card.setdefault("next_action", _next_action_for_state(card["current_state"]))
+    return card
+
+
 def _fallback_card(
     *,
     knowledge_point: str,
@@ -416,15 +482,6 @@ def _fallback_card(
         "state_stable": "This point stayed in the same state after new evidence.",
         "state_changed": "New evidence changed the current state estimate.",
     }
-    next_action_by_state = {
-        STATE_TRUE_MASTERY: {"type": "advance", "label": "Move to mixed transfer questions"},
-        STATE_ILLUSION: {"type": "concept_rebuild", "label": "Rebuild the concept before more drills"},
-        STATE_LUCKY: {"type": "explain_rule", "label": "Explain the rule in your own words"},
-        STATE_WEAKNESS: {"type": "concept_patch", "label": "Patch the concept and retry similar questions"},
-        STATE_STUBBORN: {"type": "redo_stubborn_errors", "label": "Break down the repeated wrong-answer pattern"},
-        STATE_EXAM_TRANSFER: {"type": "exam_transfer_check", "label": "Practice exam-style transfer"},
-    }
-
     evidence_summary = [
         (
             f"{metrics.get('attempt_count', 0)} attempts, "
@@ -451,7 +508,7 @@ def _fallback_card(
         "transition": transition,
         "interesting_insight": insight_by_transition[transition],
         "evidence_summary": evidence_summary,
-        "next_action": next_action_by_state[current_state],
+        "next_action": _next_action_for_state(current_state),
         "guardrail_flags": list(guardrail_flags),
     }
 
@@ -526,12 +583,16 @@ def _validated_llm_cards(
         if "sure_wrong" in fallback["guardrail_flags"]:
             current_state = STATE_ILLUSION
         card = dict(fallback)
+        fallback_state = card["current_state"]
         card["current_state"] = current_state
+        if current_state != fallback_state:
+            card["transition"] = _transition(card.get("previous_state"), current_state)
+            card["next_action"] = _next_action_for_state(current_state)
         if raw_card.get("interesting_insight"):
             card["interesting_insight"] = str(raw_card["interesting_insight"])[:240]
         if isinstance(raw_card.get("evidence_summary"), list):
             card["evidence_summary"] = raw_card["evidence_summary"]
-        if isinstance(raw_card.get("next_action"), dict):
+        if current_state == fallback_state and isinstance(raw_card.get("next_action"), dict):
             card["next_action"] = raw_card["next_action"]
         cards.append(card)
         seen.add(knowledge_point)
