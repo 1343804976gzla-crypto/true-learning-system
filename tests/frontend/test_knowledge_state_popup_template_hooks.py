@@ -18,6 +18,8 @@ def test_quiz_detail_loads_knowledge_state_popup_and_invokes_detail_session():
     assert completion_function.count("return false;") >= 3
     assert "const trackingCompleted = await originalCompleteDetailTrackingSession(score, totalQuestions);" in wrapper
     assert "trackingCompleted &&" in wrapper
+    assert "return trackingCompleted;" in wrapper
+    assert "return;" not in wrapper
     assert "try {" in wrapper
     assert "catch (error)" in wrapper
     assert wrapper.index("catch (error)") < wrapper.index("bumpKnowledgePracticeCount(currentKnowledge)")

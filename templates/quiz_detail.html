@@ -1282,13 +1282,14 @@
         } catch (error) {
             console.error('[KnowledgeState] 显示细节练习知识状态弹窗失败:', error);
         }
-        if (typeof detailTrackingCompleted === 'undefined') return;
-        if (typeof detailTrackingSessionId === 'undefined') return;
-        if (typeof bumpKnowledgePracticeCount !== 'function') return;
+        if (typeof detailTrackingCompleted === 'undefined') return trackingCompleted;
+        if (typeof detailTrackingSessionId === 'undefined') return trackingCompleted;
+        if (typeof bumpKnowledgePracticeCount !== 'function') return trackingCompleted;
         if (!detailTrackingCompleted && currentKnowledge && detailTrackingSessionId) {
             detailTrackingCompleted = true;
             bumpKnowledgePracticeCount(currentKnowledge);
         }
+        return trackingCompleted;
     };
 
     async function generateVariationQuestions(keyPoint) {
