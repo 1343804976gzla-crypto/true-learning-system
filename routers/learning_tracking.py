@@ -46,7 +46,11 @@ from utils.data_contracts import (
     canonicalize_learning_activity_data,
     normalize_confidence,
 )
-from services.data_identity import DEFAULT_DEVICE_ID, resolve_request_actor_scope
+from services.data_identity import (
+    DEFAULT_DEVICE_ID,
+    build_storage_scope_key,
+    resolve_request_actor_scope,
+)
 from services.knowledge_state_analysis import analyze_completed_session
 
 logger = logging.getLogger(__name__)
@@ -1231,11 +1235,21 @@ async def analyze_knowledge_state(
     body: KnowledgeStateAnalyzeRequest,
     db: Session = Depends(get_db),
 ):
+    request_actor = resolve_request_actor_scope()
+    session = _get_scoped_learning_session(
+        db,
+        body.session_id,
+        actor=request_actor,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="session_not_found")
+
+    resolved_scope_key = build_storage_scope_key(user_id=session.user_id, device_id=session.device_id)
     try:
         return analyze_completed_session(
             db,
             body.session_id,
-            scope_key=body.scope_key,
+            scope_key=resolved_scope_key,
             llm_client=None,
         )
     except ValueError as exc:
@@ -1249,14 +1263,22 @@ async def analyze_knowledge_state(
 
 @router.get("/knowledge-state/latest", response_model=KnowledgeStateLatestResponse)
 async def get_latest_knowledge_state(
-    scope_key: str = Query(...),
+    scope_key: Optional[str] = Query(None),
     knowledge_point: str = Query(...),
     db: Session = Depends(get_db),
 ):
+    request_actor = resolve_request_actor_scope()
+    resolved_scope_key = build_storage_scope_key(
+        user_id=request_actor.get("candidate_user_id"),
+        device_id=request_actor.get("candidate_device_id"),
+    )
+    if scope_key is not None and scope_key != resolved_scope_key:
+        raise HTTPException(status_code=403, detail="scope_key_forbidden")
+
     profile = (
         db.query(KnowledgeStateProfile)
         .filter(
-            KnowledgeStateProfile.scope_key == scope_key,
+            KnowledgeStateProfile.scope_key == resolved_scope_key,
             KnowledgeStateProfile.knowledge_point == knowledge_point,
         )
         .one_or_none()
