@@ -18,6 +18,9 @@ import uuid
 from api_contracts import (
     ActivityRecordedResponse,
     KnowledgeArchiveResponse,
+    KnowledgeStateAnalyzeRequest,
+    KnowledgeStateAnalyzeResponse,
+    KnowledgeStateLatestResponse,
     KnowledgeTreeResponse,
     MarkdownExportResponse,
     OcrPlanBoardResponse,
@@ -36,7 +39,7 @@ from models import get_db, Chapter, DailyUpload
 from learning_tracking_models import (
     LearningSession, LearningActivity, QuestionRecord,
     DailyLearningLog, LearningInsight, SessionStatus, ActivityType,
-    WrongAnswerV2, make_fingerprint, INVALID_CHAPTER_IDS
+    WrongAnswerV2, KnowledgeStateProfile, make_fingerprint, INVALID_CHAPTER_IDS
 )
 from utils.data_contracts import (
     canonicalize_answer_changes,
@@ -44,6 +47,7 @@ from utils.data_contracts import (
     normalize_confidence,
 )
 from services.data_identity import DEFAULT_DEVICE_ID, resolve_request_actor_scope
+from services.knowledge_state_analysis import analyze_completed_session
 
 logger = logging.getLogger(__name__)
 
@@ -1219,6 +1223,62 @@ async def complete_learning_session(
         "score": body.score,
         "accuracy": round(session.accuracy * 100, 1),
         "duration": session.duration_seconds
+    }
+
+
+@router.post("/knowledge-state/analyze", response_model=KnowledgeStateAnalyzeResponse)
+async def analyze_knowledge_state(
+    body: KnowledgeStateAnalyzeRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return analyze_completed_session(
+            db,
+            body.session_id,
+            scope_key=body.scope_key,
+            llm_client=None,
+        )
+    except ValueError as exc:
+        reason = str(exc)
+        if reason == "session_not_found":
+            raise HTTPException(status_code=404, detail=reason) from exc
+        if reason == "session_has_no_question_records":
+            raise HTTPException(status_code=400, detail=reason) from exc
+        raise HTTPException(status_code=400, detail=reason) from exc
+
+
+@router.get("/knowledge-state/latest", response_model=KnowledgeStateLatestResponse)
+async def get_latest_knowledge_state(
+    scope_key: str = Query(...),
+    knowledge_point: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    profile = (
+        db.query(KnowledgeStateProfile)
+        .filter(
+            KnowledgeStateProfile.scope_key == scope_key,
+            KnowledgeStateProfile.knowledge_point == knowledge_point,
+        )
+        .one_or_none()
+    )
+    if profile is None:
+        raise HTTPException(status_code=404, detail="knowledge_state_profile_not_found")
+
+    return {
+        "id": profile.id,
+        "scope_key": profile.scope_key,
+        "user_id": profile.user_id,
+        "device_id": profile.device_id,
+        "knowledge_point": profile.knowledge_point,
+        "current_state": profile.current_state,
+        "state_confidence": profile.state_confidence,
+        "stability_score": profile.stability_score or 0.0,
+        "calibration_score": profile.calibration_score or 0.0,
+        "last_transition": profile.last_transition,
+        "last_session_id": profile.last_session_id,
+        "evidence_snapshot": profile.evidence_snapshot,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
+        "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
     }
 
 

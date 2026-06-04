@@ -30,6 +30,56 @@ class SessionCompletedResponse(BaseModel):
     duration: int
 
 
+class KnowledgeStateAnalyzeRequest(BaseModel):
+    session_id: str
+    scope_key: Optional[str] = None
+
+
+class KnowledgeStateNextAction(BaseModel):
+    type: str
+    label: str
+
+
+class KnowledgeStateCard(BaseModel):
+    knowledge_point: str
+    previous_state: Optional[str] = None
+    current_state: str
+    state_confidence: str
+    transition: str
+    interesting_insight: str
+    evidence_summary: List[str] = Field(default_factory=list)
+    next_action: KnowledgeStateNextAction
+    guardrail_flags: List[str] = Field(default_factory=list)
+    event_id: Optional[int] = None
+
+
+class KnowledgeStateAnalyzeResponse(BaseModel):
+    analysis_id: Optional[str] = None
+    popup_title: str
+    overall_summary: str
+    overall_trend: str
+    cards: List[KnowledgeStateCard] = Field(default_factory=list)
+    low_reliability_notes: List[str] = Field(default_factory=list)
+    fallback_used: bool
+
+
+class KnowledgeStateLatestResponse(BaseModel):
+    id: int
+    scope_key: str
+    user_id: Optional[str] = None
+    device_id: Optional[str] = None
+    knowledge_point: str
+    current_state: str
+    state_confidence: str
+    stability_score: float = 0.0
+    calibration_score: float = 0.0
+    last_transition: Optional[str] = None
+    last_session_id: Optional[str] = None
+    evidence_snapshot: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class TrackingSessionListItem(BaseModel):
     id: str
     session_type: str
