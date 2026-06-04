@@ -438,6 +438,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="/static/js/knowledge-state-popup.js"></script>
 <script>
     // ========== 安全工具函数 ==========
     function escapeHtml(text) {
@@ -1270,6 +1271,11 @@
     const originalCompleteDetailTrackingSession = completeDetailTrackingSession;
     completeDetailTrackingSession = async function(score, totalQuestions) {
         await originalCompleteDetailTrackingSession(score, totalQuestions);
+        if (typeof showKnowledgeStateAfterPractice === 'function' && detailTrackingSessionId) {
+            await showKnowledgeStateAfterPractice(detailTrackingSessionId, {
+                trigger: 'detail_practice_completed'
+            });
+        }
         if (typeof detailTrackingCompleted === 'undefined') return;
         if (typeof detailTrackingSessionId === 'undefined') return;
         if (typeof bumpKnowledgePracticeCount !== 'function') return;

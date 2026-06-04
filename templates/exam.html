@@ -242,6 +242,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="/static/js/knowledge-state-popup.js"></script>
 <script>
     // ========== 安全工具函数 ==========
     function escapeHtml(text) {
@@ -869,6 +870,11 @@
                 })
             }, '操作失败');
             console.log('[Tracking] 会话完成');
+            if (typeof showKnowledgeStateAfterPractice === 'function' && trackingSessionId) {
+                await showKnowledgeStateAfterPractice(trackingSessionId, {
+                    trigger: 'exam_completed'
+                });
+            }
         } catch (error) {
             console.error('[Tracking] 完成会话失败:', error);
         }
