@@ -1271,10 +1271,14 @@
     const originalCompleteDetailTrackingSession = completeDetailTrackingSession;
     completeDetailTrackingSession = async function(score, totalQuestions) {
         await originalCompleteDetailTrackingSession(score, totalQuestions);
-        if (typeof showKnowledgeStateAfterPractice === 'function' && detailTrackingSessionId) {
-            await showKnowledgeStateAfterPractice(detailTrackingSessionId, {
-                trigger: 'detail_practice_completed'
-            });
+        try {
+            if (typeof showKnowledgeStateAfterPractice === 'function' && detailTrackingSessionId) {
+                await showKnowledgeStateAfterPractice(detailTrackingSessionId, {
+                    trigger: 'detail_practice_completed'
+                });
+            }
+        } catch (error) {
+            console.error('[KnowledgeState] 显示细节练习知识状态弹窗失败:', error);
         }
         if (typeof detailTrackingCompleted === 'undefined') return;
         if (typeof detailTrackingSessionId === 'undefined') return;
