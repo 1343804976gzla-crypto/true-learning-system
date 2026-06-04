@@ -516,18 +516,6 @@ def _next_action_for_state(state: str) -> Dict[str, str]:
     return dict(NEXT_ACTION_BY_STATE[state])
 
 
-def _valid_llm_next_action(value: Any) -> Optional[Dict[str, str]]:
-    if not isinstance(value, dict):
-        return None
-    action_type = value.get("type")
-    label = value.get("label")
-    if not isinstance(action_type, str) or not action_type.strip():
-        return None
-    if not isinstance(label, str) or not label.strip():
-        return None
-    return {"type": action_type.strip(), "label": label.strip()}
-
-
 def _load_existing_event(
     db: Session,
     *,
@@ -554,14 +542,20 @@ def _card_from_existing_event(
 ) -> Dict[str, Any]:
     llm_analysis = event.llm_analysis if isinstance(event.llm_analysis, dict) else {}
     stored_card = llm_analysis.get("card") if isinstance(llm_analysis.get("card"), dict) else None
-    card = dict(stored_card or fallback_card)
-    card.setdefault("knowledge_point", event.knowledge_point)
-    card.setdefault("previous_state", event.previous_state)
-    card.setdefault("current_state", event.current_state)
-    card.setdefault("state_confidence", event.state_confidence)
-    card.setdefault("transition", event.transition)
-    card.setdefault("guardrail_flags", event.guardrail_flags or [])
-    card.setdefault("next_action", _next_action_for_state(card["current_state"]))
+    card = dict(fallback_card)
+    if stored_card:
+        if stored_card.get("interesting_insight"):
+            card["interesting_insight"] = str(stored_card["interesting_insight"])[:240]
+        evidence_summary = _sanitize_evidence_summary(stored_card.get("evidence_summary"))
+        if evidence_summary is not None:
+            card["evidence_summary"] = evidence_summary
+    card["knowledge_point"] = event.knowledge_point
+    card["previous_state"] = event.previous_state
+    card["current_state"] = event.current_state
+    card["state_confidence"] = event.state_confidence
+    card["transition"] = event.transition
+    card["guardrail_flags"] = event.guardrail_flags or []
+    card["next_action"] = _next_action_for_state(card["current_state"])
     return card
 
 
@@ -662,14 +656,6 @@ def _validated_llm_cards(
     fallback_cards: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     fallback_by_point = {card["knowledge_point"]: card for card in fallback_cards}
-    allowed_states = {
-        STATE_TRUE_MASTERY,
-        STATE_ILLUSION,
-        STATE_LUCKY,
-        STATE_WEAKNESS,
-        STATE_STUBBORN,
-        STATE_EXAM_TRANSFER,
-    }
     cards: List[Dict[str, Any]] = []
     seen = set()
     for raw_card in llm_payload.get("cards") or []:
@@ -679,23 +665,12 @@ def _validated_llm_cards(
         fallback = fallback_by_point.get(knowledge_point)
         if fallback is None:
             continue
-        current_state = str(raw_card.get("current_state") or fallback["current_state"])
-        if current_state not in allowed_states:
-            current_state = fallback["current_state"]
-        if "sure_wrong" in fallback["guardrail_flags"]:
-            current_state = STATE_ILLUSION
         card = dict(fallback)
-        fallback_state = card["current_state"]
-        card["current_state"] = current_state
-        if current_state != fallback_state:
-            card["transition"] = _transition(card.get("previous_state"), current_state)
-            card["next_action"] = _next_action_for_state(current_state)
         if raw_card.get("interesting_insight"):
             card["interesting_insight"] = str(raw_card["interesting_insight"])[:240]
-        if isinstance(raw_card.get("evidence_summary"), list):
-            card["evidence_summary"] = raw_card["evidence_summary"]
-        if current_state == fallback_state:
-            card["next_action"] = _valid_llm_next_action(raw_card.get("next_action")) or _next_action_for_state(current_state)
+        evidence_summary = _sanitize_evidence_summary(raw_card.get("evidence_summary"))
+        if evidence_summary is not None:
+            card["evidence_summary"] = evidence_summary
         cards.append(card)
         seen.add(knowledge_point)
 
@@ -703,6 +678,16 @@ def _validated_llm_cards(
         if fallback["knowledge_point"] not in seen:
             cards.append(fallback)
     return sorted(cards, key=lambda item: STATE_PRIORITY.get(item["current_state"], 99))
+
+
+def _sanitize_evidence_summary(value: Any) -> Optional[List[str]]:
+    if not isinstance(value, list):
+        return None
+    evidence_summary: List[str] = []
+    for item in value:
+        if isinstance(item, (str, int, float, bool)):
+            evidence_summary.append(str(item))
+    return evidence_summary
 
 
 def _fallback_title(cards: List[Dict[str, Any]]) -> str:

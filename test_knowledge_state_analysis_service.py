@@ -4,7 +4,7 @@ import sys
 import types
 from datetime import datetime, timedelta
 
-from sqlalchemy import create_engine
+from sqlalchemy import UniqueConstraint, create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -87,6 +87,25 @@ def test_knowledge_state_models_create_runtime_tables():
         assert profile.events[0].transition == "first_observed"
     finally:
         _close_db(db, engine)
+
+
+def test_knowledge_state_event_model_has_session_point_unique_constraint():
+    constraint = next(
+        (
+            item
+            for item in KnowledgeStateEvent.__table__.constraints
+            if isinstance(item, UniqueConstraint)
+            and item.name == "uq_knowledge_state_events_scope_session_point"
+        ),
+        None,
+    )
+
+    assert constraint is not None
+    assert [column.name for column in constraint.columns] == [
+        "scope_key",
+        "session_id",
+        "knowledge_point",
+    ]
 
 
 def test_analyze_completed_session_detects_illusion_of_competence_and_persists_event():
@@ -218,7 +237,7 @@ def test_analyze_completed_session_detects_calibration_improved_transition():
         _close_db(db, engine)
 
 
-def test_analyze_completed_session_marks_missing_confidence_low_reliability():
+def test_analyze_completed_session_keeps_missing_confidence_state_when_llm_claims_mastery():
     db, engine = _make_db()
     try:
         session = LearningSession(
@@ -256,11 +275,32 @@ def test_analyze_completed_session_marks_missing_confidence_low_reliability():
         )
         db.commit()
 
-        result = analyze_completed_session(db, "session-missing-confidence", scope_key="u:u1", llm_client=None)
+        llm_client = FakeKnowledgeStateLLM(
+            {
+                "popup_title": "Model title",
+                "overall_summary": "Model summary",
+                "overall_trend": "observed",
+                "cards": [
+                    {
+                        "knowledge_point": "Preload definition",
+                        "current_state": "True Mastery",
+                    }
+                ],
+            }
+        )
 
+        result = analyze_completed_session(
+            db,
+            "session-missing-confidence",
+            scope_key="u:u1",
+            llm_client=llm_client,
+        )
+
+        assert result["cards"][0]["current_state"] == "Lucky / Underconfident Correct"
         assert result["cards"][0]["state_confidence"] == "low"
         assert "confidence_missing" in result["cards"][0]["guardrail_flags"]
         assert result["low_reliability_notes"]
+        assert db.query(KnowledgeStateProfile).one().current_state == "Lucky / Underconfident Correct"
     finally:
         _close_db(db, engine)
 
@@ -321,7 +361,18 @@ def test_analyze_completed_session_uses_storage_scope_key_for_implicit_wrong_mem
         )
         db.commit()
 
-        result = analyze_completed_session(db, "session-implicit-scope", llm_client=None)
+        llm_client = FakeKnowledgeStateLLM(
+            {
+                "cards": [
+                    {
+                        "knowledge_point": "Baroreflex receptor",
+                        "current_state": "True Mastery",
+                    }
+                ]
+            }
+        )
+
+        result = analyze_completed_session(db, "session-implicit-scope", llm_client=llm_client)
 
         assert result["cards"][0]["current_state"] == "Stubborn Error"
         assert "stubborn_memory" in result["cards"][0]["guardrail_flags"]
@@ -330,7 +381,7 @@ def test_analyze_completed_session_uses_storage_scope_key_for_implicit_wrong_mem
         _close_db(db, engine)
 
 
-def test_analyze_completed_session_recomputes_transition_and_action_for_llm_state_override():
+def test_analyze_completed_session_keeps_deterministic_state_when_llm_claims_weaker_state():
     db, engine = _make_db()
     try:
         db.add(
@@ -386,6 +437,8 @@ def test_analyze_completed_session_recomputes_transition_and_action_for_llm_stat
                     {
                         "knowledge_point": "Cardiac output regulation",
                         "current_state": "Conscious Weakness",
+                        "interesting_insight": "Model narrative insight",
+                        "evidence_summary": [{"bad": "dict"}, "valid"],
                     }
                 ]
             }
@@ -395,11 +448,16 @@ def test_analyze_completed_session_recomputes_transition_and_action_for_llm_stat
 
         card = result["cards"][0]
         event = db.query(KnowledgeStateEvent).one()
-        assert card["current_state"] == "Conscious Weakness"
-        assert card["transition"] == "risk_regressed"
-        assert card["next_action"]["type"] != "advance"
-        assert event.current_state == "Conscious Weakness"
-        assert event.transition == "risk_regressed"
+        assert card["current_state"] == "True Mastery"
+        assert card["transition"] == "state_stable"
+        assert card["state_confidence"] == "low"
+        assert card["next_action"]["type"] == "advance"
+        assert card["interesting_insight"] == "Model narrative insight"
+        assert card["evidence_summary"] == ["valid"]
+        assert all(isinstance(item, str) for item in card["evidence_summary"])
+        assert not any(isinstance(item, dict) for item in card["evidence_summary"])
+        assert event.current_state == "True Mastery"
+        assert event.transition == "state_stable"
     finally:
         _close_db(db, engine)
 

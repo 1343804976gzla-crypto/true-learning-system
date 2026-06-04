@@ -66,6 +66,12 @@ def upgrade() -> None:
         sa.Column("llm_analysis", sa.JSON(), nullable=True),
         sa.Column("guardrail_flags", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.UniqueConstraint(
+            "scope_key",
+            "session_id",
+            "knowledge_point",
+            name="uq_knowledge_state_events_scope_session_point",
+        ),
     )
     op.create_index("ix_knowledge_state_events_id", "knowledge_state_events", ["id"])
     op.create_index("ix_knowledge_state_events_profile_id", "knowledge_state_events", ["profile_id"])

@@ -23,6 +23,8 @@ def test_quiz_detail_loads_knowledge_state_popup_and_invokes_detail_session():
     assert "try {" in wrapper
     assert "catch (error)" in wrapper
     assert wrapper.index("catch (error)") < wrapper.index("bumpKnowledgePracticeCount(currentKnowledge)")
+    assert "trackingRecordQueue" in content
+    assert "await trackingRecordQueue;" in completion_function
 
 
 def test_exam_loads_knowledge_state_popup_and_invokes_tracking_session():
@@ -30,6 +32,8 @@ def test_exam_loads_knowledge_state_popup_and_invokes_tracking_session():
 
     assert "/static/js/knowledge-state-popup.js" in content
     assert "showKnowledgeStateAfterPractice(trackingSessionId" in content
+    assert "trackingRecordQueue" in content
+    assert "await trackingRecordQueue;" in content
 
 
 def test_quiz_batch_loads_knowledge_state_popup_and_invokes_tracking_session():

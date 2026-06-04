@@ -219,6 +219,12 @@ class KnowledgeStateEvent(RuntimeBase):
     """
     __tablename__ = "knowledge_state_events"
     __table_args__ = (
+        UniqueConstraint(
+            "scope_key",
+            "session_id",
+            "knowledge_point",
+            name="uq_knowledge_state_events_scope_session_point",
+        ),
         Index("ix_knowledge_state_events_scope_session", "scope_key", "session_id"),
         Index("ix_knowledge_state_events_point_created", "knowledge_point", "created_at"),
     )
