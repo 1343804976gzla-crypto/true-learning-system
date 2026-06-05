@@ -242,6 +242,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="/static/js/knowledge-state-popup.js"></script>
 <script>
     // ========== 安全工具函数 ==========
     function escapeHtml(text) {
@@ -465,6 +466,7 @@
     let userAnswers = {};
     let timerInterval = null;
     let trackingSessionId = null;  // 学习轨迹会话ID
+    let trackingRecordQueue = Promise.resolve();
 
     // 字符计数
     document.getElementById('contentInput').addEventListener('input', function() {
@@ -625,7 +627,7 @@
         updateProgress();
 
         // 记录答题到学习轨迹
-        recordQuestionAnswer(idx);
+        queueQuestionAnswerRecord(idx);
     }
 
     function updateProgress() {
@@ -814,10 +816,19 @@
                 })
             }, '操作失败');
             trackingSessionId = data.session_id;
+            trackingRecordQueue = Promise.resolve();
             console.log('[Tracking] 会话开始:', trackingSessionId);
         } catch (error) {
             console.error('[Tracking] 开始会话失败:', error);
         }
+    }
+
+    function queueQuestionAnswerRecord(questionIndex) {
+        trackingRecordQueue = trackingRecordQueue.then(function() {
+            return recordQuestionAnswer(questionIndex);
+        }).catch(function(error) {
+            console.error('[Tracking] 记录题目队列失败:', error);
+        });
     }
 
     async function recordQuestionAnswer(questionIndex) {
@@ -860,6 +871,7 @@
     async function completeTrackingSession(score, totalQuestions) {
         if (!trackingSessionId) return;
         try {
+            await trackingRecordQueue;
             await safeFetch('/api/tracking/session/' + trackingSessionId + '/complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -869,6 +881,11 @@
                 })
             }, '操作失败');
             console.log('[Tracking] 会话完成');
+            if (typeof showKnowledgeStateAfterPractice === 'function' && trackingSessionId) {
+                await showKnowledgeStateAfterPractice(trackingSessionId, {
+                    trigger: 'exam_completed'
+                });
+            }
         } catch (error) {
             console.error('[Tracking] 完成会话失败:', error);
         }

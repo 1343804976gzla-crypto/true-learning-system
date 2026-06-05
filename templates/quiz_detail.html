@@ -438,6 +438,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="/static/js/knowledge-state-popup.js"></script>
 <script>
     // ========== 安全工具函数 ==========
     function escapeHtml(text) {
@@ -483,6 +484,7 @@
     let practiceFuzzyOptions = {};
     let isPracticeMode = false;
     let detailTrackingSessionId = null;
+    let trackingRecordQueue = Promise.resolve();
     let detailTrackingCompleted = false;
     let lastPracticeResult = null;
 
@@ -1200,11 +1202,20 @@
                 })
             }, '操作失败');
             detailTrackingSessionId = data.session_id;
+            trackingRecordQueue = Promise.resolve();
             detailTrackingCompleted = false;
             console.log('[Tracking] 细节练习会话已开启:', detailTrackingSessionId);
         } catch (error) {
             console.error('[Tracking] 开始细节练习会话失败:', error);
         }
+    }
+
+    function queueDetailQuestionAnswerRecord(questionIndex) {
+        trackingRecordQueue = trackingRecordQueue.then(function() {
+            return recordDetailQuestionAnswer(questionIndex);
+        }).catch(function(error) {
+            console.error('[Tracking] 记录细节练习题目队列失败:', error);
+        });
     }
 
     async function recordDetailQuestionAnswer(questionIndex) {
@@ -1250,9 +1261,10 @@
     }
 
     async function completeDetailTrackingSession(score, totalQuestions) {
-        if (typeof detailTrackingSessionId === 'undefined' || !detailTrackingSessionId) return;
-        if (typeof safeFetch !== 'function') return;
+        if (typeof detailTrackingSessionId === 'undefined' || !detailTrackingSessionId) return false;
+        if (typeof safeFetch !== 'function') return false;
         try {
+            await trackingRecordQueue;
             await safeFetch('/api/tracking/session/' + detailTrackingSessionId + '/complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1262,21 +1274,33 @@
                 })
             }, '操作失败');
             console.log('[Tracking] 细节练习会话完成');
+            return true;
         } catch (error) {
             console.error('[Tracking] 完成细节练习会话失败:', error);
+            return false;
         }
     }
 
     const originalCompleteDetailTrackingSession = completeDetailTrackingSession;
     completeDetailTrackingSession = async function(score, totalQuestions) {
-        await originalCompleteDetailTrackingSession(score, totalQuestions);
-        if (typeof detailTrackingCompleted === 'undefined') return;
-        if (typeof detailTrackingSessionId === 'undefined') return;
-        if (typeof bumpKnowledgePracticeCount !== 'function') return;
+        const trackingCompleted = await originalCompleteDetailTrackingSession(score, totalQuestions);
+        try {
+            if (trackingCompleted && typeof showKnowledgeStateAfterPractice === 'function' && detailTrackingSessionId) {
+                await showKnowledgeStateAfterPractice(detailTrackingSessionId, {
+                    trigger: 'detail_practice_completed'
+                });
+            }
+        } catch (error) {
+            console.error('[KnowledgeState] 显示细节练习知识状态弹窗失败:', error);
+        }
+        if (typeof detailTrackingCompleted === 'undefined') return trackingCompleted;
+        if (typeof detailTrackingSessionId === 'undefined') return trackingCompleted;
+        if (typeof bumpKnowledgePracticeCount !== 'function') return trackingCompleted;
         if (!detailTrackingCompleted && currentKnowledge && detailTrackingSessionId) {
             detailTrackingCompleted = true;
             bumpKnowledgePracticeCount(currentKnowledge);
         }
+        return trackingCompleted;
     };
 
     async function generateVariationQuestions(keyPoint) {
@@ -1380,7 +1404,7 @@
             delete practiceConfidence[idx];
             clearPracticeFuzzyOptions(idx);
             renderPracticeConfidenceState(idx);
-            if (shouldRecordPracticeQuestion(idx)) recordDetailQuestionAnswer(idx);
+            if (shouldRecordPracticeQuestion(idx)) queueDetailQuestionAnswerRecord(idx);
             return;
         }
 
@@ -1389,7 +1413,7 @@
             clearPracticeFuzzyOptions(idx);
         }
         renderPracticeConfidenceState(idx);
-        if (shouldRecordPracticeQuestion(idx)) recordDetailQuestionAnswer(idx);
+        if (shouldRecordPracticeQuestion(idx)) queueDetailQuestionAnswerRecord(idx);
     }
 
     function togglePracticeFuzzyOption(idx, opt) {
@@ -1409,7 +1433,7 @@
         }
 
         renderPracticeConfidenceState(idx);
-        if (shouldRecordPracticeQuestion(idx)) recordDetailQuestionAnswer(idx);
+        if (shouldRecordPracticeQuestion(idx)) queueDetailQuestionAnswerRecord(idx);
     }
 
     function selectPracticeOption(opt) {
@@ -1471,7 +1495,7 @@
         }
 
         updateAnsweredCount();
-        recordDetailQuestionAnswer(currentPracticeIndex);
+        queueDetailQuestionAnswerRecord(currentPracticeIndex);
     }
 
     function displayPracticeQuestion() {
@@ -1986,6 +2010,7 @@
         document.getElementById('knowledgeList').parentElement.classList.remove('hidden');
         isPracticeMode = false;
         detailTrackingSessionId = null;
+        trackingRecordQueue = Promise.resolve();
         renderKnowledgeList();
     };
     window.endStudySession = function() {

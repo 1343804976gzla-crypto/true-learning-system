@@ -1628,6 +1628,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="/static/js/knowledge-state-popup.js"></script>
 <script>
     // ========== 安全工具函数 ==========
     function escapeHtml(text) {
@@ -4220,7 +4221,7 @@
         if (!trackingSessionId) return;
         
         try {
-            await fetch('/api/tracking/session/' + trackingSessionId + '/complete', {
+            const response = await fetch('/api/tracking/session/' + trackingSessionId + '/complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -4228,7 +4229,13 @@
                     total_questions: totalQuestions
                 })
             });
+            if (!response.ok) throw new Error('完成会话失败');
             console.log('[Tracking] 会话完成');
+            if (typeof showKnowledgeStateAfterPractice === 'function' && trackingSessionId) {
+                await showKnowledgeStateAfterPractice(trackingSessionId, {
+                    trigger: 'batch_exam_completed'
+                });
+            }
         } catch (error) {
             console.error('[Tracking] 完成会话失败:', error);
         }

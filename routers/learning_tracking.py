@@ -6,6 +6,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 from datetime import datetime, date, timedelta
@@ -18,6 +19,9 @@ import uuid
 from api_contracts import (
     ActivityRecordedResponse,
     KnowledgeArchiveResponse,
+    KnowledgeStateAnalyzeRequest,
+    KnowledgeStateAnalyzeResponse,
+    KnowledgeStateLatestResponse,
     KnowledgeTreeResponse,
     MarkdownExportResponse,
     OcrPlanBoardResponse,
@@ -36,14 +40,19 @@ from models import get_db, Chapter, DailyUpload
 from learning_tracking_models import (
     LearningSession, LearningActivity, QuestionRecord,
     DailyLearningLog, LearningInsight, SessionStatus, ActivityType,
-    WrongAnswerV2, make_fingerprint, INVALID_CHAPTER_IDS
+    WrongAnswerV2, KnowledgeStateProfile, make_fingerprint, INVALID_CHAPTER_IDS
 )
 from utils.data_contracts import (
     canonicalize_answer_changes,
     canonicalize_learning_activity_data,
     normalize_confidence,
 )
-from services.data_identity import DEFAULT_DEVICE_ID, resolve_request_actor_scope
+from services.data_identity import (
+    DEFAULT_DEVICE_ID,
+    build_storage_scope_key,
+    resolve_request_actor_scope,
+)
+from services.knowledge_state_analysis import ApiHubKnowledgeStateLlm, analyze_completed_session
 
 logger = logging.getLogger(__name__)
 
@@ -496,6 +505,42 @@ def _apply_actor_scope(
     elif scope_device_id and hasattr(model, "device_id"):
         query = query.filter(getattr(model, "device_id") == scope_device_id)
     return query
+
+
+def _scoped_learning_session_query(
+    db: Session,
+    *,
+    actor: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+):
+    return _apply_actor_scope(
+        db.query(LearningSession),
+        LearningSession,
+        actor=actor,
+        user_id=user_id,
+        device_id=device_id,
+    )
+
+
+def _get_scoped_learning_session(
+    db: Session,
+    session_id: str,
+    *,
+    actor: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+) -> Optional[LearningSession]:
+    return (
+        _scoped_learning_session_query(
+            db,
+            actor=actor,
+            user_id=user_id,
+            device_id=device_id,
+        )
+        .filter(LearningSession.id == session_id)
+        .first()
+    )
 
 
 def _build_daily_upload_ai_extracted(
@@ -1219,6 +1264,82 @@ async def complete_learning_session(
         "score": body.score,
         "accuracy": round(session.accuracy * 100, 1),
         "duration": session.duration_seconds
+    }
+
+
+@router.post("/knowledge-state/analyze", response_model=KnowledgeStateAnalyzeResponse)
+async def analyze_knowledge_state(
+    body: KnowledgeStateAnalyzeRequest,
+    db: Session = Depends(get_db),
+):
+    request_actor = resolve_request_actor_scope()
+    session = _get_scoped_learning_session(
+        db,
+        body.session_id,
+        actor=request_actor,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="session_not_found")
+
+    resolved_scope_key = build_storage_scope_key(user_id=session.user_id, device_id=session.device_id)
+    try:
+        return await run_in_threadpool(
+            lambda: analyze_completed_session(
+                db,
+                body.session_id,
+                scope_key=resolved_scope_key,
+                llm_client=ApiHubKnowledgeStateLlm(),
+            )
+        )
+    except ValueError as exc:
+        reason = str(exc)
+        if reason == "session_not_found":
+            raise HTTPException(status_code=404, detail=reason) from exc
+        if reason == "session_has_no_question_records":
+            raise HTTPException(status_code=400, detail=reason) from exc
+        raise HTTPException(status_code=400, detail=reason) from exc
+
+
+@router.get("/knowledge-state/latest", response_model=KnowledgeStateLatestResponse)
+async def get_latest_knowledge_state(
+    scope_key: Optional[str] = Query(None),
+    knowledge_point: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    request_actor = resolve_request_actor_scope()
+    resolved_scope_key = build_storage_scope_key(
+        user_id=request_actor.get("candidate_user_id"),
+        device_id=request_actor.get("candidate_device_id"),
+    )
+    if scope_key is not None and scope_key != resolved_scope_key:
+        raise HTTPException(status_code=403, detail="scope_key_forbidden")
+
+    profile = (
+        db.query(KnowledgeStateProfile)
+        .filter(
+            KnowledgeStateProfile.scope_key == resolved_scope_key,
+            KnowledgeStateProfile.knowledge_point == knowledge_point,
+        )
+        .one_or_none()
+    )
+    if profile is None:
+        raise HTTPException(status_code=404, detail="knowledge_state_profile_not_found")
+
+    return {
+        "id": profile.id,
+        "scope_key": profile.scope_key,
+        "user_id": profile.user_id,
+        "device_id": profile.device_id,
+        "knowledge_point": profile.knowledge_point,
+        "current_state": profile.current_state,
+        "state_confidence": profile.state_confidence,
+        "stability_score": profile.stability_score or 0.0,
+        "calibration_score": profile.calibration_score or 0.0,
+        "last_transition": profile.last_transition,
+        "last_session_id": profile.last_session_id,
+        "evidence_snapshot": profile.evidence_snapshot,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
+        "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
     }
 
 

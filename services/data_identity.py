@@ -144,6 +144,13 @@ def canonicalize_storage_identity(user_id: str | None = None, device_id: str | N
     return normalized_user, normalized_device
 
 
+def build_storage_scope_key(user_id: str | None = None, device_id: str | None = None) -> str:
+    normalized_user, normalized_device = canonicalize_storage_identity(user_id, device_id)
+    if normalized_user:
+        return f"user:{normalized_user}"
+    return f"device:{normalized_device or DEFAULT_DEVICE_ID}"
+
+
 def resolve_actor_identity(user_id: str | None = None, device_id: str | None = None) -> tuple[str | None, str]:
     if is_single_user_mode():
         return None, DEFAULT_DEVICE_ID

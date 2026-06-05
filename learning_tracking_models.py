@@ -5,7 +5,7 @@
 
 from sqlalchemy import (
     Column, Integer, String, Text, Date, DateTime,
-    Float, Boolean, ForeignKey, JSON, Enum, Interval, UniqueConstraint
+    Float, Boolean, ForeignKey, JSON, Enum, Interval, UniqueConstraint, Index
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime, date, timedelta
@@ -165,6 +165,7 @@ class QuestionRecord(RuntimeBase):
     options = Column(JSON)  # {A: "...", B: "...", ...}
     correct_answer = Column(String)
     explanation = Column(Text)
+    primary_key_point = Column(String, nullable=True)
     key_point = Column(String)  # 知识点
     
     # 答题记录
@@ -182,6 +183,70 @@ class QuestionRecord(RuntimeBase):
     
     # 关联
     session = relationship("LearningSession", back_populates="question_records")
+
+
+class KnowledgeStateProfile(RuntimeBase):
+    """
+    Dynamic learner state for one student scope + knowledge point.
+    Stores the latest state; the append-only event table stores the trajectory.
+    """
+    __tablename__ = "knowledge_state_profiles"
+    __table_args__ = (
+        UniqueConstraint("scope_key", "knowledge_point", name="uq_knowledge_state_scope_point"),
+        Index("ix_knowledge_state_profiles_scope_state", "scope_key", "current_state"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
+    scope_key = Column(String, nullable=False, index=True)
+    knowledge_point = Column(String, nullable=False, index=True)
+    current_state = Column(String, nullable=False, index=True)
+    state_confidence = Column(String, nullable=False, default="low")
+    stability_score = Column(Float, default=0.0)
+    calibration_score = Column(Float, default=0.0)
+    last_transition = Column(String, nullable=True, index=True)
+    last_session_id = Column(String, nullable=True, index=True)
+    evidence_snapshot = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    events = relationship("KnowledgeStateEvent", back_populates="profile", cascade="all, delete-orphan")
+
+
+class KnowledgeStateEvent(RuntimeBase):
+    """
+    Append-only event for each analysis run that changes or observes a knowledge state.
+    """
+    __tablename__ = "knowledge_state_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope_key",
+            "session_id",
+            "knowledge_point",
+            name="uq_knowledge_state_events_scope_session_point",
+        ),
+        Index("ix_knowledge_state_events_scope_session", "scope_key", "session_id"),
+        Index("ix_knowledge_state_events_point_created", "knowledge_point", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(Integer, ForeignKey("knowledge_state_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String, nullable=True, index=True)
+    device_id = Column(String, nullable=True, index=True)
+    scope_key = Column(String, nullable=False, index=True)
+    session_id = Column(String, nullable=False, index=True)
+    knowledge_point = Column(String, nullable=False, index=True)
+    previous_state = Column(String, nullable=True)
+    current_state = Column(String, nullable=False, index=True)
+    transition = Column(String, nullable=False, index=True)
+    state_confidence = Column(String, nullable=False, default="low")
+    evidence_packet = Column(JSON, nullable=True)
+    llm_analysis = Column(JSON, nullable=True)
+    guardrail_flags = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    profile = relationship("KnowledgeStateProfile", back_populates="events")
 
 
 class DailyLearningLog(RuntimeBase):
@@ -260,6 +325,7 @@ class WrongAnswerV2(ReviewBase):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, nullable=True, index=True)
     device_id = Column(String, nullable=True, index=True)
+    scope_key = Column(String, nullable=True, index=True)
     question_fingerprint = Column(String(64), nullable=False, unique=True, index=True)
 
     # 题目快照
