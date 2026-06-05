@@ -507,6 +507,42 @@ def _apply_actor_scope(
     return query
 
 
+def _scoped_learning_session_query(
+    db: Session,
+    *,
+    actor: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+):
+    return _apply_actor_scope(
+        db.query(LearningSession),
+        LearningSession,
+        actor=actor,
+        user_id=user_id,
+        device_id=device_id,
+    )
+
+
+def _get_scoped_learning_session(
+    db: Session,
+    session_id: str,
+    *,
+    actor: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+) -> Optional[LearningSession]:
+    return (
+        _scoped_learning_session_query(
+            db,
+            actor=actor,
+            user_id=user_id,
+            device_id=device_id,
+        )
+        .filter(LearningSession.id == session_id)
+        .first()
+    )
+
+
 def _build_daily_upload_ai_extracted(
     *,
     chapter: Optional[Chapter],
