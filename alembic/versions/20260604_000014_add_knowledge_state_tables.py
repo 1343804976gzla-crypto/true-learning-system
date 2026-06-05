@@ -1,7 +1,7 @@
 """add knowledge state tables
 
 Revision ID: 20260604_000014
-Revises: 20260511_000013
+Revises: 20260407_000004
 Create Date: 2026-06-04
 """
 from __future__ import annotations
@@ -10,12 +10,16 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260604_000014"
-down_revision = "20260511_000013"
+down_revision = "20260407_000004"
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
+    op.add_column("question_records", sa.Column("primary_key_point", sa.String(), nullable=True))
+    op.add_column("wrong_answers_v2", sa.Column("scope_key", sa.String(), nullable=True))
+    op.create_index("ix_wrong_answers_v2_scope_key", "wrong_answers_v2", ["scope_key"])
+
     op.create_table(
         "knowledge_state_profiles",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
@@ -93,3 +97,6 @@ def downgrade() -> None:
     op.drop_table("knowledge_state_events")
     op.drop_index("ix_knowledge_state_profiles_scope_state", table_name="knowledge_state_profiles")
     op.drop_table("knowledge_state_profiles")
+    op.drop_index("ix_wrong_answers_v2_scope_key", table_name="wrong_answers_v2")
+    op.drop_column("wrong_answers_v2", "scope_key")
+    op.drop_column("question_records", "primary_key_point")

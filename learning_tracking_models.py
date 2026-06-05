@@ -165,6 +165,7 @@ class QuestionRecord(RuntimeBase):
     options = Column(JSON)  # {A: "...", B: "...", ...}
     correct_answer = Column(String)
     explanation = Column(Text)
+    primary_key_point = Column(String, nullable=True)
     key_point = Column(String)  # 知识点
     
     # 答题记录
@@ -324,6 +325,7 @@ class WrongAnswerV2(ReviewBase):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, nullable=True, index=True)
     device_id = Column(String, nullable=True, index=True)
+    scope_key = Column(String, nullable=True, index=True)
     question_fingerprint = Column(String(64), nullable=False, unique=True, index=True)
 
     # 题目快照
