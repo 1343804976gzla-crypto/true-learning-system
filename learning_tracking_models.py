@@ -5,7 +5,7 @@
 
 from sqlalchemy import (
     Column, Integer, String, Text, Date, DateTime,
-    Float, Boolean, ForeignKey, JSON, Enum, Interval, UniqueConstraint
+    Float, Boolean, ForeignKey, JSON, Enum, Interval, UniqueConstraint, Index
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime, date, timedelta
